@@ -1,5 +1,21 @@
 # 千星奇域图片拟合工具
 
+## 🌐 Global Version (GitHub Pages)
+
+仓库根目录即为面向全球社区的纯浏览器版本（[index.html](index.html)），无需任何后端即可
+直接部署到 GitHub Pages：所有拟合、GIA 导出与模式转换均在浏览器本地完成，输出与原版
+逐比特一致，支持批量并行处理与 15 种语言（覆盖原神官方支持的全部语言）。
+部署方式见 [SITE.md](SITE.md)，一致性验证见 [tests/parity](tests/parity/README.md)。
+
+The repository root is the fully static, browser-only global port
+([index.html](index.html)) and deploys directly to GitHub Pages — no backend
+required. It reproduces the full pipeline (fill fitting, decoration outline
+fitting, GIA export, GIA mode conversion) client-side with bit-exact output
+parity to the original, adds batch/concurrent processing, and is localized
+into all 15 languages officially supported by Genshin Impact. See
+[SITE.md](SITE.md) for deployment notes and [tests/parity](tests/parity/README.md)
+for the parity regression suites.
+
 ## 图片素材组拟合
 
 ![](demo/demo2.png)

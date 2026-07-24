@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Parity browser smoke</title></head>
+<body>
+<pre id="out">running...</pre>
+<script>
+/* Runs one outline + one fill golden case in the REAL browser workers and
+ * compares against the goldens served from tests/parity/e2e/goldens/.
+ * Serve the repo root (e.g. python -m http.server) and open
+ * /tests/parity/e2e/browser_smoke.html . Results in #out and
+ * window.__SMOKE__. */
+const DOCS = "/js/";
+const GOLD = "/tests/parity/e2e/goldens/";
+
+function deepCompare(a, b, p, diffs) {
+  if (diffs.length >= 10) return;
+  if (typeof a === "number" || typeof b === "number") {
+    if (!(a === b)) diffs.push(`${p}: ${a} !== ${b}`);
+    return;
+  }
+  if (a === null || b === null || typeof a !== "object" || typeof b !== "object") {
+    if (a !== b) diffs.push(`${p}: ${JSON.stringify(a)} !== ${JSON.stringify(b)}`);
+    return;
+  }
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) { diffs.push(`${p}: len ${a.length} vs ${b && b.length}`); return; }
+    for (let i = 0; i < a.length; i++) deepCompare(a[i], b[i], `${p}[${i}]`, diffs);
+    return;
+  }
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const k of keys) {
+    const av = k in a ? a[k] : undefined, bv = k in b ? b[k] : undefined;
+    if (av === undefined || bv === undefined) { if (av !== bv) diffs.push(`${p}.${k}: presence`); continue; }
+    deepCompare(av, bv, `${p}.${k}`, diffs);
+  }
+}
+
+async function runCase(workerFile, golden, extraCfg) {
+  const rgbaResp = await fetch(GOLD + golden.input_rgba);
+  const rgba = await rgbaResp.arrayBuffer();
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(DOCS + workerFile);
+    worker.onmessage = (e) => {
+      if (e.data.type === "done") { worker.terminate(); resolve(e.data.result); }
+      else if (e.data.type === "error") { worker.terminate(); reject(new Error(e.data.message)); }
+    };
+    worker.onerror = (e) => { worker.terminate(); reject(new Error(e.message)); };
+    worker.postMessage({
+      cmd: "process", jobId: "smoke",
+      rgba, width: golden.width, height: golden.height,
+      config: Object.assign({}, golden.config, extraCfg || {}),
+    }, [rgba]);
+  });
+}
+
+(async () => {
+  const results = {};
+  const lines = [];
+  for (const [name, workerFile, caseId, extraCfg] of [
+    ["outline case02", "worker-outline.js", "case02", null],
+    ["outline case07", "worker-outline.js", "case07", null],
+    ["fill fill01", "worker-fill.js", "fill01", null],
+  ]) {
+    try {
+      const golden = await (await fetch(GOLD + caseId + ".json")).json();
+      const cfg = golden.seed !== undefined ? { random_seed: golden.seed } : null;
+      const r = await runCase(workerFile, golden, cfg);
+      const jsResult = JSON.parse(JSON.stringify({
+        mode: r.mode, image_center: r.image_center, image_size: r.image_size,
+        config: r.config, elements_count: r.elements_count, elements: r.elements,
+      }));
+      const gr = golden.result;
+      const goldenCmp = {
+        mode: gr.mode, image_center: gr.image_center, image_size: gr.image_size,
+        config: gr.config, elements_count: gr.elements_count, elements: gr.elements,
+      };
+      const diffs = [];
+      deepCompare(jsResult, goldenCmp, "result", diffs);
+      results[name] = { pass: diffs.length === 0, diffs };
+      lines.push(`${diffs.length === 0 ? "PASS" : "FAIL"} ${name} (${r.elements_count} elements)`);
+      diffs.forEach((d) => lines.push("   " + d));
+    } catch (err) {
+      results[name] = { pass: false, error: String(err) };
+      lines.push(`FAIL ${name}: ${err}`);
+    }
+    document.getElementById("out").textContent = lines.join("\n");
+  }
+  const allPass = Object.values(results).every((r) => r.pass);
+  lines.push(allPass ? "ALL PASS (browser environment)" : "FAILURES");
+  document.getElementById("out").textContent = lines.join("\n");
+  window.__SMOKE__ = { allPass, results };
+})();
+</script>
+</body>
+</html>

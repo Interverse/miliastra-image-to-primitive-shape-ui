@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title data-i18n="app.pageTitle">Miliastra Wonderland Image Fitter</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='38' cy='42' r='26' fill='%234355B9'/%3E%3Crect x='48' y='44' width='36' height='36' rx='6' fill='%23E8A317' transform='rotate(12 66 62)'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css?v=5">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <a href="#" id="homeLink" style="text-decoration:none;"><h1 data-i18n="app.title">Image Primitive Fitter</h1></a>
+      <span class="topbar-subtitle" id="topbarSubtitle" data-i18n="topbar.subtitle.fill"></span>
+      <nav class="tool-tabs" aria-label="Tool tabs">
+        <button type="button" id="imageToolTab" class="tool-tab active" data-i18n="topbar.tab.image">Image Fitting</button>
+        <button type="button" id="classicToolTab" class="tool-tab" data-i18n="topbar.tab.classic">GIA Mode Convert</button>
+      </nav>
+      <a href="#" id="outlineLink" class="topbar-link topbar-link-subtle" data-i18n="topbar.link.outline">Decorations</a>
+    </div>
+    <div class="topbar-right">
+      <select id="langSelect" class="lang-select" data-i18n-aria-label="topbar.language"></select>
+      <a href="https://github.com/1475505/Miliastra-toolbox-primitive-shape" target="_blank" rel="noopener noreferrer" class="topbar-link" data-i18n="topbar.repo">Repository</a>
+      <a href="https://ugc.070077.xyz/" target="_blank" rel="noopener noreferrer" class="topbar-link topbar-link-subtle" data-i18n="topbar.kb">Knowledge Base</a>
+      <span class="topbar-status active" id="topbarStatus" data-i18n="topbar.status.ready">Ready</span>
+    </div>
+  </header>
+
+  <!-- ═══════════════ View: image tool (upload + batch queue) ═══════════════ -->
+  <div class="app-layout view active" id="viewUpload">
+    <aside class="panel panel-left">
+      <section class="panel-section">
+        <h3 data-i18n="upload.sectionTitle">Input Images</h3>
+        <div id="dropZone" class="drop-zone" role="button" tabindex="0" data-i18n-aria-label="upload.dropHint">
+          <div class="drop-zone-content">
+            <span class="drop-icon" data-i18n="upload.dropIcon">IMG</span>
+            <p data-i18n="upload.dropHint">Click, drag &amp; drop, or paste (Ctrl+V) images</p>
+          </div>
+          <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp" multiple hidden>
+          <div id="fileThumbs" class="file-thumbs"></div>
+          <div id="uploadReady" class="upload-ready" hidden aria-live="polite"></div>
+          <div id="uploadWarning" class="upload-warning" hidden aria-live="polite" data-i18n="upload.largeWarning"></div>
+        </div>
+        <p class="hint" data-i18n="upload.formats"></p>
+        <p class="hint" data-i18n="upload.multiHint"></p>
+      </section>
+
+      <section class="panel-section" id="shapeTypeSection">
+        <h3 id="shapeSectionTitle" data-i18n="shapes.sectionTitle.fill">Primitive Types</h3>
+
+        <div id="fillShapeSection">
+          <div class="shape-checks">
+            <label class="shape-check active">
+              <input type="checkbox" id="shapeCircle" checked>
+              <span class="shape-icon">○</span>
+              <span data-i18n="shapes.circle">Circle</span>
+            </label>
+            <label class="shape-check">
+              <input type="checkbox" id="shapeRect">
+              <span class="shape-icon">□</span>
+              <span data-i18n="shapes.rect">Rectangle</span>
+            </label>
+            <label class="shape-check">
+              <input type="checkbox" id="shapeTriangle">
+              <span class="shape-icon">△</span>
+              <span data-i18n="shapes.triangle">Triangle</span>
+            </label>
+          </div>
+          <p class="hint" id="shapeHint" data-i18n="shapes.hint.fill"></p>
+        </div>
+
+        <div id="primitiveListSection" hidden>
+          <div class="outline-intro">
+            <strong data-i18n="outline.intro.title">Decoration component list</strong>
+            <span data-i18n="outline.intro.text"></span>
+          </div>
+          <div class="primitive-toolbar">
+            <button type="button" id="addCirclePrimitiveBtn" class="btn-chip" data-i18n="outline.addCircle">+ Circle component</button>
+            <button type="button" id="addRectPrimitiveBtn" class="btn-chip" data-i18n="outline.addRect">+ Rectangle component</button>
+          </div>
+          <p class="hint" id="primitiveCountHint"></p>
+          <div id="primitiveList" class="primitive-list"></div>
+          <div id="primitiveEmpty" class="primitive-empty" hidden>
+            <p data-i18n="outline.empty.title">No decoration components yet</p>
+            <span data-i18n="outline.empty.text"></span>
+          </div>
+        </div>
+      </section>
+
+      <div id="fillParams">
+        <section class="panel-section">
+          <h3 data-i18n="fillParams.sectionTitle">Fitting Parameters</h3>
+          <div class="param-item">
+            <div class="param-head">
+              <span class="param-title" data-i18n="fillParams.numPrims">Primitive count</span>
+              <span id="numPrimsVal" class="val-tag">400</span>
+            </div>
+            <p class="param-desc" data-i18n="fillParams.numPrimsDesc"></p>
+            <input type="range" id="numPrims" min="40" max="1200" step="10" value="400">
+            <input type="number" id="numPrimsManual" min="40" max="3000" value="400" class="num-input" style="margin-top:8px;width:100%;">
+          </div>
+
+          <div class="param-item">
+            <div class="param-head">
+              <span class="param-title" data-i18n="fillParams.imageScale">Image scale</span>
+              <span id="imageScaleVal" class="val-tag">1.0</span>
+            </div>
+            <p class="param-desc" data-i18n="fillParams.imageScaleDesc"></p>
+            <input type="range" id="imageScale" min="0.2" max="4" step="0.1" value="1.0">
+          </div>
+
+          <div class="param-item">
+            <div class="param-head">
+              <span class="param-title" data-i18n="fillParams.outputAlpha">Opacity</span>
+              <span id="outputAlphaVal" class="val-tag">100%</span>
+            </div>
+            <p class="param-desc" data-i18n="fillParams.outputAlphaDesc"></p>
+            <input type="range" id="outputAlpha" min="0" max="100" step="5" value="100">
+          </div>
+
+          <div class="param-item">
+            <div class="param-head">
+              <span class="param-title" data-i18n="fillParams.pngMode">PNG mode</span>
+              <span class="val-tag" data-i18n="fillParams.pngModeTag">Optional</span>
+            </div>
+            <p class="param-desc" data-i18n="fillParams.pngModeDesc"></p>
+            <label class="check-label">
+              <input type="checkbox" id="enablePngMode">
+              <span data-i18n="fillParams.pngModeLabel">Enable PNG mode</span>
+            </label>
+          </div>
+        </section>
+      </div>
+
+      <div id="outlineParams" hidden>
+        <section class="panel-section">
+          <h3 data-i18n="outlineParams.sectionTitle">Outline Parameters</h3>
+          <div class="param-item">
+            <div class="param-head">
+              <span class="param-title" data-i18n="outlineParams.primSize">Primitive size</span>
+              <span id="olPrimSizeVal" class="val-tag">30</span>
+            </div>
+            <p class="param-desc" data-i18n="outlineParams.primSizeDesc"></p>
+            <input type="range" id="olPrimSize" min="3" max="200" step="1" value="30">
+          </div>
+
+          <div class="param-item">
+            <div class="param-head">
+              <span class="param-title" data-i18n="outlineParams.spacing">Spacing</span>
+              <span id="olSpacingVal" class="val-tag">0.9</span>
+            </div>
+            <p class="param-desc" data-i18n="outlineParams.spacingDesc"></p>
+            <input type="range" id="olSpacing" min="0.1" max="1.0" step="0.05" value="0.9">
+          </div>
+
+          <div class="param-item">
+            <div class="param-head">
+              <span class="param-title" data-i18n="outlineParams.precision">Precision</span>
+              <span id="olPrecisionVal" class="val-tag">0.3</span>
+            </div>
+            <p class="param-desc" data-i18n="outlineParams.precisionDesc"></p>
+            <input type="range" id="olPrecision" min="0.0" max="1.0" step="0.05" value="0.3">
+          </div>
+        </section>
+      </div>
+
+      <section class="panel-section">
+        <h3 data-i18n="origin.sectionTitle">Origin</h3>
+        <label class="radio-row"><input type="radio" name="originType" value="center" checked><span data-i18n="origin.center">Image center</span></label>
+        <label class="radio-row"><input type="radio" name="originType" value="top_left"><span data-i18n="origin.topLeft">Top-left corner</span></label>
+        <label class="radio-row"><input type="radio" name="originType" value="custom"><span data-i18n="origin.custom">Custom</span></label>
+        <div class="config-row" id="originCustomRow" hidden>
+          <label>X</label>
+          <input type="number" id="originCustomX" value="0" step="0.1" class="num-input">
+          <label style="margin-left:8px">Y</label>
+          <input type="number" id="originCustomY" value="0" step="0.1" class="num-input">
+        </div>
+        <p class="hint" data-i18n="origin.hint"></p>
+      </section>
+
+      <section class="panel-section">
+        <button type="button" id="btnSubmit" class="btn-primary" data-i18n="submit.start">Start Processing</button>
+      </section>
+    </aside>
+
+    <main class="center-area">
+      <div class="batch-header">
+        <h2 data-i18n="batch.sectionTitle">Jobs</h2>
+        <button type="button" id="btnClearDone" class="btn-text" data-i18n="batch.clearDone" hidden>Clear finished</button>
+        <button type="button" id="btnCancelAll" class="btn-text danger" data-i18n="batch.cancelAll" hidden>Cancel all</button>
+        <button type="button" id="btnDownloadAll" class="btn-tonal" data-i18n="batch.downloadAll" hidden>Download all (ZIP)</button>
+      </div>
+
+      <div class="overall-progress" id="overallProgress" hidden>
+        <div class="progress-row">
+          <span data-i18n="batch.overall">Overall progress</span>
+          <span id="overallLabel"></span>
+        </div>
+        <div class="progress-track"><div class="progress-fill" id="overallFill" style="width:0%"></div></div>
+      </div>
+
+      <div class="batch-empty" id="batchEmpty">
+        <p data-i18n="batch.empty.title">No jobs yet</p>
+        <span data-i18n="batch.empty.text"></span>
+      </div>
+
+      <div class="job-list" id="jobList"></div>
+      <p class="local-note" data-i18n="footer.local"></p>
+    </main>
+
+    <aside class="panel panel-right">
+      <section class="panel-section guide-card">
+        <h3 data-i18n="guide.sectionTitle">Workflow</h3>
+        <ol class="steps">
+          <li data-i18n="guide.step1"></li>
+          <li data-i18n="guide.step2"></li>
+          <li data-i18n="guide.step3"></li>
+        </ol>
+        <div class="m3-notice notice-info" role="status">
+          <span class="notice-icon" aria-hidden="true">🌐</span>
+          <div class="notice-body">
+            <strong class="notice-title" data-i18n="notice.global.title">Global Version</strong>
+            <p class="notice-text" data-i18n="notice.global.text"></p>
+          </div>
+        </div>
+        <ul class="tips">
+          <li><strong data-i18n="tips.rule1"></strong></li>
+          <li><strong data-i18n="tips.rule2"></strong></li>
+          <li data-i18n="tips.multiShape"></li>
+          <li data-i18n="tips.pngMode"></li>
+          <li data-i18n="tips.batch"></li>
+          <li><span data-i18n="tips.tutorial"></span> <a href="https://www.bilibili.com/video/BV1kKDyB9EvY" target="_blank" rel="noopener noreferrer">BV1kKDyB9EvY</a></li>
+        </ul>
+      </section>
+    </aside>
+  </div>
+
+  <!-- ═══════════════ View: result ═══════════════ -->
+  <div class="app-layout view" id="viewResult">
+    <aside class="panel panel-left">
+      <section class="panel-section">
+        <h3 data-i18n="result.export.sectionTitle">Export</h3>
+        <div class="export-name-field">
+          <label for="exportFileName" data-i18n="result.export.fileName">Export file name</label>
+          <input type="text" id="exportFileName" class="form-input" autocomplete="off">
+          <p class="hint" data-i18n="result.export.fileNameHint"></p>
+        </div>
+        <div class="export-action">
+          <button id="btnExportJSON" class="btn-sm" data-i18n="result.export.json">Export JSON</button>
+          <button id="btnCopyJSON" class="btn-copy" type="button" data-i18n="result.export.copy">Copy</button>
+        </div>
+        <div class="export-action">
+          <button id="btnExportCSS" class="btn-sm" data-i18n="result.export.css">Export CSS</button>
+          <button id="btnCopyCSS" class="btn-copy" type="button" data-i18n="result.export.copy">Copy</button>
+        </div>
+        <button id="btnExportSVG" class="btn-sm" data-i18n="result.export.svg">Export SVG</button>
+        <button id="btnExportPNG" class="btn-sm" data-i18n="result.export.png">Export PNG</button>
+        <button id="btnExportGIAOverlimit" class="btn-sm" data-i18n="result.export.giaOverlimit">Export Overlimit GIA</button>
+        <button id="btnExportGIAClassic" class="btn-sm" data-i18n="result.export.giaClassic">Export Classic GIA</button>
+      </section>
+
+      <section class="panel-section">
+        <h3 data-i18n="result.origin.sectionTitle">Origin</h3>
+        <p class="hint" data-i18n="result.origin.hint"></p>
+        <div class="config-row">
+          <label>X</label>
+          <input type="number" id="originX" value="0" step="0.1" class="num-input">
+          <label style="margin-left:8px">Y</label>
+          <input type="number" id="originY" value="0" step="0.1" class="num-input">
+        </div>
+        <button id="btnResetOrigin" class="btn-sm" data-i18n="result.origin.reset">Reset to image center</button>
+      </section>
+
+      <section class="panel-section" id="retrySectionFill">
+        <h3 data-i18n="result.retry.sectionTitle">Re-process</h3>
+        <div class="config-row">
+          <label data-i18n="fillParams.numPrims">Primitive count</label>
+          <input type="number" id="retryNumPrims" min="40" max="3000" class="num-input">
+        </div>
+        <div class="config-row">
+          <label data-i18n="fillParams.imageScale">Image scale</label>
+          <input type="number" id="retryImageScale" min="0.2" max="4" step="0.1" class="num-input">
+        </div>
+        <div class="config-row">
+          <label data-i18n="fillParams.outputAlpha">Opacity</label>
+          <input type="number" id="retryOutputAlpha" min="0" max="100" step="5" class="num-input">
+        </div>
+        <button type="button" id="btnRetryFill" class="btn-primary" style="margin-top:8px" data-i18n="result.retry.submit">Re-process</button>
+      </section>
+
+      <section class="panel-section" id="retrySectionOutline" hidden>
+        <h3 data-i18n="result.retry.sectionTitle">Re-process</h3>
+        <div class="config-row">
+          <label data-i18n="outlineParams.primSize">Primitive size</label>
+          <input type="number" id="retryPrimSize" min="3" max="200" class="num-input">
+        </div>
+        <div class="config-row">
+          <label data-i18n="outlineParams.spacing">Spacing</label>
+          <input type="number" id="retrySpacing" min="0.1" max="1.0" step="0.05" class="num-input">
+        </div>
+        <div class="config-row">
+          <label data-i18n="outlineParams.precision">Precision</label>
+          <input type="number" id="retryPrecision" min="0.0" max="1.0" step="0.05" class="num-input">
+        </div>
+        <button type="button" id="btnRetryOutline" class="btn-primary" style="margin-top:8px" data-i18n="result.retry.submit">Re-process</button>
+      </section>
+
+      <section class="panel-section">
+        <h3 data-i18n="result.stats.sectionTitle">Statistics</h3>
+        <div class="elem-info"><table>
+          <tr><td data-i18n="result.stats.mode">Mode</td><td id="statMode">—</td></tr>
+          <tr><td data-i18n="result.stats.total">Total</td><td id="statTotal">—</td></tr>
+          <tr><td data-i18n="result.stats.ellipse">Circles</td><td id="statEllipse">—</td></tr>
+          <tr><td data-i18n="result.stats.rect">Rectangles</td><td id="statRect">—</td></tr>
+          <tr><td data-i18n="result.stats.triangle">Triangles</td><td id="statTriangle">—</td></tr>
+          <tr><td data-i18n="result.stats.imageSize">Image size</td><td id="statImgSize">—</td></tr>
+        </table></div>
+      </section>
+    </aside>
+
+    <main class="canvas-area">
+      <div id="canvasWrap" class="canvas-wrap">
+        <canvas id="mainCanvas"></canvas>
+        <div id="tooltip" class="tooltip" hidden></div>
+      </div>
+
+      <div id="previewCompare" class="preview-compare" hidden>
+        <div class="preview-item">
+          <span class="preview-label" data-i18n="result.preview.fitted">Fitted result</span>
+          <img id="previewImg" class="preview-thumb" alt="">
+        </div>
+        <div class="preview-item">
+          <span class="preview-label" data-i18n="result.preview.original">Original</span>
+          <img id="originalThumb" class="preview-thumb" alt="">
+        </div>
+      </div>
+
+      <div class="canvas-bar">
+        <span id="coordsDisplay"></span>
+        <span id="elemCountDisplay"></span>
+        <span id="zoomLabel" class="zoom-label">100%</span>
+        <button type="button" id="btnResetView" class="btn-text" data-i18n="result.view.reset">Reset view</button>
+        <label><input type="checkbox" id="showImage"> <span data-i18n="result.canvas.showImage">Original</span></label>
+        <label><input type="checkbox" id="showMask"> <span data-i18n="result.canvas.showMask">Mask</span></label>
+        <label><input type="checkbox" id="showFill" checked> <span data-i18n="result.canvas.showFill">Fill</span></label>
+        <label><input type="checkbox" id="showBorder"> <span data-i18n="result.canvas.showBorder">Border</span></label>
+        <label><input type="checkbox" id="showOrigin" checked> <span data-i18n="result.canvas.showOrigin">Origin</span></label>
+      </div>
+    </main>
+
+    <aside class="panel panel-right">
+      <section class="panel-section">
+        <button type="button" id="btnBackToJobs" class="btn-tonal" style="width:100%;text-align:center;margin-bottom:12px;" data-i18n="result.back">Back to jobs</button>
+        <h3 data-i18n="result.info.sectionTitle">Selected Primitive</h3>
+        <p class="hint" data-i18n="result.info.hint"></p>
+        <div id="infoEmpty" class="empty-panel">
+          <p data-i18n="result.info.empty.title">No primitive selected</p>
+          <span data-i18n="result.info.empty.text"></span>
+        </div>
+        <div id="infoPanel" class="elem-info" hidden><table>
+          <tr><td data-i18n="result.info.id">ID</td><td id="infoId">—</td></tr>
+          <tr><td data-i18n="result.info.type">Type</td><td id="infoType">—</td></tr>
+          <tr><td data-i18n="result.info.center">Center</td><td id="infoCenter">—</td></tr>
+          <tr><td data-i18n="result.info.relative">Relative to origin</td><td id="infoRelative">—</td></tr>
+          <tr><td data-i18n="result.info.size">Size</td><td id="infoSize">—</td></tr>
+          <tr><td data-i18n="result.info.rotation">Rotation</td><td id="infoRotation">—</td></tr>
+        </table></div>
+      </section>
+    </aside>
+  </div>
+
+  <!-- ═══════════════ View: GIA mode conversion ═══════════════ -->
+  <div class="app-layout view" id="viewClassic">
+    <aside class="panel panel-left">
+      <section class="panel-section">
+        <h3 data-i18n="gia.direction.sectionTitle">Conversion Direction</h3>
+        <label class="radio-row">
+          <input type="radio" name="giaDirection" id="dirOverToClassic" value="overlimit_to_classic" checked>
+          <span data-i18n="gia.direction.toClassic">Overlimit → Classic</span>
+        </label>
+        <label class="radio-row">
+          <input type="radio" name="giaDirection" id="dirClassicToOver" value="classic_to_overlimit">
+          <span data-i18n="gia.direction.toOverlimit">Classic → Overlimit</span>
+        </label>
+      </section>
+
+      <section class="panel-section">
+        <h3 id="classicUploadTitle" data-i18n="gia.upload.overlimit">Overlimit GIA</h3>
+        <div id="classicDropZone" class="drop-zone">
+          <div class="drop-zone-content">
+            <span class="drop-icon">GIA</span>
+            <p id="classicDropText" data-i18n="gia.drop.overlimit"></p>
+          </div>
+          <input type="file" id="classicGiaInput" accept=".gia,application/octet-stream" hidden>
+          <span id="classicGiaName" class="file-name"></span>
+          <div id="classicGiaReady" class="upload-ready" hidden></div>
+        </div>
+        <p class="hint" id="classicHint" data-i18n="gia.hint.toClassic"></p>
+      </section>
+
+      <section class="panel-section">
+        <button type="button" id="btnConvertClassicGia" class="btn-primary" data-i18n="gia.button.toClassic">Export Classic GIA</button>
+      </section>
+    </aside>
+
+    <main class="canvas-area tool-empty">
+      <div class="classic-tool-copy">
+        <h2 id="classicToolTitle" data-i18n="gia.title.toClassic">Overlimit to Classic</h2>
+        <p id="classicToolDesc" data-i18n="gia.desc.toClassic"></p>
+      </div>
+    </main>
+
+    <aside class="panel panel-right">
+      <section class="panel-section guide-card">
+        <h3 data-i18n="gia.steps.sectionTitle">How It Works</h3>
+        <ol class="steps" id="classicSteps">
+          <li data-i18n="gia.steps.toClassic.1"></li>
+          <li data-i18n="gia.steps.toClassic.2"></li>
+          <li data-i18n="gia.steps.toClassic.3"></li>
+        </ol>
+        <ul class="tips">
+          <li data-i18n="gia.tips.1"></li>
+          <li data-i18n="gia.tips.2"></li>
+        </ul>
+      </section>
+    </aside>
+  </div>
+
+  <!-- locales (order = Genshin official language list; en first as fallback) -->
+  <script src="js/locales/en.js?v=5"></script>
+  <script src="js/locales/zh-CN.js?v=5"></script>
+  <script src="js/locales/zh-TW.js?v=5"></script>
+  <script src="js/locales/ja.js?v=5"></script>
+  <script src="js/locales/ko.js?v=5"></script>
+  <script src="js/locales/fr.js?v=5"></script>
+  <script src="js/locales/de.js?v=5"></script>
+  <script src="js/locales/es.js?v=5"></script>
+  <script src="js/locales/pt.js?v=5"></script>
+  <script src="js/locales/ru.js?v=5"></script>
+  <script src="js/locales/th.js?v=5"></script>
+  <script src="js/locales/vi.js?v=5"></script>
+  <script src="js/locales/id.js?v=5"></script>
+  <script src="js/locales/tr.js?v=5"></script>
+  <script src="js/locales/it.js?v=5"></script>
+
+  <script src="js/i18n.js?v=5"></script>
+  <script src="js/zip.js?v=5"></script>
+  <script src="js/gia.js?v=5"></script>
+  <script src="js/gia-export.js?v=5"></script>
+  <script src="js/png-decode.js?v=5"></script>
+  <script src="js/app.js?v=5"></script>
+</body>
+</html>

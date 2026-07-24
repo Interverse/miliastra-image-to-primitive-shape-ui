@@ -7,7 +7,7 @@ dist/
 win/build/
 win/dist/
 
-# GIA Workspace
+# GIA Workspace (legacy backend; the deployable site uses assets/ instead)
 gia/*
 !gia/template.gia
 !gia/convert_to_classic.pyc
@@ -19,3 +19,20 @@ tools/
 third_party/primitive/bot/
 third_party/primitive/examples/
 third_party/primitive/scripts/
+
+# Reference files
+reference/
+
+# Parity-test generated artifacts (regenerate: gen_goldens.py / go build)
+tests/parity/*/goldens/
+tests/parity/e2e/_trig_req.json
+tests/parity/e2e/_trig_res.json
+tests/parity/fill/harness.exe
+tests/parity/fill/*_golden.json
+tests/parity/fill/rng_err.txt
+
+# shapely suite regenerable goldens
+tests/parity/shapely/decision_log.jsonl
+tests/parity/shapely/goldens.json
+tests/parity/shapely/simplify.json
+tests/parity/shapely/_unit_circles.json

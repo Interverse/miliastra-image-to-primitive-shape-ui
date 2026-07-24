@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>decode parity — browser check</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 24px; max-width: 960px; }
+  h2 { margin-top: 28px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+  .pass { color: #0a7a28; font-weight: 600; }
+  .fail { color: #c0261a; font-weight: 600; }
+  .warn { color: #a6690a; font-weight: 600; }
+  table { border-collapse: collapse; margin: 8px 0; }
+  td, th { border: 1px solid #ddd; padding: 3px 8px; text-align: left; font-size: 13px; }
+  code { background: #f2f2f2; padding: 1px 4px; border-radius: 3px; }
+  #summary { font-size: 16px; padding: 10px; background: #f7f7f7; border-radius: 6px; }
+</style>
+<!-- The exact decoder shipped in the app -->
+<script src="../../../js/png-decode.js"></script>
+</head>
+<body>
+<h1>Input-decode parity — browser self-check</h1>
+<p>Serve the repo root over HTTP and open
+<code>/tests/parity/decode/browser_check.html</code>. Run
+<code>python gen_goldens.py</code> and <code>python gen_browser_assets.py</code> first.</p>
+<div id="summary">Running…</div>
+<div id="out"></div>
+
+<script type="module">
+const out = document.getElementById("out");
+const summary = document.getElementById("summary");
+const RESULTS = { done: false, sections: {} };
+window.__RESULTS__ = RESULTS;
+
+function h(html) { const d = document.createElement("div"); d.innerHTML = html; out.appendChild(d); }
+function esc(s) { return String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+
+async function fetchBytes(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error("fetch " + url + " -> " + r.status);
+  return new Uint8Array(await r.arrayBuffer());
+}
+
+// EXIF orientation neutraliser — identical logic to app.js decodeToRGBA.
+function neutralizeJpegOrientation(src) {
+  if (src.length < 4 || src[0] !== 0xff || src[1] !== 0xd8) return null;
+  const b = src.slice();
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  let p = 2;
+  while (p + 4 <= b.length) {
+    if (b[p] !== 0xff) break;
+    const marker = b[p + 1];
+    if (marker === 0xd9 || marker === 0xda) break;
+    const len = dv.getUint16(p + 2);
+    const segStart = p + 4, segEnd = p + 2 + len;
+    if (marker === 0xe1 && segEnd <= b.length &&
+        b[segStart] === 0x45 && b[segStart + 1] === 0x78 && b[segStart + 2] === 0x69 &&
+        b[segStart + 3] === 0x66 && b[segStart + 4] === 0 && b[segStart + 5] === 0) {
+      const tiff = segStart + 6;
+      const le = b[tiff] === 0x49 && b[tiff + 1] === 0x49;
+      const rd16 = (o) => (le ? b[o] | (b[o + 1] << 8) : (b[o] << 8) | b[o + 1]);
+      const rd32 = (o) => (le ? b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] * 16777216)
+                              : (b[o] * 16777216) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]);
+      const wr16 = (o, v) => { if (le) { b[o] = v & 0xff; b[o + 1] = (v >> 8) & 0xff; } else { b[o] = (v >> 8) & 0xff; b[o + 1] = v & 0xff; } };
+      const ifd0 = tiff + rd32(tiff + 4), n = rd16(ifd0);
+      for (let i = 0; i < n && ifd0 + 2 + i * 12 + 12 <= b.length; i++) {
+        const e = ifd0 + 2 + i * 12;
+        if (rd16(e) === 0x0112) wr16(e + 8, 1);
+      }
+      return b;
+    }
+    p = segEnd;
+  }
+  return b;
+}
+
+// Mirror of app.js decodeToRGBA JPEG/WebP branch (neutralise + canvas round-trip).
+async function canvasDecode(bytes, mime) {
+  let source = new Blob([bytes], { type: mime });
+  if (mime === "image/jpeg") { const f = neutralizeJpegOrientation(bytes); if (f) source = new Blob([f], { type: mime }); }
+  let bmp;
+  try {
+    bmp = await createImageBitmap(source, {
+      imageOrientation: "none", premultiplyAlpha: "none", colorSpaceConversion: "none",
+    });
+  } catch (_e) { bmp = await createImageBitmap(source); }
+  const c = document.createElement("canvas");
+  c.width = bmp.width; c.height = bmp.height;
+  const ctx = c.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(bmp, 0, 0);
+  const d = ctx.getImageData(0, 0, bmp.width, bmp.height);
+  bmp.close();
+  return { rgba: d.data, width: c.width, height: c.height };
+}
+
+function compare(a, b) {
+  let maxDelta = 0, mismatches = 0, firstAt = -1;
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    const d = Math.abs(a[i] - b[i]);
+    if (d) { mismatches++; if (firstAt < 0) firstAt = i; if (d > maxDelta) maxDelta = d; }
+  }
+  return { maxDelta, mismatches, firstAt, lenA: a.length, lenB: b.length };
+}
+
+/* ── Section A: PNG decoder via browser DecompressionStream vs cv2 goldens ── */
+async function sectionPNG() {
+  h("<h2>A. PNG decoder (browser DecompressionStream inflate) vs cv2 goldens</h2>");
+  let manifest;
+  try { manifest = JSON.parse(new TextDecoder().decode(await fetchBytes("manifest.json"))); }
+  catch (e) { h(`<p class="fail">Cannot load manifest.json: ${esc(e.message)}</p>`); return; }
+  let pass = 0, fail = 0; const fails = [];
+  for (const entry of manifest) {
+    try {
+      const png = await fetchBytes(entry.png);
+      const golden = await fetchBytes(entry.golden);
+      const res = await PNGDecode.decode(png);
+      const cmp = compare(res.rgba, golden);
+      const ok = res.width === entry.width && res.height === entry.height &&
+                 cmp.mismatches === 0 && cmp.lenA === cmp.lenB;
+      if (ok) pass++; else { fail++; fails.push(`${entry.name}: maxΔ${cmp.maxDelta} miss${cmp.mismatches} dims ${res.width}x${res.height}`); }
+    } catch (e) { fail++; fails.push(`${entry.name}: threw ${e.message}`); }
+  }
+  RESULTS.sections.png = { pass, fail, fails };
+  h(`<p class="${fail ? "fail" : "pass"}">${pass}/${pass + fail} PNG cases byte-exact via the browser inflate path.</p>`);
+  if (fails.length) h("<pre>" + esc(fails.join("\n")) + "</pre>");
+}
+
+/* ── Section B: JPEG cv2 vs browser libjpeg ── */
+async function sectionJPEG(baseline) {
+  h("<h2>B. JPEG decode — Chrome libjpeg-turbo vs cv2</h2>");
+  const bytes = await fetchBytes("assets/base.jpg");
+  const dec = await canvasDecode(bytes, "image/jpeg");
+  const base = baseline["base.jpg"];
+  const golden = Uint8Array.from(base.rgba);
+  const cmp = compare(dec.rgba, golden);
+  const dimsOk = dec.width === base.width && dec.height === base.height;
+  const identical = cmp.mismatches === 0 && dimsOk;
+  RESULTS.sections.jpeg = { dimsOk, maxDelta: cmp.maxDelta, mismatches: cmp.mismatches, total: golden.length };
+  const cls = identical ? "pass" : (cmp.maxDelta <= 4 ? "warn" : "fail");
+  h(`<p class="${cls}">${identical ? "Byte-identical to cv2." :
+      `Not byte-identical: max channel Δ = <b>${cmp.maxDelta}</b>, ${cmp.mismatches}/${golden.length} bytes differ (dims ${dec.width}x${dec.height}).`}</p>`);
+  h(`<p>Both use libjpeg-turbo but IDCT/upsampling rounding can differ slightly. Small Δ is expected and does not affect the mask/shape pipeline.</p>`);
+}
+
+/* ── Section C: EXIF orientation must NOT be applied ── */
+async function sectionEXIF(baseline) {
+  h("<h2>C. EXIF orientation (=6) must NOT rotate</h2>");
+  const bytes = await fetchBytes("assets/exif_or6.jpg");
+  const dec = await canvasDecode(bytes, "image/jpeg");
+  const base = baseline["exif_or6.jpg"];
+  const notRotated = dec.width === base.width && dec.height === base.height;
+  // top-left quadrant is bright red in the un-rotated image
+  const tlRed = dec.rgba[0] > 150 && dec.rgba[2] < 120;
+  RESULTS.sections.exif = { width: dec.width, height: dec.height, expectedW: base.width, expectedH: base.height, notRotated, tlRed };
+  h(`<table><tr><th>check</th><th>result</th></tr>
+     <tr><td>decoded dims</td><td>${dec.width} × ${dec.height} (expect ${base.width} × ${base.height}, rotated would be ${base.rotated_width} × ${base.rotated_height})</td></tr>
+     <tr><td>orientation not applied</td><td class="${notRotated ? "pass" : "fail"}">${notRotated ? "PASS" : "FAIL — image was rotated!"}</td></tr>
+     <tr><td>top-left still red</td><td class="${tlRed ? "pass" : "warn"}">${tlRed ? "PASS" : "check"} (rgba ${dec.rgba[0]},${dec.rgba[1]},${dec.rgba[2]},${dec.rgba[3]})</td></tr>
+     </table>`);
+}
+
+/* ── Section D: WebP alpha premultiply behaviour ── */
+async function sectionWebP(baseline) {
+  h("<h2>D. WebP with alpha — premultiply investigation</h2>");
+  if (!baseline["alpha.webp"]) { h('<p class="warn">No alpha.webp baseline generated; skipped.</p>'); return; }
+  const bytes = await fetchBytes("assets/alpha.webp");
+  const base = baseline["alpha.webp"];
+  const golden = Uint8Array.from(base.rgba);
+
+  const canvasRes = await canvasDecode(bytes, "image/webp");
+  const cCmp = compare(canvasRes.rgba, golden);
+
+  // WebCodecs ImageDecoder path (non-premultiplied RGBA), if available
+  let wc = null;
+  if ("ImageDecoder" in window) {
+    try {
+      const dec = new ImageDecoder({ data: bytes, type: "image/webp", premultiplyAlpha: "none" });
+      const { image } = await dec.decode();
+      const w = image.codedWidth, hgt = image.codedHeight;
+      const buf = new Uint8Array(w * hgt * 4);
+      await image.copyTo(buf, { format: "RGBA" });
+      image.close();
+      wc = compare(buf, golden);
+      RESULTS.sections.webp_webcodecs = { maxDelta: wc.maxDelta, mismatches: wc.mismatches, total: golden.length };
+    } catch (e) { RESULTS.sections.webp_webcodecs = { error: e.message }; }
+  }
+  RESULTS.sections.webp_canvas = { maxDelta: cCmp.maxDelta, mismatches: cCmp.mismatches, total: golden.length };
+  h(`<table><tr><th>path</th><th>max Δ vs cv2</th><th>mismatched bytes</th></tr>
+     <tr><td>createImageBitmap + canvas</td><td class="${cCmp.maxDelta === 0 ? "pass" : "warn"}">${cCmp.maxDelta}</td><td>${cCmp.mismatches}/${golden.length}</td></tr>
+     ${wc ? `<tr><td>WebCodecs ImageDecoder (premultiplyAlpha:none)</td><td class="${wc.maxDelta === 0 ? "pass" : "warn"}">${wc.maxDelta}</td><td>${wc.mismatches}/${golden.length}</td></tr>`
+          : `<tr><td>WebCodecs ImageDecoder</td><td colspan="2">${"ImageDecoder" in window ? (RESULTS.sections.webp_webcodecs && RESULTS.sections.webp_webcodecs.error ? "error: " + esc(RESULTS.sections.webp_webcodecs.error) : "n/a") : "not supported in this browser"}</td></tr>`}
+     </table>
+     <p>If the canvas path shows Δ&gt;0 only where alpha&lt;255, the browser premultiplied the WebP. Semi-transparent WebP is a rare input; the limitation is documented in the README.</p>`);
+}
+
+(async () => {
+  try {
+    const baseline = JSON.parse(new TextDecoder().decode(await fetchBytes("assets/baseline.json")));
+    await sectionPNG();
+    await sectionJPEG(baseline);
+    await sectionEXIF(baseline);
+    await sectionWebP(baseline);
+  } catch (e) {
+    h(`<p class="fail">Harness error: ${esc(e.message)}</p>`);
+  }
+  RESULTS.done = true;
+  const png = RESULTS.sections.png || {};
+  const exif = RESULTS.sections.exif || {};
+  const jpeg = RESULTS.sections.jpeg || {};
+  summary.innerHTML =
+    `<b>PNG:</b> ${png.pass || 0}/${(png.pass || 0) + (png.fail || 0)} exact · ` +
+    `<b>EXIF not applied:</b> ${exif.notRotated ? "PASS" : "FAIL"} · ` +
+    `<b>JPEG maxΔ vs cv2:</b> ${jpeg.maxDelta}`;
+  summary.className = (png.fail === 0 && exif.notRotated) ? "pass" : "fail";
+})();
+</script>
+</body>
+</html>
