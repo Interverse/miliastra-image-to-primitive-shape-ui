@@ -698,6 +698,26 @@
     renderJobs();
   }
 
+  /* Worker pool: reuse workers across jobs (spawn + script parse costs paid
+   * once per pool slot; module-level constant caches inside the workers stay
+   * warm). Workers are stateless per message, so per-job output is
+   * unaffected. A cancelled job's worker is terminated, not pooled. */
+  const workerPool = new Map(); // workerFile -> Worker[]
+
+  function acquireWorker(workerFile) {
+    const pool = workerPool.get(workerFile);
+    if (pool && pool.length) return pool.pop();
+    return new Worker(workerFile);
+  }
+
+  function releaseWorker(workerFile, worker) {
+    worker.onmessage = null;
+    worker.onerror = null;
+    let pool = workerPool.get(workerFile);
+    if (!pool) { pool = []; workerPool.set(workerFile, pool); }
+    pool.push(worker);
+  }
+
   async function startJob(job) {
     job.status = "processing";
     renderJobs();
@@ -713,7 +733,7 @@
     if (job.status !== "processing") return; // cancelled during decode
 
     const workerFile = job.config.mode === "outline" ? "js/worker-outline.js" : "js/worker-fill.js";
-    const worker = new Worker(workerFile);
+    const worker = acquireWorker(workerFile);
     job.worker = worker;
 
     worker.onmessage = (event) => {
@@ -722,19 +742,18 @@
       if (msg.type === "progress") {
         job.progress = msg.step;
         job.progressTotal = msg.total;
-        renderJobProgress(job);
-        renderOverall();
+        scheduleProgressFlush();
       } else if (msg.type === "done") {
         job.result = msg.result;
         job.status = "done";
         job.progress = job.progressTotal;
-        worker.terminate();
+        releaseWorker(workerFile, worker);
         job.worker = null;
         pumpQueue();
       } else if (msg.type === "error") {
         job.status = "error";
         job.error = msg.message;
-        worker.terminate();
+        worker.terminate(); // unknown worker state — do not pool
         job.worker = null;
         pumpQueue();
       }
@@ -800,12 +819,30 @@
 
   function statusLabel(status) { return t("batch.status." + status); }
 
-  function renderJobProgress(job) {
-    const fill = document.querySelector(`[data-job-progress="${job.id}"]`);
-    if (fill) {
-      const pct = job.progressTotal ? Math.round(100 * job.progress / job.progressTotal) : 0;
-      fill.style.width = pct + "%";
+  /* Progress DOM updates: cached element refs (renderJobs fills the map)
+   * and one rAF-batched flush per frame regardless of how many worker
+   * messages arrive — no per-message querySelector/layout work. */
+  const progressFillEls = new Map(); // jobId -> element
+  let progressFlushQueued = false;
+
+  function flushProgress() {
+    progressFlushQueued = false;
+    for (const job of jobs) {
+      if (job.status !== "processing") continue;
+      const fill = progressFillEls.get(job.id);
+      if (fill) {
+        const pct = job.progressTotal ? Math.round(100 * job.progress / job.progressTotal) : 0;
+        fill.style.width = pct + "%";
+      }
     }
+    renderOverall();
+  }
+
+  function scheduleProgressFlush() {
+    if (progressFlushQueued) return;
+    progressFlushQueued = true;
+    if (document.hidden) { flushProgress(); return; }
+    requestAnimationFrame(flushProgress);
   }
 
   function renderOverall() {
@@ -833,6 +870,7 @@
     const list = $("jobList");
     $("batchEmpty").hidden = jobs.length > 0;
     list.innerHTML = "";
+    progressFillEls.clear();
     for (const job of jobs) {
       const card = document.createElement("div");
       card.className = "job-card";
@@ -874,6 +912,7 @@
         const fill = document.createElement("div");
         fill.className = "progress-fill";
         fill.dataset.jobProgress = job.id;
+        progressFillEls.set(job.id, fill);
         const pct = job.progressTotal ? Math.round(100 * job.progress / job.progressTotal) : 0;
         fill.style.width = pct + "%";
         track.appendChild(fill);

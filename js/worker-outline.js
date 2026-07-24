@@ -415,6 +415,54 @@ function renderElementToMask(elem, w, h) {
   return single;
 }
 
+/* ── perf helpers (behavior-identical) ──
+ * All pixel-count/merge loops over a single element's mask only need to
+ * visit a superset of the pixels the cv2 rasterizer can write. The
+ * footprint is bounded by the element extent (ellipse: max axis; rect:
+ * half-diagonal) plus a generous rounding margin; pixels outside are zero
+ * and contribute nothing to any count or max-merge. The E2E suites assert
+ * the resulting outputs stay bit-identical. */
+function elementBBox(elem, w, h) {
+  const cx = elem.center.x | 0, cy = elem.center.y | 0;
+  let ext;
+  if (elem.type === ELLIPSE) {
+    ext = Math.max(elem.size.rx | 0, elem.size.ry | 0, 1) + 4;
+  } else {
+    const rw = Math.max(elem.size.width, 1), rh = Math.max(elem.size.height, 1);
+    ext = Math.sqrt(rw * rw + rh * rh) / 2 + 4;
+  }
+  return {
+    x0: Math.max(0, Math.floor(cx - ext)),
+    y0: Math.max(0, Math.floor(cy - ext)),
+    x1: Math.min(w - 1, Math.ceil(cx + ext)),
+    y1: Math.min(h - 1, Math.ceil(cy + ext)),
+  };
+}
+
+/* Pooled scratch mask for per-element renders: cleared only over the
+ * previously used bbox, so repeated renders cost O(bbox) not O(w·h). */
+let _scratchMask = null;
+let _scratchBox = null;
+function renderElementToScratch(elem, w, h) {
+  if (!_scratchMask || _scratchMask.length !== w * h) {
+    _scratchMask = new Uint8Array(w * h);
+    _scratchBox = null;
+  } else if (_scratchBox) {
+    for (let y = _scratchBox.y0; y <= _scratchBox.y1; y++) {
+      _scratchMask.fill(0, y * w + _scratchBox.x0, y * w + _scratchBox.x1 + 1);
+    }
+  }
+  const cx = elem.center.x | 0, cy = elem.center.y | 0;
+  const ang = elem.rotation;
+  if (elem.type === ELLIPSE) {
+    Imaging.cvEllipseFill(_scratchMask, w, h, cx, cy, Math.max(elem.size.rx | 0, 1), Math.max(elem.size.ry | 0, 1), ang);
+  } else {
+    Imaging.cvBoxFill(_scratchMask, w, h, cx, cy, Math.max(elem.size.width, 1), Math.max(elem.size.height, 1), ang);
+  }
+  _scratchBox = elementBBox(elem, w, h);
+  return _scratchMask;
+}
+
 function renderCoverageMask(elements, w, h) {
   const cov = new Uint8Array(w * h);
   for (const elem of elements) {
@@ -522,16 +570,27 @@ function fillGaps(elements, cidx, ptsX, ptsY, cumArc, totalArc, polyRing, distMa
         const elem = elementFromBest(best, cidx, `gf${iteration}_${added}`, imgCenter, fillArc);
         elem.id = `${cidx}_gf${iteration}_${added}`;
 
-        const single = renderElementToMask(elem, w, h);
+        const single = renderElementToScratch(elem, w, h);
+        const bb = elementBBox(elem, w, h);
         let elemPx = 0, coveredPx = 0;
-        for (let i = 0; i < w * h; i++) {
-          if (single[i]) {
-            elemPx++;
-            if (covMask[i]) coveredPx++;
+        for (let y = bb.y0; y <= bb.y1; y++) {
+          const row = y * w;
+          for (let x = bb.x0; x <= bb.x1; x++) {
+            const i = row + x;
+            if (single[i]) {
+              elemPx++;
+              if (covMask[i]) coveredPx++;
+            }
           }
         }
         if (elemPx > 0 && coveredPx / elemPx > 0.7) continue;
-        for (let i = 0; i < w * h; i++) if (single[i] > covMask[i]) covMask[i] = single[i];
+        for (let y = bb.y0; y <= bb.y1; y++) {
+          const row = y * w;
+          for (let x = bb.x0; x <= bb.x1; x++) {
+            const i = row + x;
+            if (single[i] > covMask[i]) covMask[i] = single[i];
+          }
+        }
 
         current.push(elem);
         added++;
@@ -636,18 +695,29 @@ function suppressOverlap(elements, w, h, coverageThresh) {
   const cumulative = new Uint8Array(w * h);
 
   for (const [origIdx, elem] of indexed) {
-    const single = renderElementToMask(elem, w, h);
+    const single = renderElementToScratch(elem, w, h);
+    const bb = elementBBox(elem, w, h);
     let elemPx = 0, coveredPx = 0;
-    for (let i = 0; i < w * h; i++) {
-      if (single[i]) {
-        elemPx++;
-        if (cumulative[i]) coveredPx++;
+    for (let y = bb.y0; y <= bb.y1; y++) {
+      const row = y * w;
+      for (let x = bb.x0; x <= bb.x1; x++) {
+        const i = row + x;
+        if (single[i]) {
+          elemPx++;
+          if (cumulative[i]) coveredPx++;
+        }
       }
     }
     if (elemPx < 1) { acceptedIdx.add(origIdx); continue; }
     if (coveredPx / elemPx >= coverageThresh) continue;
     acceptedIdx.add(origIdx);
-    for (let i = 0; i < w * h; i++) if (single[i] > cumulative[i]) cumulative[i] = single[i];
+    for (let y = bb.y0; y <= bb.y1; y++) {
+      const row = y * w;
+      for (let x = bb.x0; x <= bb.x1; x++) {
+        const i = row + x;
+        if (single[i] > cumulative[i]) cumulative[i] = single[i];
+      }
+    }
   }
 
   return elements.filter((_, i) => acceptedIdx.has(i));

@@ -67,6 +67,12 @@ class Rasterizer {
     this.splitScale2 = ss2;
     this.splitScale3 = ss3;
     this.cellIndex = new Int32Array(height);
+    // Touched-row bounds (perf): only rows findCell ever writes need
+    // clearing/emitting. Rows outside stay -1 and emit nothing in Go too,
+    // so restricting clear() and rasterize() to [minYi, maxYi] is
+    // output-identical. Initialize to "everything dirty" for the first clear.
+    this.minYi = 0;
+    this.maxYi = height - 1;
     this.clear();
   }
 
@@ -75,7 +81,11 @@ class Rasterizer {
     this.xi = 0; this.yi = 0;
     this.area = 0; this.cover = 0;
     this.cellLen = 0;
-    this.cellIndex.fill(-1);
+    if (this.maxYi >= this.minYi) {
+      this.cellIndex.fill(-1, this.minYi, this.maxYi + 1);
+    }
+    this.minYi = this.height; // empty range until findCell touches rows
+    this.maxYi = -1;
   }
 
   _growCells() {
@@ -89,6 +99,8 @@ class Rasterizer {
 
   findCell() {
     if (this.yi < 0 || this.yi >= this.cellIndex.length) return -1;
+    if (this.yi < this.minYi) this.minYi = this.yi;
+    if (this.yi > this.maxYi) this.maxYi = this.yi;
     let xi = this.xi;
     if (xi < 0) xi = -1;
     else if (xi > this.width) xi = this.width;
@@ -307,7 +319,10 @@ class Rasterizer {
   rasterize(sink) {
     this.saveCell();
     const width = this.width;
-    for (let yi = 0; yi < this.cellIndex.length; yi++) {
+    // rows outside [minYi, maxYi] have no cells and emit nothing (identical
+    // to scanning the full height in the Go original)
+    const yiEnd = Math.min(this.maxYi, this.cellIndex.length - 1);
+    for (let yi = Math.max(0, this.minYi); yi <= yiEnd; yi++) {
       let xi = 0, cover = 0;
       for (let c = this.cellIndex[yi]; c !== -1; c = this.cellNext[c]) {
         if (cover !== 0 && this.cellXi[c] > xi) {

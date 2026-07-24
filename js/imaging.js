@@ -67,34 +67,49 @@ const Imaging = (() => {
    */
   function erodeCross3(mask, w, h) {
     const out = new Uint8Array(w * h);
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const i = y * w + x;
-        // OpenCV pads with border replicate for erosion of binary images
-        const c = mask[i];
-        const l = x > 0 ? mask[i - 1] : c;
-        const r = x < w - 1 ? mask[i + 1] : c;
-        const u = y > 0 ? mask[i - w] : c;
-        const d = y < h - 1 ? mask[i + w] : c;
-        out[i] = (c && l && r && u && d) ? 255 : 0;
+    // interior: no bounds checks (identical results; borders handled below)
+    for (let y = 1; y < h - 1; y++) {
+      const row = y * w;
+      for (let x = 1; x < w - 1; x++) {
+        const i = row + x;
+        out[i] = (mask[i] && mask[i - 1] && mask[i + 1] && mask[i - w] && mask[i + w]) ? 255 : 0;
       }
     }
+    // borders: original replicate-padded logic (top/bottom rows + side columns)
+    const erodeAt = (x, y) => {
+      const i = y * w + x;
+      const c = mask[i];
+      const l = x > 0 ? mask[i - 1] : c;
+      const r = x < w - 1 ? mask[i + 1] : c;
+      const u = y > 0 ? mask[i - w] : c;
+      const d = y < h - 1 ? mask[i + w] : c;
+      out[i] = (c && l && r && u && d) ? 255 : 0;
+    };
+    for (let x = 0; x < w; x++) { erodeAt(x, 0); if (h > 1) erodeAt(x, h - 1); }
+    for (let y = 1; y < h - 1; y++) { erodeAt(0, y); if (w > 1) erodeAt(w - 1, y); }
     return out;
   }
 
   function dilateCross3(mask, w, h) {
     const out = new Uint8Array(w * h);
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const i = y * w + x;
-        const c = mask[i];
-        const l = x > 0 ? mask[i - 1] : 0;
-        const r = x < w - 1 ? mask[i + 1] : 0;
-        const u = y > 0 ? mask[i - w] : 0;
-        const d = y < h - 1 ? mask[i + w] : 0;
-        out[i] = (c || l || r || u || d) ? 255 : 0;
+    for (let y = 1; y < h - 1; y++) {
+      const row = y * w;
+      for (let x = 1; x < w - 1; x++) {
+        const i = row + x;
+        out[i] = (mask[i] || mask[i - 1] || mask[i + 1] || mask[i - w] || mask[i + w]) ? 255 : 0;
       }
     }
+    const dilateAt = (x, y) => {
+      const i = y * w + x;
+      const c = mask[i];
+      const l = x > 0 ? mask[i - 1] : 0;
+      const r = x < w - 1 ? mask[i + 1] : 0;
+      const u = y > 0 ? mask[i - w] : 0;
+      const d = y < h - 1 ? mask[i + w] : 0;
+      out[i] = (c || l || r || u || d) ? 255 : 0;
+    };
+    for (let x = 0; x < w; x++) { dilateAt(x, 0); if (h > 1) dilateAt(x, h - 1); }
+    for (let y = 1; y < h - 1; y++) { dilateAt(0, y); if (w > 1) dilateAt(w - 1, y); }
     return out;
   }
 
@@ -102,25 +117,42 @@ const Imaging = (() => {
   function morphOpen(mask, w, h) { return dilateCross3(erodeCross3(mask, w, h), w, h); }
 
   function dilateSquare(mask, w, h, radius) {
-    // square kernel of size (2r+1); used by detect_gaps (np.ones)
+    // Square 3x3 kernel (np.ones), applied `radius` times. The square SE is
+    // separable: horizontal 3-max then vertical 3-max covers exactly the
+    // same 3x3 window — identical 0/255 output, 6 reads/px instead of 9
+    // with no inner bounds checks.
     let cur = mask;
     for (let it = 0; it < radius; it++) {
+      const tmp = new Uint8Array(w * h);
       const out = new Uint8Array(w * h);
       for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-          const i = y * w + x;
-          let v = 0;
-          for (let dy = -1; dy <= 1 && !v; dy++) {
-            const yy = y + dy;
-            if (yy < 0 || yy >= h) continue;
-            for (let dx = -1; dx <= 1; dx++) {
-              const xx = x + dx;
-              if (xx < 0 || xx >= w) continue;
-              if (cur[yy * w + xx]) { v = 255; break; }
-            }
-          }
-          out[i] = v;
+        const row = y * w;
+        if (w === 1) {
+          tmp[row] = cur[row];
+          continue;
         }
+        tmp[row] = cur[row] | cur[row + 1];
+        for (let x = 1; x < w - 1; x++) {
+          const i = row + x;
+          tmp[i] = cur[i - 1] | cur[i] | cur[i + 1];
+        }
+        tmp[row + w - 1] = cur[row + w - 2] | cur[row + w - 1];
+      }
+      // vertical pass writes the canonical 0/255 values (any nonzero → 255),
+      // matching the original for arbitrary byte inputs
+      if (h === 1) {
+        for (let x = 0; x < w; x++) out[x] = tmp[x] ? 255 : 0;
+      } else {
+        for (let x = 0; x < w; x++) out[x] = (tmp[x] | tmp[x + w]) ? 255 : 0;
+        for (let y = 1; y < h - 1; y++) {
+          const row = y * w;
+          for (let x = 0; x < w; x++) {
+            const i = row + x;
+            out[i] = (tmp[i - w] | tmp[i] | tmp[i + w]) ? 255 : 0;
+          }
+        }
+        const last = (h - 1) * w;
+        for (let x = 0; x < w; x++) out[last + x] = (tmp[last - w + x] | tmp[last + x]) ? 255 : 0;
       }
       cur = out;
     }
