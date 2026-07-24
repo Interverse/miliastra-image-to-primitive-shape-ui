@@ -51,6 +51,11 @@ const SHAPE_ROTATED_ELLIPSE = 7;
 function clampInt(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
 function clamp(x, lo, hi) { return x < lo ? lo : (x > hi ? hi : x); }
 
+/* Perf: packed 32-bit pixel loads are only byte-order-correct on
+ * little-endian platforms (every realistic browser/CPU today); the energy
+ * loops keep an exact byte-wise fallback for big-endian. */
+const IS_LE = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
+
 /* Exact integer division truncating toward zero (Go int64 `/`), for operands
  * whose magnitudes are < 2^53. Corrects the ±1 float-division misround that can
  * occur when the true quotient lands astronomically close to an integer. */
@@ -150,13 +155,27 @@ function cropScanlines(buf, w, h) {
 class TriangleShape {
   constructor(rnd, w, h) {
     this.rnd = rnd; this.w = w; this.h = h;
-    this.x1 = rnd.intn(w);
-    this.y1 = rnd.intn(h);
+    this.initRandom();
+  }
+  static uninit(rnd, w, h) {
+    const t = Object.create(TriangleShape.prototype);
+    t.rnd = rnd; t.w = w; t.h = h;
+    t.x1 = 0; t.y1 = 0; t.x2 = 0; t.y2 = 0; t.x3 = 0; t.y3 = 0;
+    return t;
+  }
+  /* NewRandomTriangle body — identical RNG consumption to the constructor. */
+  initRandom() {
+    const rnd = this.rnd;
+    this.x1 = rnd.intn(this.w);
+    this.y1 = rnd.intn(this.h);
     this.x2 = this.x1 + rnd.intn(31) - 15;
     this.y2 = this.y1 + rnd.intn(31) - 15;
     this.x3 = this.x1 + rnd.intn(31) - 15;
     this.y3 = this.y1 + rnd.intn(31) - 15;
     this.mutate();
+  }
+  assign(o) {
+    this.x1 = o.x1; this.y1 = o.y1; this.x2 = o.x2; this.y2 = o.y2; this.x3 = o.x3; this.y3 = o.y3;
   }
   copy() {
     const t = Object.create(TriangleShape.prototype);
@@ -268,12 +287,26 @@ class TriangleShape {
 class RotatedRectShape {
   constructor(rnd, w, h) {
     this.rnd = rnd; this.w = w; this.h = h;
-    this.x = rnd.intn(w);
-    this.y = rnd.intn(h);
+    this.initRandom();
+  }
+  static uninit(rnd, w, h) {
+    const r = Object.create(RotatedRectShape.prototype);
+    r.rnd = rnd; r.w = w; r.h = h;
+    r.x = 0; r.y = 0; r.sx = 1; r.sy = 1; r.angle = 0;
+    return r;
+  }
+  /* NewRandomRotatedRectangle body — identical RNG consumption. */
+  initRandom() {
+    const rnd = this.rnd;
+    this.x = rnd.intn(this.w);
+    this.y = rnd.intn(this.h);
     this.sx = rnd.intn(32) + 1;
     this.sy = rnd.intn(32) + 1;
     this.angle = rnd.intn(360);
     this.mutate();
+  }
+  assign(o) {
+    this.x = o.x; this.y = o.y; this.sx = o.sx; this.sy = o.sy; this.angle = o.angle;
   }
   copy() {
     const r = Object.create(RotatedRectShape.prototype);
@@ -353,15 +386,52 @@ class RotatedRectShape {
   }
 }
 
+/* Precomputed GoMath.cos/sin of the 16 fixed ellipse segment angles
+ * (a1, midpoint, a2 per segment) — exactly the values the per-call code
+ * computed: a1 = (i/16)*2*PI, mid = a1 + (a2-a1)/2, a2 = ((i+1)/16)*2*PI.
+ * Layout per segment i: [cos a1, sin a1, cos mid, sin mid, cos a2, sin a2]. */
+let _ellipseTrig = null;
+function ellipseTrigTable() {
+  if (_ellipseTrig) return _ellipseTrig;
+  const n = 16;
+  const T = new Float64Array(n * 6);
+  for (let i = 0; i < n; i++) {
+    const p1 = (i + 0) / n, p2 = (i + 1) / n;
+    const a1 = p1 * 2 * Math.PI, a2 = p2 * 2 * Math.PI;
+    const am = a1 + (a2 - a1) / 2;
+    const ti = i * 6;
+    T[ti] = GoMath.cos(a1); T[ti + 1] = GoMath.sin(a1);
+    T[ti + 2] = GoMath.cos(am); T[ti + 3] = GoMath.sin(am);
+    T[ti + 4] = GoMath.cos(a2); T[ti + 5] = GoMath.sin(a2);
+  }
+  _ellipseTrig = T;
+  return T;
+}
+
 class RotatedEllipseShape {
   constructor(rnd, w, h) {
     this.rnd = rnd; this.w = w; this.h = h;
-    this.x = rnd.float64() * w;
-    this.y = rnd.float64() * h;
+    this.rasterizer = null; // shared per-model Rasterizer, injected by makeShape
+    this.initRandom();
+  }
+  static uninit(rnd, w, h) {
+    const e = Object.create(RotatedEllipseShape.prototype);
+    e.rnd = rnd; e.w = w; e.h = h;
+    e.x = 0; e.y = 0; e.rx = 1; e.ry = 1; e.angle = 0;
+    e.rasterizer = null;
+    return e;
+  }
+  /* NewRandomRotatedEllipse body — identical RNG consumption. */
+  initRandom() {
+    const rnd = this.rnd;
+    this.x = rnd.float64() * this.w;
+    this.y = rnd.float64() * this.h;
     this.rx = rnd.float64() * 32 + 1;
     this.ry = rnd.float64() * 32 + 1;
     this.angle = rnd.float64() * 360;
-    this.rasterizer = null; // shared per-model Rasterizer, injected by makeShape
+  }
+  assign(o) {
+    this.x = o.x; this.y = o.y; this.rx = o.rx; this.ry = o.ry; this.angle = o.angle;
   }
   copy() {
     const e = Object.create(RotatedEllipseShape.prototype);
@@ -395,12 +465,15 @@ class RotatedEllipseShape {
     const angRad = GoMath.radians(this.angle);
     const cosT = GoMath.cos(angRad), sinT = GoMath.sin(angRad);
     const gfix = GoRaster.gfix;
+    // The 16 segment angles are constants — their GoMath.cos/sin values are
+    // precomputed once (identical bits; see ellipseTrigTable) instead of
+    // 96 software-trig calls per rasterize.
+    const T = ellipseTrigTable();
     for (let i = 0; i < n; i++) {
-      const p1 = (i + 0) / n, p2 = (i + 1) / n;
-      const a1 = p1 * 2 * Math.PI, a2 = p2 * 2 * Math.PI;
-      let x0 = Rx * GoMath.cos(a1), y0 = Ry * GoMath.sin(a1);
-      const x1 = Rx * GoMath.cos(a1 + (a2 - a1) / 2), y1 = Ry * GoMath.sin(a1 + (a2 - a1) / 2);
-      let x2 = Rx * GoMath.cos(a2), y2 = Ry * GoMath.sin(a2);
+      const ti = i * 6;
+      let x0 = Rx * T[ti], y0 = Ry * T[ti + 1];
+      const x1 = Rx * T[ti + 2], y1 = Ry * T[ti + 3];
+      let x2 = Rx * T[ti + 4], y2 = Ry * T[ti + 5];
       let cx = 2 * x1 - x0 / 2 - x2 / 2;
       let cy = 2 * y1 - y0 / 2 - y2 / 2;
       const rx0 = x0 * cosT - y0 * sinT, ry0 = x0 * sinT + y0 * cosT;
@@ -459,9 +532,21 @@ class PrimitiveModel {
     }
 
     this.buffer = new Uint8Array(n * 4);
+    // 32-bit views over target/current: one load per pixel instead of four
+    // byte loads in the energy hot loops (little-endian byte extraction;
+    // big-endian platforms fall back to the byte path).
+    this.target32 = new Uint32Array(this.target.buffer, this.target.byteOffset, n);
+    this.current32 = new Uint32Array(this.current.buffer, this.current.byteOffset, n);
     this.lines = new ScanlineBuffer(4096);
     this.rnd = new GoRand(seed);
     this.rasterizer = new GoRaster.Rasterizer(w, h);
+    this._powScore = NaN; // cache key for _scoreBase()
+    this._powBase = 0;
+    // per-evaluation after-value LUTs (see energy pass 2)
+    this._lutR = new Int32Array(256);
+    this._lutG = new Int32Array(256);
+    this._lutB = new Int32Array(256);
+    this._lutA = new Int32Array(256);
     this.score = this.differenceFull();
     this.shapes = [];
     this.colors = [];
@@ -559,13 +644,158 @@ class PrimitiveModel {
     return Math.sqrt(total / N) / 255;
   }
 
+  /* Cached uint64(math.Pow(score*255,2) * N) — `this.score` only changes
+   * when a shape is committed, but the value was recomputed (software pow)
+   * on every one of the ~20k energy evaluations per step. Same bits. */
+  _scoreBase() {
+    if (this._powScore !== this.score) {
+      this._powScore = this.score;
+      this._powBase = Math.trunc(GoMath.pow(this.score * 255, 2) * (this.w * this.h * 4));
+    }
+    return this._powBase;
+  }
+
+  /* energy(): fused, write-free equivalent of
+   *   computeColor → copyLines → drawLines → differencePartial.
+   * The Go path copies the affected span pixels into a scratch buffer,
+   * draws the shape into it, then diffs before/after per pixel. Since
+   * "before" is exactly `current` and "after" is a pure function of
+   * (current pixel, color, span alpha), the after-values are computed
+   * inline and never stored — identical arithmetic, ~zero memory writes.
+   *
+   * Integer-division note: the Go uint32 divisions here use plain
+   * Math.floor(x / d). This is exact for these operand ranges: the
+   * float64 quotient's absolute error is < q·2⁻⁵³ ≤ 2³²·2⁻⁵³ = 2⁻²¹,
+   * while a nonzero remainder keeps the true quotient at least 1/d ≥
+   * 1/65535 ≈ 1.5·10⁻⁵ away from the next integer, so floor can never
+   * land on the wrong side (same argument as goIntDiv's proof, with the
+   * correction provably never triggered).
+   */
   energy(shape, alpha) {
     const lines = this.lines;
     shape.rasterize(lines);
-    const color = this.computeColor(lines, alpha);
-    this.copyLines(this.buffer, this.current, lines);
-    this.drawLines(this.buffer, color, lines);
-    return this.differencePartial(this.current, this.buffer, this.score, lines);
+
+    const t = this.target, c = this.current, w = this.w;
+    const t32 = this.target32, c32 = this.current32;
+
+    /* pass 1: computeColor (count hoisted per span; the per-pixel term uses
+     * the exact integer identity (t-c)*ac + c*0x101 == t*ac + c*(0x101-ac),
+     * all values well below 2^53 so the sums are identical). */
+    let rsum = 0, gsum = 0, bsum = 0, count = 0;
+    const ac = goIntDiv(0x101 * 255, alpha);
+    const acC = 0x101 - ac;
+    if (IS_LE) {
+      for (let li = 0; li < lines.n; li++) {
+        const x1 = lines.x1[li], x2 = lines.x2[li];
+        let p = lines.y[li] * w + x1;
+        for (let x = x1; x <= x2; x++, p++) {
+          const tv = t32[p], cv = c32[p];
+          rsum += (tv & 255) * ac + (cv & 255) * acC;
+          gsum += ((tv >>> 8) & 255) * ac + ((cv >>> 8) & 255) * acC;
+          bsum += ((tv >>> 16) & 255) * ac + ((cv >>> 16) & 255) * acC;
+        }
+        count += x2 - x1 + 1;
+      }
+    } else {
+      for (let li = 0; li < lines.n; li++) {
+        const x1 = lines.x1[li], x2 = lines.x2[li];
+        let i = (lines.y[li] * w + x1) * 4;
+        for (let x = x1; x <= x2; x++) {
+          const tr = t[i], tg = t[i + 1], tb = t[i + 2];
+          const cr = c[i], cg = c[i + 1], cb = c[i + 2];
+          i += 4;
+          rsum += (tr - cr) * ac + cr * 0x101;
+          gsum += (tg - cg) * ac + cg * 0x101;
+          bsum += (tb - cb) * ac + cb * 0x101;
+        }
+        count += x2 - x1 + 1;
+      }
+    }
+    let cr8 = 0, cg8 = 0, cb8 = 0, ca8 = 0;
+    if (count !== 0) {
+      cr8 = clampInt(Math.floor(goIntDiv(rsum, count) / 256), 0, 255);
+      cg8 = clampInt(Math.floor(goIntDiv(gsum, count) / 256), 0, 255);
+      cb8 = clampInt(Math.floor(goIntDiv(bsum, count) / 256), 0, 255);
+      ca8 = alpha;
+    } // else Go returns Color{} → (0,0,0,0)
+
+    /* pass 2: simulated drawLines + differencePartial (before == current) */
+    const m = 0xffff;
+    const sr = goIntDiv(cr8 * 0x101 * ca8, 0xff);
+    const sg = goIntDiv(cg8 * 0x101 * ca8, 0xff);
+    const sb = goIntDiv(cb8 * 0x101 * ca8, 0xff);
+    const sa = ca8 * 0x101;
+
+    /* For a fixed span alpha the after-value is a pure function of the
+     * 8-bit before-value; interior spans all share ma = 0xffff (only the
+     * antialiased ellipse edge spans differ). Build 256-entry LUTs of the
+     * IDENTICAL per-pixel expression once per evaluation (lazily) and look
+     * after-values up instead of dividing per pixel. All quantities are
+     * integers < 2^53, so every sum below is exact regardless of order. */
+    let lutBuilt = false;
+    const lutR = this._lutR, lutG = this._lutG, lutB = this._lutB, lutA = this._lutA;
+
+    let total = this._scoreBase();
+    for (let li = 0; li < lines.n; li++) {
+      const ma = lines.a[li];
+      const x1 = lines.x1[li], x2 = lines.x2[li];
+      if (ma === m) {
+        if (!lutBuilt) {
+          lutBuilt = true;
+          const aF = (m - Math.floor((sa * m) / m)) * 0x101;
+          const srm = sr * m, sgm = sg * m, sbm = sb * m, sam = sa * m;
+          for (let v = 0; v < 256; v++) {
+            const va = v * aF;
+            lutR[v] = Math.floor(((va + srm) >>> 0) / m) >> 8;
+            lutG[v] = Math.floor(((va + sgm) >>> 0) / m) >> 8;
+            lutB[v] = Math.floor(((va + sbm) >>> 0) / m) >> 8;
+            lutA[v] = Math.floor(((va + sam) >>> 0) / m) >> 8;
+          }
+        }
+        if (IS_LE) {
+          let p = lines.y[li] * w + x1;
+          for (let x = x1; x <= x2; x++, p++) {
+            const tv = t32[p], cv = c32[p];
+            const tr = tv & 255, tg = (tv >>> 8) & 255, tb = (tv >>> 16) & 255, ta = tv >>> 24;
+            const br = cv & 255, bg = (cv >>> 8) & 255, bb = (cv >>> 16) & 255, ba = cv >>> 24;
+            const dr1 = tr - br, dg1 = tg - bg, db1 = tb - bb, da1 = ta - ba;
+            const dr2 = tr - lutR[br], dg2 = tg - lutG[bg], db2 = tb - lutB[bb], da2 = ta - lutA[ba];
+            total -= dr1 * dr1 + dg1 * dg1 + db1 * db1 + da1 * da1;
+            total += dr2 * dr2 + dg2 * dg2 + db2 * db2 + da2 * da2;
+          }
+        } else {
+          let i = (lines.y[li] * w + x1) * 4;
+          for (let x = x1; x <= x2; x++) {
+            const tr = t[i], tg = t[i + 1], tb = t[i + 2], ta = t[i + 3];
+            const br = c[i], bg = c[i + 1], bb = c[i + 2], ba = c[i + 3];
+            i += 4;
+            const dr1 = tr - br, dg1 = tg - bg, db1 = tb - bb, da1 = ta - ba;
+            const dr2 = tr - lutR[br], dg2 = tg - lutG[bg], db2 = tb - lutB[bb], da2 = ta - lutA[ba];
+            total -= dr1 * dr1 + dg1 * dg1 + db1 * db1 + da1 * da1;
+            total += dr2 * dr2 + dg2 * dg2 + db2 * db2 + da2 * da2;
+          }
+        }
+      } else {
+        const a = (m - Math.floor((sa * ma) / m)) * 0x101;
+        const srm = sr * ma, sgm = sg * ma, sbm = sb * ma, sam = sa * ma;
+        let i = (lines.y[li] * w + x1) * 4;
+        for (let x = x1; x <= x2; x++) {
+          const tr = t[i], tg = t[i + 1], tb = t[i + 2], ta = t[i + 3];
+          const br = c[i], bg = c[i + 1], bb = c[i + 2], ba = c[i + 3];
+          i += 4;
+          const ar = Math.floor(((br * a + srm) >>> 0) / m) >> 8;
+          const ag = Math.floor(((bg * a + sgm) >>> 0) / m) >> 8;
+          const ab = Math.floor(((bb * a + sbm) >>> 0) / m) >> 8;
+          const aa = Math.floor(((ba * a + sam) >>> 0) / m) >> 8;
+          const dr1 = tr - br, dg1 = tg - bg, db1 = tb - bb, da1 = ta - ba;
+          const dr2 = tr - ar, dg2 = tg - ag, db2 = tb - ab, da2 = ta - aa;
+          total -= dr1 * dr1 + dg1 * dg1 + db1 * db1 + da1 * da1;
+          total += dr2 * dr2 + dg2 * dg2 + db2 * db2 + da2 * da2;
+        }
+      }
+    }
+    if (total < 0) total += 18446744073709551616; // Go uint64 wrap (see README)
+    return Math.sqrt(total / (this.w * this.h * 4)) / 255;
   }
 
   stateEnergy(state) {
@@ -600,39 +830,82 @@ class PrimitiveModel {
     return { shape, alpha, mutateAlpha, score: -1 };
   }
 
+  /* Allocation-free hill climb. Go's HillClimb copies the state per
+   * iteration only to support pointer-swap undo; the shapes are pure value
+   * bags, so field save/restore (assign) yields identical values and
+   * identical RNG consumption without ~3 heap objects per iteration. */
   hillClimb(state, maxAge) {
-    let s = { shape: state.shape.copy(), alpha: state.alpha, mutateAlpha: state.mutateAlpha, score: state.score };
-    let best = { shape: s.shape.copy(), alpha: s.alpha, mutateAlpha: s.mutateAlpha, score: s.score };
-    let bestEnergy = this.stateEnergy(s);
-    best.score = bestEnergy;
+    const s = state.shape.copy();
+    const mutateAlpha = state.mutateAlpha;
+    let sAlpha = state.alpha;
+    let sScore = state.score;
+    let bestEnergy = sScore < 0 ? this.energy(s, sAlpha) : sScore; // stateEnergy semantics
+    sScore = bestEnergy;
+    const bestShape = s.copy();
+    let bestAlpha = sAlpha;
+    const undoShape = s.copy();
+    let undoAlpha = 0, undoScore = 0;
     for (let age = 0; age < maxAge; age++) {
-      const undo = { shape: s.shape.copy(), alpha: s.alpha, score: s.score };
+      undoShape.assign(s); undoAlpha = sAlpha; undoScore = sScore;
       // DoMove: mutate shape, then (if mutateAlpha) perturb alpha, then score=-1
-      s.shape.mutate();
-      if (s.mutateAlpha) {
-        s.alpha = clampInt(s.alpha + this.rnd.intn(21) - 10, 1, 255);
+      s.mutate();
+      if (mutateAlpha) {
+        sAlpha = clampInt(sAlpha + this.rnd.intn(21) - 10, 1, 255);
       }
-      s.score = -1;
-      const energy = this.stateEnergy(s);
+      const energy = this.energy(s, sAlpha); // score was -1 → always computed
+      sScore = energy;
       if (energy >= bestEnergy) {
-        s.shape = undo.shape; s.alpha = undo.alpha; s.score = undo.score;
+        s.assign(undoShape); sAlpha = undoAlpha; sScore = undoScore;
       } else {
         bestEnergy = energy;
-        best = { shape: s.shape.copy(), alpha: s.alpha, mutateAlpha: s.mutateAlpha, score: s.score };
+        bestShape.assign(s); bestAlpha = sAlpha;
         age = -1;
       }
     }
-    return best;
+    return { shape: bestShape, alpha: bestAlpha, mutateAlpha, score: bestEnergy };
   }
 
   bestRandomState(type, alpha, n) {
-    let bestEnergy = 0, best = null;
-    for (let i = 0; i < n; i++) {
-      const st = this.randomState(type, alpha);
-      const e = this.stateEnergy(st);
-      if (i === 0 || e < bestEnergy) { bestEnergy = e; best = st; }
+    if (type !== SHAPE_TRIANGLE && type !== SHAPE_ROTATED_RECT && type !== SHAPE_ROTATED_ELLIPSE) {
+      // combo mode (unused by the app): original allocation path, since each
+      // state draws a fresh random shape TYPE from the RNG.
+      let bestEnergy = 0, best = null;
+      for (let i = 0; i < n; i++) {
+        const st = this.randomState(type, alpha);
+        const e = this.stateEnergy(st);
+        if (i === 0 || e < bestEnergy) { bestEnergy = e; best = st; }
+      }
+      return best;
     }
-    return best;
+    // Fixed shape type: two reusable instances (candidate/best) instead of a
+    // fresh shape+state object per random draw. initRandom() consumes the
+    // RNG exactly like the constructor; energies and comparisons unchanged.
+    let alphaEff = alpha, mutateAlpha = false;
+    if (alphaEff === 0) { alphaEff = 128; mutateAlpha = true; }
+    let cand = this.makeShapeUninit(type);
+    let best = this.makeShapeUninit(type);
+    let bestEnergy = 0;
+    for (let i = 0; i < n; i++) {
+      cand.initRandom();
+      const e = this.energy(cand, alphaEff); // fresh state → score always computed
+      if (i === 0 || e < bestEnergy) {
+        bestEnergy = e;
+        const t = best; best = cand; cand = t; // keep best by reference swap
+      }
+    }
+    return { shape: best, alpha: alphaEff, mutateAlpha, score: bestEnergy };
+  }
+
+  makeShapeUninit(type) {
+    switch (type) {
+      case SHAPE_TRIANGLE: return TriangleShape.uninit(this.rnd, this.w, this.h);
+      case SHAPE_ROTATED_RECT: return RotatedRectShape.uninit(this.rnd, this.w, this.h);
+      default: {
+        const e = RotatedEllipseShape.uninit(this.rnd, this.w, this.h);
+        e.rasterizer = this.rasterizer;
+        return e;
+      }
+    }
   }
 
   bestHillClimbState(type, alpha, n, age, m) {

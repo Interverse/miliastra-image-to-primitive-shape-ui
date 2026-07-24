@@ -19,6 +19,10 @@
 function idiv(a, b) { return Math.trunc(a / b); }
 function imod(a, b) { return a - Math.trunc(a / b) * b; }
 
+// Perf: trunc-toward-zero division by 64 for int32-range fixed-point values
+// (identical to idiv(a, 64); shifts floor, so negate around the shift).
+function idiv64(a) { return a >= 0 ? a >> 6 : -((-a) >> 6); }
+
 // fix: fixed.Int26_6(x * 64) — float64 → int32, truncation toward zero.
 function gfix(x) { return Math.trunc(x * 64); }
 
@@ -41,6 +45,12 @@ class Rasterizer {
     this.cellNext = new Int32Array(cap);
     this.cellLen = 0;
     this.cellIndex = null;
+    // Add2 scratch (perf): the Bezier subdivision stacks are fixed-size and
+    // value-overwritten on every call — allocate once per rasterizer instead
+    // of per call (identical contents/behavior, no GC churn).
+    this.a2pxs = new Float64Array(2 * 16 + 3);
+    this.a2pys = new Float64Array(2 * 16 + 3);
+    this.a2s = new Int32Array(16 + 1);
     this.setBounds(width, height);
   }
 
@@ -116,9 +126,9 @@ class Rasterizer {
   }
 
   scan(yi, x0, y0f, x1, y1f) {
-    const x0i = idiv(x0, 64);
+    const x0i = idiv64(x0);
     const x0f = x0 - 64 * x0i;
-    const x1i = idiv(x1, 64);
+    const x1i = idiv64(x1);
     const x1f = x1 - 64 * x1i;
 
     if (y0f === y1f) { this.setCell(x1i, yi); return; }
@@ -164,7 +174,7 @@ class Rasterizer {
   }
 
   start(ax, ay) {
-    this.setCell(idiv(ax, 64), idiv(ay, 64));
+    this.setCell(idiv64(ax), idiv64(ay));
     this.aX = ax; this.aY = ay;
   }
 
@@ -172,9 +182,9 @@ class Rasterizer {
     const x0 = this.aX, y0 = this.aY;
     const x1 = bx, y1 = by;
     const dx = x1 - x0, dy = y1 - y0;
-    const y0i = idiv(y0, 64);
+    const y0i = idiv64(y0);
     const y0f = y0 - 64 * y0i;
-    const y1i = idiv(y1, 64);
+    const y1i = idiv64(y1);
     const y1f = y1 - 64 * y1i;
 
     if (y0i === y1i) {
@@ -183,7 +193,7 @@ class Rasterizer {
       let edge0, edge1, yiDelta;
       if (dy > 0) { edge0 = 0; edge1 = 64; yiDelta = 1; }
       else { edge0 = 64; edge1 = 0; yiDelta = -1; }
-      const x0i = idiv(x0, 64);
+      const x0i = idiv64(x0);
       let yi = y0i;
       const x0fTimes2 = (x0 - 64 * x0i) * 2;
       let dcover = edge1 - y0f;
@@ -213,7 +223,7 @@ class Rasterizer {
       let x = x0, yi = y0i;
       this.scan(yi, x, y0f, x + xDelta, edge1);
       x = x + xDelta; yi = yi + yiDelta;
-      this.setCell(idiv(x, 64), yi);
+      this.setCell(idiv64(x), yi);
       if (yi !== y1i) {
         p = 64 * dx;
         let fullDelta = idiv(p, q), fullRem = imod(p, q);
@@ -225,7 +235,7 @@ class Rasterizer {
           if (xRem >= 0) { xDelta += 1; xRem -= q; }
           this.scan(yi, x, edge0, x + xDelta, edge1);
           x = x + xDelta; yi = yi + yiDelta;
-          this.setCell(idiv(x, 64), yi);
+          this.setCell(idiv64(x), yi);
         }
       }
       this.scan(yi, x, edge0, x1, y1f);
@@ -240,9 +250,10 @@ class Rasterizer {
     const maxNsplit = 16;
     if (nsplit > maxNsplit) throw new Error("freetype/raster: Add2 nsplit too large: " + nsplit);
     // pStack holds (2*maxNsplit+3) points; sStack holds (maxNsplit+1) ints.
-    const pxs = new Float64Array(2 * maxNsplit + 3);
-    const pys = new Float64Array(2 * maxNsplit + 3);
-    const sStack = new Int32Array(maxNsplit + 1);
+    // Reused per-instance scratch; every slot consumed is written first.
+    const pxs = this.a2pxs;
+    const pys = this.a2pys;
+    const sStack = this.a2s;
     let i = 0;
     sStack[0] = nsplit;
     pxs[0] = cx; pys[0] = cy;

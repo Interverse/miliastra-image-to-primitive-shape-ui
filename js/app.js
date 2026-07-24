@@ -559,7 +559,9 @@
 
   /* ════════════════════ job queue ════════════════════ */
 
-  const MAX_CONCURRENT = Math.max(1, Math.min((navigator.hardwareConcurrency || 4) - 1, 4));
+  // One worker per job; leave a core for the UI. Higher cap benefits
+  // many-core machines on batch imports (per-job output is unaffected).
+  const MAX_CONCURRENT = Math.max(1, Math.min((navigator.hardwareConcurrency || 4) - 1, 8));
   const jobs = [];
   let jobCounter = 0;
   let shownJob = null;
