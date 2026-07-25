@@ -664,6 +664,9 @@ input[type="range"]::-webkit-slider-thumb {
   gap: 12px;
   align-items: flex-start;
   box-shadow: var(--md-elevation-1);
+  /* large batches: skip layout/paint for off-screen cards */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 92px;
 }
 
 .job-thumb {

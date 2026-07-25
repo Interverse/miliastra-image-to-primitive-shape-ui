@@ -158,7 +158,7 @@ class Rasterizer {
       p = x0f * dy; q = -dx;
       edge0 = 64; edge1 = 0; xiDelta = -1;
     }
-    let yDelta = idiv(p, q), yRem = imod(p, q);
+    let yDelta = Math.trunc(p / q), yRem = p - yDelta * q;
     if (yRem < 0) { yDelta -= 1; yRem += q; }
     let xi = x0i, y = y0f;
     this.area += (x0f + edge1) * yDelta;
@@ -167,7 +167,7 @@ class Rasterizer {
     this.setCell(xi, yi);
     if (xi !== x1i) {
       p = 64 * (y1f - y + yDelta);
-      let fullDelta = idiv(p, q), fullRem = imod(p, q);
+      let fullDelta = Math.trunc(p / q), fullRem = p - fullDelta * q;
       if (fullRem < 0) { fullDelta -= 1; fullRem += q; }
       yRem -= q;
       while (xi !== x1i) {
@@ -230,7 +230,7 @@ class Rasterizer {
       let p, q, edge0, edge1, yiDelta;
       if (dy > 0) { p = (64 - y0f) * dx; q = dy; edge0 = 0; edge1 = 64; yiDelta = 1; }
       else { p = y0f * dx; q = -dy; edge0 = 64; edge1 = 0; yiDelta = -1; }
-      let xDelta = idiv(p, q), xRem = imod(p, q);
+      let xDelta = Math.trunc(p / q), xRem = p - xDelta * q;
       if (xRem < 0) { xDelta -= 1; xRem += q; }
       let x = x0, yi = y0i;
       this.scan(yi, x, y0f, x + xDelta, edge1);
@@ -238,7 +238,7 @@ class Rasterizer {
       this.setCell(idiv64(x), yi);
       if (yi !== y1i) {
         p = 64 * dx;
-        let fullDelta = idiv(p, q), fullRem = imod(p, q);
+        let fullDelta = Math.trunc(p / q), fullRem = p - fullDelta * q;
         if (fullRem < 0) { fullDelta -= 1; fullRem += q; }
         xRem -= q;
         while (yi !== y1i) {
@@ -302,7 +302,11 @@ class Rasterizer {
     // Go: a := (area + 1) >> 1 — arithmetic shift (floor), NOT trunc division.
     // `area` may be negative (winding), and floor vs trunc differ for negatives,
     // which changes the 12-bit alpha by 1 (a ×16 error in the 16-bit result).
-    let a = Math.floor((area + 1) / 2);
+    // The JS >> matches exactly while the value fits int32 (cell areas/covers
+    // are Int32Array-backed and row sums stay far below 2^31); the guarded
+    // fallback keeps the general floor for anything larger.
+    const t = area + 1;
+    let a = (t | 0) === t ? t >> 1 : Math.floor(t / 2);
     if (a < 0) a = -a;
     let alpha = a >>> 0;
     if (this.UseNonZeroWinding) {

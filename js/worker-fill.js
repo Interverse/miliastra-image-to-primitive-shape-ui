@@ -547,10 +547,55 @@ class PrimitiveModel {
     this._lutG = new Int32Array(256);
     this._lutB = new Int32Array(256);
     this._lutA = new Int32Array(256);
+    /* Run-length + target-prefix acceleration (perf): energy() sums are
+     * reassociated into per-RUN closed forms. `current` is piecewise-
+     * constant along rows (it is built by drawing constant-color shapes),
+     * so index it as per-row runs of identical 32-bit pixels; `target`
+     * never changes, so its per-channel row prefix sums are built once.
+     * For a run of length L with constant before-pixel (cr,cg,cb,ca) and
+     * after-pixel (ar,ag,ab,aa):
+     *   Σ c        = L·c                        (pass 1 current sum)
+     *   Σ(t−a)²−Σ(t−c)² = 2(c−a)·Σt + L·(a²−c²) (pass 2 error delta)
+     * Every quantity is an exact integer (channel row sums ≤ w·255 < 2^31,
+     * every product < 2^53) and integer float64 addition is exact, so the
+     * reassociated totals are bit-identical to the per-pixel loops.
+     * Gated by image size to bound memory (20 bytes/px). */
+    this._usePrefix = n <= 2 * 1024 * 1024;
+    if (this._usePrefix) {
+      const stride = w + 1;
+      this._ptR = new Int32Array(stride * h);
+      this._ptG = new Int32Array(stride * h);
+      this._ptB = new Int32Array(stride * h);
+      this._ptA = new Int32Array(stride * h);
+      this._runEnd = new Int32Array(n); // absolute index of run's last pixel
+      const t = this.target;
+      const ptR = this._ptR, ptG = this._ptG, ptB = this._ptB, ptA = this._ptA;
+      for (let y = 0; y < h; y++) {
+        let i = y * w * 4, o = y * stride;
+        let sr = 0, sg = 0, sb = 0, sa = 0;
+        ptR[o] = 0; ptG[o] = 0; ptB[o] = 0; ptA[o] = 0;
+        for (let x = 0; x < w; x++, i += 4, o++) {
+          sr += t[i]; sg += t[i + 1]; sb += t[i + 2]; sa += t[i + 3];
+          ptR[o + 1] = sr; ptG[o + 1] = sg; ptB[o + 1] = sb; ptA[o + 1] = sa;
+        }
+      }
+      for (let y = 0; y < h; y++) this._rebuildRunsRow(y);
+    }
     this.score = this.differenceFull();
     this.shapes = [];
     this.colors = [];
     this.scores = [];
+  }
+
+  /* Recompute the run index for row y of `current` (one backward pass).
+   * Called after add() commits a shape, only for the rows it touched. */
+  _rebuildRunsRow(y) {
+    const w = this.w, c32 = this.current32, runEnd = this._runEnd;
+    const rowStart = y * w, rowLast = rowStart + w - 1;
+    runEnd[rowLast] = rowLast;
+    for (let p = rowLast - 1; p >= rowStart; p--) {
+      runEnd[p] = c32[p] === c32[p + 1] ? runEnd[p + 1] : p;
+    }
   }
 
   differenceFull() {
@@ -591,7 +636,7 @@ class PrimitiveModel {
     for (let li = 0; li < lines.n; li++) {
       const a = (lines.y[li] * w + lines.x1[li]) * 4;
       const b = a + (lines.x2[li] - lines.x1[li] + 1) * 4;
-      for (let i = a; i < b; i++) dst[i] = src[i];
+      dst.set(src.subarray(a, b), a);
     }
   }
 
@@ -674,6 +719,7 @@ class PrimitiveModel {
   energy(shape, alpha) {
     const lines = this.lines;
     shape.rasterize(lines);
+    if (this._usePrefix) return this._energyPrefix(lines, alpha);
 
     const t = this.target, c = this.current, w = this.w;
     const t32 = this.target32, c32 = this.current32;
@@ -742,15 +788,7 @@ class PrimitiveModel {
       if (ma === m) {
         if (!lutBuilt) {
           lutBuilt = true;
-          const aF = (m - Math.floor((sa * m) / m)) * 0x101;
-          const srm = sr * m, sgm = sg * m, sbm = sb * m, sam = sa * m;
-          for (let v = 0; v < 256; v++) {
-            const va = v * aF;
-            lutR[v] = Math.floor(((va + srm) >>> 0) / m) >> 8;
-            lutG[v] = Math.floor(((va + sgm) >>> 0) / m) >> 8;
-            lutB[v] = Math.floor(((va + sbm) >>> 0) / m) >> 8;
-            lutA[v] = Math.floor(((va + sam) >>> 0) / m) >> 8;
-          }
+          this._buildLuts(sr, sg, sb, sa);
         }
         if (IS_LE) {
           let p = lines.y[li] * w + x1;
@@ -792,6 +830,138 @@ class PrimitiveModel {
           total -= dr1 * dr1 + dg1 * dg1 + db1 * db1 + da1 * da1;
           total += dr2 * dr2 + dg2 * dg2 + db2 * db2 + da2 * da2;
         }
+      }
+    }
+    if (total < 0) total += 18446744073709551616; // Go uint64 wrap (see README)
+    return Math.sqrt(total / (this.w * this.h * 4)) / 255;
+  }
+
+  /* Build the ma=0xffff after-value LUTs for source color (sr,sg,sb,sa)
+   * (16-bit premultiplied). Entry: uint8(uint32(v·aF + s·m) / m >> 8) with
+   * aF = (m − sa)·0x101 (goIntDiv(sa·m, m) = sa exactly). Since s·m is an
+   * exact multiple of m, floor((v·aF + s·m)/m) = s + floor(v·aF/m) whenever
+   * v·aF + s·m < 2^32 (v·aF alone always is: aF ≤ (m−0x101)·0x101 gives
+   * 255·aF < 2^32) — so one shared quotient per v covers all four channels.
+   * When the uint32 sum wraps, Go divides the wrapped value: computed
+   * directly in the (rare) branch. Identical results, ~256 divisions
+   * instead of 1024. */
+  _buildLuts(sr, sg, sb, sa) {
+    const m = 0xffff;
+    const lutR = this._lutR, lutG = this._lutG, lutB = this._lutB, lutA = this._lutA;
+    const aF = (m - sa) * 0x101;
+    const srm = sr * m, sgm = sg * m, sbm = sb * m, sam = sa * m;
+    const W = 4294967296; // 2^32
+    for (let v = 0; v < 256; v++) {
+      const va = v * aF;
+      const q = Math.floor(va / m);
+      let x = va + srm;
+      lutR[v] = (x < W ? sr + q : Math.floor((x - W) / m)) >> 8;
+      x = va + sgm;
+      lutG[v] = (x < W ? sg + q : Math.floor((x - W) / m)) >> 8;
+      x = va + sbm;
+      lutB[v] = (x < W ? sb + q : Math.floor((x - W) / m)) >> 8;
+      x = va + sam;
+      lutA[v] = (x < W ? sa + q : Math.floor((x - W) / m)) >> 8;
+    }
+  }
+
+  /* energy() over the run index + target prefix sums (see constructor).
+   * Both passes walk RUNS of constant current pixels instead of pixels;
+   * per run everything is a closed form over exact integers, so the
+   * reassociated totals are bit-identical to the per-pixel loops. Note
+   * the prefix arrays have row stride w+1, so the prefix index for
+   * absolute pixel index p in row y is simply p + y. */
+  _energyPrefix(lines, alpha) {
+    const w = this.w;
+    const c32 = this.current32;
+    const ptR = this._ptR, ptG = this._ptG, ptB = this._ptB, ptA = this._ptA;
+    const runEnd = this._runEnd;
+
+    /* pass 1: computeColor — rsum = ac·ΣT (prefix per span) + acC·Σc (L·c
+     * per run), the exact regrouping of Σ(t·ac + c·(0x101−ac)) */
+    let rsum = 0, gsum = 0, bsum = 0, count = 0;
+    const ac = goIntDiv(0x101 * 255, alpha);
+    const acC = 0x101 - ac;
+    for (let li = 0; li < lines.n; li++) {
+      const y = lines.y[li];
+      const x1 = lines.x1[li], x2 = lines.x2[li];
+      const rowStart = y * w;
+      const b = y + rowStart; // prefix base: index for pixel p is b + (p−rowStart)... = y + p
+      rsum += ac * (ptR[b + x2 + 1] - ptR[b + x1]);
+      gsum += ac * (ptG[b + x2 + 1] - ptG[b + x1]);
+      bsum += ac * (ptB[b + x2 + 1] - ptB[b + x1]);
+      count += x2 - x1 + 1;
+      let p = rowStart + x1;
+      const pEnd = rowStart + x2;
+      let csR = 0, csG = 0, csB = 0;
+      while (p <= pEnd) {
+        let e = runEnd[p]; if (e > pEnd) e = pEnd;
+        const L = e - p + 1;
+        const cv = c32[p];
+        if (IS_LE) {
+          csR += L * (cv & 255);
+          csG += L * ((cv >>> 8) & 255);
+          csB += L * ((cv >>> 16) & 255);
+        } else {
+          csR += L * (cv >>> 24);
+          csG += L * ((cv >>> 16) & 255);
+          csB += L * ((cv >>> 8) & 255);
+        }
+        p = e + 1;
+      }
+      rsum += acC * csR; gsum += acC * csG; bsum += acC * csB;
+    }
+    let cr8 = 0, cg8 = 0, cb8 = 0, ca8 = 0;
+    if (count !== 0) {
+      cr8 = clampInt(Math.floor(goIntDiv(rsum, count) / 256), 0, 255);
+      cg8 = clampInt(Math.floor(goIntDiv(gsum, count) / 256), 0, 255);
+      cb8 = clampInt(Math.floor(goIntDiv(bsum, count) / 256), 0, 255);
+      ca8 = alpha;
+    } // else Go returns Color{} → (0,0,0,0)
+
+    /* pass 2: per run of constant before-pixel c and after-pixel a
+     * (a = the exact Go blend of c with the shape color at span alpha ma),
+     *   Σ(t−a)² − Σ(t−c)² = 2(c−a)·Σt + L·(a²−c²)   per channel,
+     * with Σt from the target prefixes. After-bytes are memoized on
+     * (cv, ma) — consecutive runs frequently alternate few colors. */
+    const m = 0xffff;
+    const sr = goIntDiv(cr8 * 0x101 * ca8, 0xff);
+    const sg = goIntDiv(cg8 * 0x101 * ca8, 0xff);
+    const sb = goIntDiv(cb8 * 0x101 * ca8, 0xff);
+    const sa = ca8 * 0x101;
+
+    let memoCv = -1, memoMa = -1;
+    let dR = 0, dG = 0, dB = 0, dA = 0, sqd = 0;
+
+    let total = this._scoreBase();
+    for (let li = 0; li < lines.n; li++) {
+      const ma = lines.a[li];
+      const y = lines.y[li];
+      const x1 = lines.x1[li], x2 = lines.x2[li];
+      const a = (m - Math.floor((sa * ma) / m)) * 0x101;
+      const srm = sr * ma, sgm = sg * ma, sbm = sb * ma, sam = sa * ma;
+      const rowStart = y * w;
+      let p = rowStart + x1;
+      const pEnd = rowStart + x2;
+      while (p <= pEnd) {
+        let e = runEnd[p]; if (e > pEnd) e = pEnd;
+        const cv = c32[p];
+        if (cv !== memoCv || ma !== memoMa) {
+          memoCv = cv; memoMa = ma;
+          let cr, cg, cb, ca;
+          if (IS_LE) { cr = cv & 255; cg = (cv >>> 8) & 255; cb = (cv >>> 16) & 255; ca = cv >>> 24; }
+          else { cr = cv >>> 24; cg = (cv >>> 16) & 255; cb = (cv >>> 8) & 255; ca = cv & 255; }
+          const aR = Math.floor(((cr * a + srm) >>> 0) / m) >> 8;
+          const aG = Math.floor(((cg * a + sgm) >>> 0) / m) >> 8;
+          const aB = Math.floor(((cb * a + sbm) >>> 0) / m) >> 8;
+          const aA = Math.floor(((ca * a + sam) >>> 0) / m) >> 8;
+          dR = cr - aR; dG = cg - aG; dB = cb - aB; dA = ca - aA;
+          sqd = (aR * aR - cr * cr) + (aG * aG - cg * cg) + (aB * aB - cb * cb) + (aA * aA - ca * ca);
+        }
+        const i0 = y + p, i1 = y + e + 1;
+        total += 2 * (dR * (ptR[i1] - ptR[i0]) + dG * (ptG[i1] - ptG[i0]) + dB * (ptB[i1] - ptB[i0]) + dA * (ptA[i1] - ptA[i0]))
+               + (e - p + 1) * sqd;
+        p = e + 1;
       }
     }
     if (total < 0) total += 18446744073709551616; // Go uint64 wrap (see README)
@@ -926,6 +1096,15 @@ class PrimitiveModel {
     this.copyLines(this.buffer, this.current, lines); // before := current (scanline pixels)
     this.drawLines(this.current, color, lines);        // draw onto current
     this.score = this.differencePartial(this.buffer, this.current, this.score, lines);
+    if (this._usePrefix) {
+      // `current` changed on the shape's rows — refresh their run index
+      // (idempotent; scanlines arrive in ascending y, dedup adjacent).
+      let prevY = -1;
+      for (let li = 0; li < lines.n; li++) {
+        const y = lines.y[li];
+        if (y !== prevY) { this._rebuildRunsRow(y); prevY = y; }
+      }
+    }
     this.shapes.push(shape);
     this.colors.push(color);
     this.scores.push(this.score);

@@ -157,55 +157,93 @@ const Geometry = (() => {
    * Returns area of (subject ∩ clip). Clipping the raw self-touching ring and
    * taking |signed shoelace| reproduces buffer(0).intersection(convex).area
    * (validated to <3e-10 on the corpus). */
+  /* Persistent flat scratch buffers for intersectionArea (each worker runs
+   * single-threaded and the function does not recurse). Storage-only
+   * optimization: every float operation happens in the same order as the
+   * original array-of-arrays version, so results are bit-identical while
+   * the per-pass array allocations (and their GC pressure) disappear. */
+  let _iaX0 = new Float64Array(0), _iaY0 = new Float64Array(0);
+  let _iaX1 = new Float64Array(0), _iaY1 = new Float64Array(0);
+  function _iaPow2(n) { let c = 256; while (c < n) c *= 2; return c; }
+
   function intersectionArea(subjectRing, clipConvex) {
-    // strip closing duplicate -> open lists
-    let subj = subjectRing;
-    if (subj.length > 1 && subj[0][0] === subj[subj.length - 1][0] &&
-        subj[0][1] === subj[subj.length - 1][1]) {
-      subj = subj.slice(0, -1);
-    }
-    let clip = clipConvex;
-    if (clip.length > 1 && clip[0][0] === clip[clip.length - 1][0] &&
-        clip[0][1] === clip[clip.length - 1][1]) {
-      clip = clip.slice(0, -1);
-    }
-    if (subj.length < 3 || clip.length < 3) return 0.0;
-    // force clip CCW (buffer rings are CW) so interior is to the left of edges
-    if (signedAreaOpen(clip) < 0) clip = clip.slice().reverse();
+    // strip closing duplicates (index-based; same open lists as before)
+    let sN = subjectRing.length;
+    if (sN > 1 && subjectRing[0][0] === subjectRing[sN - 1][0] &&
+        subjectRing[0][1] === subjectRing[sN - 1][1]) sN--;
+    let cN = clipConvex.length;
+    if (cN > 1 && clipConvex[0][0] === clipConvex[cN - 1][0] &&
+        clipConvex[0][1] === clipConvex[cN - 1][1]) cN--;
+    if (sN < 3 || cN < 3) return 0.0;
 
-    let out = subj;
-    const m = clip.length;
-    for (let e = 0; e < m; e++) {
-      const a = clip[e], b = clip[(e + 1) % m];
-      const inp = out;
-      out = [];
-      if (inp.length === 0) break;
-      const ax = a[0], ay = a[1], bx = b[0], by = b[1];
+    // orientation: signedAreaOpen over the open clip list. Buffer rings are
+    // CW; instead of materializing clip.slice().reverse(), the edge loop
+    // below walks the same reversed (a, b) sequence by index.
+    let cs = 0.0;
+    for (let i = 0; i < cN; i++) {
+      const p = clipConvex[i], q = clipConvex[i + 1 === cN ? 0 : i + 1];
+      cs += p[0] * q[1] - q[0] * p[1];
+    }
+    const rev = cs / 2.0 < 0;
+
+    if (_iaX0.length < sN) {
+      const c = _iaPow2(sN);
+      _iaX0 = new Float64Array(c); _iaY0 = new Float64Array(c);
+    }
+    let inpX = _iaX0, inpY = _iaY0, outX = _iaX1, outY = _iaY1;
+    let outIsSlot1 = true;
+    for (let i = 0; i < sN; i++) { inpX[i] = subjectRing[i][0]; inpY[i] = subjectRing[i][1]; }
+    let n = sN;
+
+    for (let e = 0; e < cN; e++) {
+      if (n === 0) break;
+      let aI, bI;
+      if (rev) { aI = cN - 1 - e; bI = e + 1 === cN ? cN - 1 : cN - 2 - e; }
+      else { aI = e; bI = e + 1 === cN ? 0 : e + 1; }
+      const A = clipConvex[aI], B = clipConvex[bI];
+      const ax = A[0], ay = A[1], bx = B[0], by = B[1];
       const edx = bx - ax, edy = by - ay;
-      let S = inp[inp.length - 1];
-      let Sin = edx * (S[1] - ay) - edy * (S[0] - ax) >= 0;
-      for (let k = 0; k < inp.length; k++) {
-        const E = inp[k];
-        const Ein = edx * (E[1] - ay) - edy * (E[0] - ax) >= 0;
-        if (Ein) {
-          if (!Sin) out.push(segInter(S, E, a, b));
-          out.push(E);
-        } else if (Sin) {
-          out.push(segInter(S, E, a, b));
-        }
-        S = E; Sin = Ein;
+      const need = 2 * n + 2; // ≤2 pushes per input vertex
+      if (outX.length < need) {
+        const c = _iaPow2(need);
+        outX = new Float64Array(c); outY = new Float64Array(c);
+        if (outIsSlot1) { _iaX1 = outX; _iaY1 = outY; }
+        else { _iaX0 = outX; _iaY0 = outY; }
       }
+      let Sx = inpX[n - 1], Sy = inpY[n - 1];
+      let Sin = edx * (Sy - ay) - edy * (Sx - ax) >= 0;
+      let outN = 0;
+      for (let k = 0; k < n; k++) {
+        const Ex = inpX[k], Ey = inpY[k];
+        const Ein = edx * (Ey - ay) - edy * (Ex - ax) >= 0;
+        if (Ein) {
+          if (!Sin) { // segInter(S, E, A, B), inlined verbatim
+            const den = (Sx - Ex) * (ay - by) - (Sy - Ey) * (ax - bx);
+            const t = ((Sx - ax) * (ay - by) - (Sy - ay) * (ax - bx)) / den;
+            outX[outN] = Sx + t * (Ex - Sx); outY[outN] = Sy + t * (Ey - Sy); outN++;
+          }
+          outX[outN] = Ex; outY[outN] = Ey; outN++;
+        } else if (Sin) {
+          const den = (Sx - Ex) * (ay - by) - (Sy - Ey) * (ax - bx);
+          const t = ((Sx - ax) * (ay - by) - (Sy - ay) * (ax - bx)) / den;
+          outX[outN] = Sx + t * (Ex - Sx); outY[outN] = Sy + t * (Ey - Sy); outN++;
+        }
+        Sx = Ex; Sy = Ey; Sin = Ein;
+      }
+      const tX = inpX, tY = inpY;
+      inpX = outX; inpY = outY;
+      outX = tX; outY = tY;
+      outIsSlot1 = !outIsSlot1;
+      n = outN;
     }
-    if (out.length < 3) return 0.0;
-    return Math.abs(signedAreaOpen(out));
-  }
-
-  function segInter(p1, p2, a, b) {
-    const x1 = p1[0], y1 = p1[1], x2 = p2[0], y2 = p2[1];
-    const x3 = a[0], y3 = a[1], x4 = b[0], y4 = b[1];
-    const den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
-    const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / den;
-    return [x1 + t * (x2 - x1), y1 + t * (y2 - y1)];
+    if (n < 3) return 0.0;
+    // signedAreaOpen over the surviving ring (same accumulation order)
+    let s = 0.0;
+    for (let i = 0; i < n; i++) {
+      const j = i + 1 === n ? 0 : i + 1;
+      s += inpX[i] * inpY[j] - inpX[j] * inpY[i];
+    }
+    return Math.abs(s / 2.0);
   }
 
   /* ── GEOS TopologyPreservingSimplifier (JTS TaggedLineStringSimplifier) ──
