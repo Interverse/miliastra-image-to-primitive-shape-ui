@@ -3,8 +3,6 @@
 A fully static, browser-only web app that approximates images with primitive shapes (circles, rectangles, triangles) for Genshin Impact's "Miliastra Wonderland" (千星奇域) UGC mode. The repository root is the deployable site ([index.html](index.html)): all fitting, GIA export, and GIA mode conversion run client-side with no backend, producing output that is bit-identical to the original Python/Go implementation. See [SITE.md](SITE.md) for deployment notes and [tests/parity](tests/parity/README.md) for the parity regression suites.
 
 > This project's code is entirely AI-generated.
->
-> Some parts of the code are not convenient to open-source; contact the author if you need them.
 
 For the final technical design, see [tech.md](tech.md). For usage instructions, see [user_guide.md](user_guide.md).
 
