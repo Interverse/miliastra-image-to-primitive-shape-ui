@@ -235,7 +235,6 @@ window.LOCALES["de"] = {
   "tips.rule1": "Fitten Sie keine politischen Inhalte, realen Personen, aktuellen Ereignisse, OOC-Inhalte oder sonst Unangemessenes.",
   "tips.rule2": "Verwenden Sie die erzeugten GIA-Assets verantwortungsvoll und laden Sie sie nicht in den Asset-Hub hoch; der Autor des Tools übernimmt keine Verantwortung für Folgen.",
   "tips.multiShape": "Die Unterstützung für Rechtecke und Dreiecke ist derzeit begrenzt; Ergebnisse mit mehreren Formen können schlecht ausfallen.",
-  "tips.pngMode": "PNG-Transparenz wird standardmäßig auf Weiß reduziert. Aktivieren Sie den „PNG-Modus“ in den Parametern, um einen transparenten Hintergrund zu behalten.",
   "tips.tutorial": "Anleitung:",
   "tips.batch": "Tipp: Fügen Sie mehrere Bilder hinzu, um sie parallel zu verarbeiten — jeder Auftrag läuft auf einem eigenen CPU-Kern.",
 

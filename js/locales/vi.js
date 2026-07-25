@@ -235,7 +235,6 @@ window.LOCALES["vi"] = {
   "tips.rule1": "Không ghép nội dung chính trị, người thật, sự kiện thời sự, nội dung OOC hoặc bất kỳ nội dung không phù hợp nào khác.",
   "tips.rule2": "Hãy sử dụng tài nguyên GIA được tạo ra một cách có trách nhiệm và không tải chúng lên trung tâm tài nguyên; tác giả công cụ không chịu trách nhiệm về mọi hậu quả.",
   "tips.multiShape": "Hỗ trợ hình chữ nhật và tam giác hiện còn hạn chế; kết quả nhiều loại hình có thể kém.",
-  "tips.pngMode": "Vùng trong suốt của PNG mặc định được trộn với nền trắng. Bật “Chế độ PNG” trong tham số để giữ nền trong suốt.",
   "tips.tutorial": "Hướng dẫn:",
   "tips.batch": "Mẹo: thêm nhiều ảnh để xử lý song song — mỗi tác vụ chạy trên một nhân CPU riêng.",
 

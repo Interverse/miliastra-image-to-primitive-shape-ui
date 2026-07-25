@@ -235,7 +235,6 @@ window.LOCALES["id"] = {
   "tips.rule1": "Jangan menyusun konten politik, orang sungguhan, peristiwa terkini, konten OOC, atau hal lain yang tidak pantas.",
   "tips.rule2": "Gunakan aset GIA yang dihasilkan secara bertanggung jawab dan jangan mengunggahnya ke pusat aset; pembuat alat tidak bertanggung jawab atas konsekuensi apa pun.",
   "tips.multiShape": "Dukungan persegi panjang dan segitiga saat ini terbatas; hasil dengan banyak jenis bentuk bisa buruk.",
-  "tips.pngMode": "Transparansi PNG secara bawaan diratakan ke latar putih. Aktifkan “Mode PNG” pada parameter untuk mempertahankan latar transparan.",
   "tips.tutorial": "Tutorial:",
   "tips.batch": "Kiat: tambahkan beberapa gambar untuk diproses paralel — setiap tugas berjalan di inti CPU-nya sendiri.",
 

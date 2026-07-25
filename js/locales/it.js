@@ -235,7 +235,6 @@ window.LOCALES["it"] = {
   "tips.rule1": "Non ricostruire contenuti politici, persone reali, eventi di attualità, contenuti OOC o qualsiasi altro contenuto inappropriato.",
   "tips.rule2": "Usa le risorse GIA generate in modo responsabile e non caricarle nel centro risorse; l'autore dello strumento non è responsabile di alcuna conseguenza.",
   "tips.multiShape": "Il supporto per rettangoli e triangoli è attualmente limitato; i risultati con più tipi di forme possono essere scadenti.",
-  "tips.pngMode": "La trasparenza dei PNG viene appiattita su bianco per impostazione predefinita. Attiva la “Modalità PNG” nei parametri per mantenere lo sfondo trasparente.",
   "tips.tutorial": "Tutorial:",
   "tips.batch": "Suggerimento: aggiungi più immagini per elaborarle in parallelo — ogni attività usa un core CPU dedicato.",
 

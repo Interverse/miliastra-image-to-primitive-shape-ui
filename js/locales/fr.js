@@ -235,7 +235,6 @@ window.LOCALES["fr"] = {
   "tips.rule1": "N'ajustez pas de contenus politiques, de personnes réelles, d'actualités, de contenus OOC ni rien d'inapproprié.",
   "tips.rule2": "Utilisez les assets GIA générés de manière responsable et ne les téléversez pas sur le hub d'assets ; l'auteur de l'outil décline toute responsabilité en cas de conséquences.",
   "tips.multiShape": "La prise en charge des rectangles et des triangles est encore limitée ; les résultats multi-formes peuvent être médiocres.",
-  "tips.pngMode": "La transparence des PNG est aplatie sur fond blanc par défaut. Activez le « mode PNG » dans les paramètres pour conserver un fond transparent.",
   "tips.tutorial": "Tutoriel :",
   "tips.batch": "Astuce : ajoutez plusieurs images pour les traiter en parallèle — chaque tâche utilise son propre cœur CPU.",
 

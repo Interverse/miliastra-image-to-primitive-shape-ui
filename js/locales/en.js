@@ -235,7 +235,6 @@ window.LOCALES["en"] = {
   "tips.rule1": "Do not fit political content, real people, current events, out-of-character content, or anything else inappropriate.",
   "tips.rule2": "Use the generated GIA assets responsibly and do not upload them to the asset hub; the tool author is not responsible for any consequences.",
   "tips.multiShape": "Rectangle and triangle support is currently limited; multi-shape results can be poor.",
-  "tips.pngMode": "PNG transparency is flattened onto white by default. Enable “PNG mode” in the parameters to keep a transparent background.",
   "tips.tutorial": "Tutorial:",
   "tips.batch": "Tip: add several images to process them in parallel — each job runs on its own CPU core.",
 

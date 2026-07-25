@@ -235,7 +235,6 @@ window.LOCALES["tr"] = {
   "tips.rule1": "Siyasi içerik, gerçek kişiler, güncel olaylar, OOC içerik veya uygunsuz başka hiçbir şeyi oluşturmayın.",
   "tips.rule2": "Üretilen GIA varlıklarını sorumlu biçimde kullanın ve varlık merkezine yüklemeyin; araç yazarı hiçbir sonuçtan sorumlu değildir.",
   "tips.multiShape": "Dikdörtgen ve üçgen desteği şu anda sınırlıdır; çok şekilli sonuçlar kötü olabilir.",
-  "tips.pngMode": "PNG saydamlığı varsayılan olarak beyaz zemine düzleştirilir. Saydam arka planı korumak için parametrelerde “PNG modu”nu etkinleştirin.",
   "tips.tutorial": "Eğitim:",
   "tips.batch": "İpucu: paralel işlemek için birden fazla görsel ekleyin — her iş kendi CPU çekirdeğinde çalışır.",
 
