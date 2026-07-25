@@ -288,14 +288,29 @@ body {
   margin-bottom: 12px;
 }
 
-/* Start Processing stays pinned to the bottom of the left panel, so it is
-   reachable without scrolling past every parameter. The negative offsets
-   cancel the panel's 16px padding so the bar spans the full panel width. */
-.panel-submit {
-  position: sticky;
-  bottom: -16px;
-  z-index: 5;
-  margin: 12px -16px -16px;
+/* The upload panel is split into a scrolling content region and a fixed
+   footer holding Start Processing. The scrollbar therefore belongs to the
+   content region and physically ends above the footer, instead of running
+   across it as it did when the whole panel was the scroll container. */
+.panel-split {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;   /* the inner region scrolls, not the panel */
+  padding: 0;
+}
+
+.panel-split > .panel-scroll {
+  flex: 1 1 auto;
+  min-height: 0;      /* let it shrink so the footer is never pushed off */
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px;
+  scrollbar-gutter: stable; /* reserve the track so content never shifts */
+}
+
+.panel-split > .panel-submit {
+  flex: 0 0 auto;
+  margin: 0;
   padding: 12px 16px 16px;
   border: none;
   border-top: 1px solid var(--md-outline-variant);
@@ -1102,10 +1117,15 @@ input[type="range"]::-webkit-slider-thumb {
     padding: 10px 16px;
   }
   .topbar-subtitle { display: none; }
-  /* stacked layout scrolls the page, not the panel: a pinned bar would
-     float over the job list, so it goes back to a normal section */
-  .panel-submit {
-    position: static;
+  /* stacked layout scrolls the page, not the panel, so there is no inner
+     scroll container to separate: the footer becomes a normal section */
+  .panel-split { display: block; overflow: visible; padding: 16px; }
+  .panel-split > .panel-scroll {
+    overflow: visible;
+    padding: 0;
+    scrollbar-gutter: auto;
+  }
+  .panel-split > .panel-submit {
     margin: 0;
     padding: 16px;
     border: 1px solid var(--md-outline-variant);
