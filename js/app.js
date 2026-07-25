@@ -1507,6 +1507,9 @@
     setView("result");
     updateStats();
     refreshSelectionUI();
+    // cleanup only applies to transparent outputs (PNG mode)
+    $("btnCleanTransparency").disabled = !R.outputHasTransparency;
+    $("cleanupStatus").textContent = "";
     $("coordsDisplay").textContent = t("result.canvas.coords", { coords: "—" });
     renderCanvas(); // setView already forced layout; render synchronously so
                     // the canvas is correct even in background tabs
@@ -1915,6 +1918,112 @@
   }
   $("editColor").addEventListener("change", applyColorAlpha);
   $("editAlpha").addEventListener("change", applyColorAlpha);
+
+  /* ── transparency cleanup (post-generation, one undo step) ── */
+
+  const CLEANUP_MIN_COVERAGE = 0.15; // mean source alpha under the element
+  const CLEANUP_ZERO_AREA = 0.4;     // fraction of area over fully transparent source
+  const CLEANUP_MIN_ALPHA = 0.01;    // effectively invisible elements
+
+  /* Source alpha per pixel, lazily read once per job from the original
+   * image canvas (only meaningful for transparent outputs). */
+  function ensureJobAlpha(job) {
+    if (job.srcAlpha !== undefined) return job.srcAlpha;
+    const assets = ensureJobAssets(job);
+    if (!assets.base) return (job.srcAlpha = null);
+    const w = assets.base.width, h = assets.base.height;
+    try {
+      const d = assets.base.getContext("2d").getImageData(0, 0, w, h).data;
+      const a = new Uint8Array(w * h);
+      for (let p = 0; p < w * h; p++) a[p] = d[p * 4 + 3];
+      job.srcAlpha = a;
+    } catch (e) {
+      job.srcAlpha = null;
+    }
+    return job.srcAlpha;
+  }
+
+  /* Mean source alpha + fully-transparent fraction under one element
+   * (same inside tests as pointInElement, iterated over the bbox). */
+  function elementAlphaStats(element, srcAlpha) {
+    const w = R.data.image_size.width, h = R.data.image_size.height;
+    const type = normalizeType(element.type);
+    const center = imagePointToElementCenter(element);
+    const rot = -elementRotationRad(element);
+    const cosA = Math.cos(rot), sinA = Math.sin(rot);
+    let rx, ry;
+    if (type === "ellipse") {
+      rx = (element.size.rx || (element.size.width || 0) / 2) * R.ppu;
+      ry = (element.size.ry || (element.size.height || 0) / 2) * R.ppu;
+    } else {
+      rx = ((element.size.width || 0) * R.ppu) / 2;
+      ry = ((element.size.height || 0) * R.ppu) / 2;
+      if (type === "triangle" && !ry) ry = rx * Math.sqrt(3) / 2;
+    }
+    const ext = Math.max(rx, ry, 0.5) + 1;
+    const x0 = Math.max(0, Math.floor(center.x - ext)), x1 = Math.min(w - 1, Math.ceil(center.x + ext));
+    const y0 = Math.max(0, Math.floor(center.y - ext)), y1 = Math.min(h - 1, Math.ceil(center.y + ext));
+    let count = 0, alphaSum = 0, zero = 0;
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const dx0 = x - center.x, dy0 = y - center.y;
+        const dx = dx0 * cosA - dy0 * sinA;
+        const dy = dx0 * sinA + dy0 * cosA;
+        let inside = false;
+        if (type === "ellipse") {
+          inside = rx > 0 && ry > 0 && (dx * dx) / (rx * rx) + (dy * dy) / (ry * ry) <= 1;
+        } else if (type === "triangle") {
+          const th = ry * 2;
+          const vs = [[0, -2 * th / 3], [-rx, th / 3], [rx, th / 3]];
+          const cr = [];
+          for (let i = 0; i < 3; i++) {
+            const a = vs[i], b = vs[(i + 1) % 3];
+            cr.push((dx - a[0]) * (b[1] - a[1]) - (dy - a[1]) * (b[0] - a[0]));
+          }
+          inside = cr.every((v) => v >= 0) || cr.every((v) => v <= 0);
+        } else {
+          inside = Math.abs(dx) <= rx && Math.abs(dy) <= ry;
+        }
+        if (!inside) continue;
+        count++;
+        const a = srcAlpha[y * w + x];
+        alphaSum += a;
+        if (a === 0) zero++;
+      }
+    }
+    return { count, meanAlpha: count ? alphaSum / (count * 255) : 0, zeroFrac: count ? zero / count : 1 };
+  }
+
+  $("btnCleanTransparency").addEventListener("click", () => {
+    if (!R || $("btnCleanTransparency").disabled) return;
+    const srcAlpha = ensureJobAlpha(R.job);
+    if (!srcAlpha) { $("cleanupStatus").textContent = t("result.cleanup.none"); return; }
+    const elements = R.data.elements;
+    const doomed = [];
+    elements.forEach((el, idx) => {
+      if (isBackgroundElement(el)) return;
+      const alpha = Number(el.alpha) || 0;
+      if (alpha <= CLEANUP_MIN_ALPHA) { doomed.push(idx); return; }
+      const stats = elementAlphaStats(el, srcAlpha);
+      if (!stats.count || stats.meanAlpha <= CLEANUP_MIN_COVERAGE || stats.zeroFrac >= CLEANUP_ZERO_AREA) {
+        doomed.push(idx);
+      }
+    });
+    if (!doomed.length) {
+      $("cleanupStatus").textContent = t("result.cleanup.none");
+      return;
+    }
+    pushUndoSnapshot(); // one undoable step (Ctrl+Z restores everything)
+    for (let i = doomed.length - 1; i >= 0; i--) elements.splice(doomed[i], 1);
+    R.data.elements_count = elements.length;
+    R.selectedSet.clear();
+    R.selected = null;
+    R.hovered = null;
+    refreshSelectionUI();
+    updateStats();
+    renderCanvas();
+    $("cleanupStatus").textContent = t("result.cleanup.done", { n: doomed.length });
+  });
 
   /* ── origin pick tool (replaces the old right-click gesture) ── */
 
