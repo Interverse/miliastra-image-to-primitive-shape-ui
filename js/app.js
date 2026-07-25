@@ -1451,6 +1451,12 @@
       $("retryNumPrims").value = cfg.num_primitives != null ? cfg.num_primitives : 400;
       $("retryImageScale").value = cfg.image_scale != null ? cfg.image_scale : 1.0;
       $("retryOutputAlpha").value = Math.round((cfg.output_alpha != null ? cfg.output_alpha : 1.0) * 100);
+      // primitive types prefilled from the job's config
+      const allowed = Array.isArray(cfg.allowed_shapes) && cfg.allowed_shapes.length ? cfg.allowed_shapes : ["circle"];
+      $("retryShapeCircle").checked = allowed.includes("circle");
+      $("retryShapeRect").checked = allowed.includes("rect");
+      $("retryShapeTriangle").checked = allowed.includes("triangle");
+      syncRetryShapeLabels();
     } else {
       $("retryPrimSize").value = cfg.primitive_size != null ? cfg.primitive_size : 30;
       $("retrySpacing").value = cfg.spacing != null ? cfg.spacing : 0.9;
@@ -1467,12 +1473,27 @@
     pumpQueue();
   }
 
+  const retryShapeInputs = Array.from(document.querySelectorAll("#retryShapeChecks .shape-check input"));
+  function syncRetryShapeLabels() {
+    retryShapeInputs.forEach((checkbox) => {
+      checkbox.closest(".shape-check").classList.toggle("active", checkbox.checked);
+    });
+  }
+  retryShapeInputs.forEach((input) => input.addEventListener("change", syncRetryShapeLabels));
+
   $("btnRetryFill").addEventListener("click", () => {
     if (!R) return;
+    const allowed = [];
+    if ($("retryShapeCircle").checked) allowed.push("circle");
+    if ($("retryShapeRect").checked) allowed.push("rect");
+    if ($("retryShapeTriangle").checked) allowed.push("triangle");
+    const shapes = allowed.length ? allowed : ["circle"]; // same fallback as the upload page
     retryJob(R.job, {
       num_primitives: Math.max(40, Math.min(3000, Number($("retryNumPrims").value) || 400)),
       image_scale: Number($("retryImageScale").value) || 1.0,
       output_alpha: (Number($("retryOutputAlpha").value) || 100) / 100,
+      allowed_shapes: shapes,
+      primitives: shapes.map((shape) => ({ shape, color: "#ffffff" })),
     });
   });
   $("btnRetryOutline").addEventListener("click", () => {

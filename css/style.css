@@ -303,6 +303,17 @@ body {
   margin-top: 8px;
 }
 
+/* A hint that introduces controls has to clear them. `.hint` only carries a
+   top margin, so a trailing hint keeps the section's own padding as its
+   bottom spacing, but one followed by controls would otherwise sit flush
+   against them. */
+.hint + .config-row,
+.hint + .shape-checks,
+.hint + .empty-panel,
+.hint + .primitive-list,
+.hint + .btn-sm,
+.hint + .btn-primary { margin-top: 10px; }
+
 /* ============================================================
    Buttons
    ============================================================ */
@@ -483,6 +494,20 @@ body {
    Shape checks / params
    ============================================================ */
 .shape-checks { display: flex; gap: 8px; }
+
+/* Sub-label for a control group inside a panel section (e.g. the primitive
+   type picker in the Re-process panel), tighter than a section heading. */
+.field-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--md-on-surface-variant);
+  margin-bottom: 6px;
+}
+
+/* Keep following controls off the picker when it is not the last element. */
+.shape-checks + .config-row,
+.shape-checks + .btn-sm,
+.shape-checks + .btn-primary { margin-top: 12px; }
 
 .shape-check {
   flex: 1;
