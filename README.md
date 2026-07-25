@@ -1,159 +1,69 @@
-# 千星奇域图片拟合工具
+# Miliastra Wonderland Image Fitting Tool
 
-## 🌐 Global Version (GitHub Pages)
+A fully static, browser-only web app that approximates images with primitive shapes (circles, rectangles, triangles) for Genshin Impact's "Miliastra Wonderland" (千星奇域) UGC mode. The repository root is the deployable site ([index.html](index.html)): all fitting, GIA export, and GIA mode conversion run client-side with no backend, producing output that is bit-identical to the original Python/Go implementation. See [SITE.md](SITE.md) for deployment notes and [tests/parity](tests/parity/README.md) for the parity regression suites.
 
-仓库根目录即为面向全球社区的纯浏览器版本（[index.html](index.html)），无需任何后端即可
-直接部署到 GitHub Pages：所有拟合、GIA 导出与模式转换均在浏览器本地完成，输出与原版
-逐比特一致，支持批量并行处理与 15 种语言（覆盖原神官方支持的全部语言）。
-部署方式见 [SITE.md](SITE.md)，一致性验证见 [tests/parity](tests/parity/README.md)。
+> This project's code is entirely AI-generated.
+>
+> Some parts of the code are not convenient to open-source; contact the author if you need them.
 
-The repository root is the fully static, browser-only global port
-([index.html](index.html)) and deploys directly to GitHub Pages — no backend
-required. It reproduces the full pipeline (fill fitting, decoration outline
-fitting, GIA export, GIA mode conversion) client-side with bit-exact output
-parity to the original, adds batch/concurrent processing, and is localized
-into all 15 languages officially supported by Genshin Impact. See
-[SITE.md](SITE.md) for deployment notes and [tests/parity](tests/parity/README.md)
-for the parity regression suites.
+For the final technical design, see [tech.md](tech.md). For usage instructions, see [user_guide.md](user_guide.md).
 
-## 图片素材组拟合
+## Features
 
-![](demo/demo2.png)
+- **Image asset-group fitting** — approximates an uploaded image with in-game primitive elements.
 
-参考B站教程 [https://www.bilibili.com/video/BV1kKDyB9EvY](https://www.bilibili.com/video/BV1kKDyB9EvY)
+  ![](demo/demo2.png)
 
-## 装饰物拟合
+  Video tutorial (Bilibili): <https://www.bilibili.com/video/BV1kKDyB9EvY>
+
+- **GIA export** — exports both **Beyond mode** and **Classic mode** `.gia` files, byte-identical to the original tool's output.
+- **GIA mode conversion** — converts existing GIA files in both directions (Beyond ↔ Classic) from the upload page.
+- **Enhanced mode (default)** — error-guided fitting, roughly 9x faster per primitive, fully deterministic.
+- **Batch processing** — concurrent processing of multiple images via Web Workers.
+- **15 UI languages** — all languages officially supported by Genshin Impact.
+- **Additional export formats** — SVG, PNG, and CSS (see [Export options](#export-options)).
+
+### Decoration outline fitting
 
 ![](demo/image2.png)
 
-该功能为本仓库之前的代码，现在修坏了，目前在 [https://qx-shaper.up.railway.app/](https://qx-shaper.up.railway.app/) 部署了可用的[历史commit](https://github.com/1475505/Miliastra-toolbox-primitive-shape/tree/b8045325a71a6b99fa07db8bd721d2ae289fcdec) 版本。
+Decoration outline fitting is available from the **Decorations** link in the top bar and is covered by the parity test suite. (A deployment of a [historical commit](https://github.com/1475505/Miliastra-toolbox-primitive-shape/tree/b8045325a71a6b99fa07db8bd721d2ae289fcdec) of the earlier Python version remains available at <https://qx-shaper.up.railway.app/>.)
 
+## Usage
 
-> 本项目代码完全由 AI 生成。
+Open the hosted GitHub Pages site (or a local server, see below), then:
 
-> 本项目可能有部分代码不便开源，相关代码请联系本人获取~
+1. Use the **Image Fitting** tab to upload one or more images, adjust settings, and run the fit.
+2. Use the **GIA Mode Convert** tab to convert existing `.gia` files between Beyond and Classic modes.
+3. From the result page, download the output in any of the export formats below.
 
-最终技术方案请参考[tech.md](tech.md)
+## Export options
 
-使用方式请参考[user_guide.md](user_guide.md)
+The result page currently offers:
 
-## Quick Start
-
-导出gia的构建产物要求在 python 3.13 运行，此部署条件将在后续优化。
-
-安装依赖：
-
-```bash
-pip install -r requirements.txt
-python server.py
-```
-
-CLI 直接导出 GIA（支持 `--gia-mode overlimit/classic`）：
-
-```bash
-python server.py --cli --input demo.png --gia-mode classic --output output.gia
-```
-
-若提示primitive的不可用,可自行源码编译. 或准备 `primitive` 可执行文件并放到 `tools/` 目录下:
-- 官方仓库：https://github.com/fogleman/primitive/
-- 安装 Go 后执行：`go install github.com/fogleman/primitive@latest`
-- Windows 放 `tools/primitive.exe`
-- Linux/macOS 放 `tools/primitive`
-- 没有这个文件时，应用在实际处理图片时会失败。
-
-## 信息
-
-### 圆形
-
-| 元件 | ID | 大小 |
-| :--- | :--- | :--- |
-| 冒险币 | 10005009 | 1.0 |
-| 雷元素徽章 | 20001281 | 0.3 |
-| 火元素徽章 | 20001282 | 0.3 |
-| 草元素徽章 | 20001283 | 0.3 |
-| 冰元素徽章 | 20001284 | 0.3 |
-| 岩元素徽章 | 20001285 | 0.3 |
-| 水元素徽章 | 20001286 | 0.3 |
-| 风元素徽章 | 20001287 | 0.3 |
-
-### 矩形
-
-| 元件 | ID | 大小 |
-| :--- | :--- | :--- |
-| 木质箱子 | 20001224 | 1.0 |
-| 石质元素立方体 | 20001034 | 5.0 |
-| 木质箱子（绿） | 20001237 | 1.5 |
-| 木质箱子（蓝） | 20001238 | 1.5 |
-| 木质箱子（紫） | 20001239 | 1.5 |
-| 石质墙体（黄） | 20001869 | 3.0 |
-| 石质墙体（红） | 20001870 | 3.0 |
-| 石质墙体（灰） | 20001872 | 3.0 |
-| 水质立方体 | 20001874 | 1.0 |
-| 通常立方体（奶黄） | 20001875 | 1.0 |
-| 坚固立方体（暗蓝） | 20001876 | 1.0 |
-| 冰质立方体 | 20001877 | 1.0 |
-| 火质立方体 | 20001878 | 1.0 |
-| 雷质立方体 | 20001879 | 1.0 |
-| 矩形木质矮柜 | 20001082 | 1.0 |
-| 积木立方体（木色） | 20001096 | 6.0 |
-| 积木立方体（深色） | 20001097 | 6.0 |
-| 积木立方体（浅色） | 20001100 | 6.0 |
-| 石质天花板（白） | 20002146 | 5.0 |
-| 木质天花板（黑） | 20002121 | 5.0 |
-| 积木平台（绿） | 10005014 | 5.0 |
-## 导出说明
-
-处理完成后，结果页当前提供以下导出选项：
-
-- `导出 SVG`
-- `导出 PNG`
-- `导出 CSS`
-- `导出超限模式 GIA`
-- `导出经典模式 GIA`
-
-此外，上传页面还提供 **GIA 模式转换** 工具，支持：
-- 超限模式 GIA → 经典模式 GIA
-- 经典模式 GIA → 超限模式 GIA
+- **Export SVG**
+- **Export PNG**
+- **Export CSS**
+- **Export Beyond-mode GIA**
+- **Export Classic-mode GIA**
 
 ### SVG
 
-SVG 导出会把当前图元结果转换为矢量图形，主要包含：
-
-- `ellipse`
-- `rect`
-- `polygon`
-
-并保留以下信息：
-
-- 位置
-- 尺寸
-- 旋转
-- 透明度
-- 颜色
-
-如果当前结果不是透明背景，导出的 SVG 会自动补一个白色背景。
+Converts the current primitive result to vector graphics using `ellipse`, `rect`, and `polygon` elements, preserving position, size, rotation, opacity, and color. If the result does not have a transparent background, the exported SVG adds a white background automatically.
 
 ### PNG
 
-PNG 导出的是当前结果页画布中的最终渲染结果，适合直接预览、分享和存档。
+Exports the final rendered canvas from the result page — suitable for previewing, sharing, and archiving.
 
 ### CSS
 
-CSS 导出适合前端集成，但它不是“只放一个 css 文件就能直接还原结果”的格式。
-
-导出的 CSS 会包含：
-
-- `.shaper-container`
-- `.shaper-element`
-- `.shaper-element.shaper-e0 ~ .shaper-element.shaper-eN`
-
-使用时通常至少需要一个容器节点：
+Intended for front-end integration; it is **not** a drop-in single-file format. The export contains `.shaper-container`, `.shaper-element`, and `.shaper-element.shaper-e0` … `.shaper-eN` rules. You need at least one container node:
 
 ```html
 <div class="shaper-container"></div>
 ```
 
-然后再用 JavaScript 补齐对应数量的子节点，例如：
+and then create the matching child nodes with JavaScript:
 
 ```js
 const container = document.querySelector('.shaper-container');
@@ -164,13 +74,122 @@ for (let i = 0; i < elementCount; i += 1) {
 }
 ```
 
-为了方便使用，导出的 CSS 文件头部已经附带 `HTML + JavaScript` 的示例注释。
+A ready-to-use `HTML + JavaScript` example is included as a comment at the top of the exported CSS file.
 
 ### GIA
 
-支持导出**超限模式**和**经典模式**两种 GIA 格式。结果页可直接选择对应按钮下载；若需要批量转换已有 GIA 文件，可使用上传页面的「GIA模式转换」工具。
+Both **Beyond** and **Classic** GIA formats can be downloaded directly from the result page. To batch-convert existing GIA files, use the **GIA Mode Convert** tool on the upload page.
+
+## Running locally
+
+Serve the repository root with any static file server, e.g.:
+
+```bash
+python -m http.server
+```
+
+then open `http://localhost:8000/`. Opening `index.html` via `file://` does **not** work because the app uses Web Workers, which require an `http(s)` origin.
+
+Deployment is plain GitHub Pages from the repository root — no build step or backend required.
+
+## Project structure
+
+- `index.html` — single-page app entry point
+- `js/` — application and engine code
+- `js/locales/` — UI translations (one file per language)
+- `css/` — styles
+- `tests/parity/` — bit-exact parity regression suites (Node-based)
+
+## Testing
+
+The parity suites verify that the JS port reproduces the original Python/Go implementation exactly. Each suite has a Python golden generator and a Node runner:
+
+```bash
+python tests/parity/<suite>/gen_goldens.py
+node tests/parity/<suite>/run_tests.js
+```
+
+See [tests/parity/README.md](tests/parity/README.md) for the suite layout, the parity contract (determinism/libm caveats), and the reference environment.
+
+## Localization
+
+The UI is available in 15 languages (all languages officially supported by Genshin Impact): `de`, `en`, `es`, `fr`, `id`, `it`, `ja`, `ko`, `pt`, `ru`, `th`, `tr`, `vi`, `zh-CN`, `zh-TW`. To add a language, create a new file in `js/locales/` following the structure of an existing one (e.g. `en.js`) and register it alongside the others.
+
+## Legacy Python backend (optional)
+
+The repository also contains the original Python server (`server.py`), which the static port replaced. It is not needed for the web app, but can still be used directly. The GIA-export build artifacts require Python 3.13.
+
+Install dependencies and run the server:
+
+```bash
+pip install -r requirements.txt
+python server.py
+```
+
+Or export a GIA file directly from the CLI (supports `--gia-mode overlimit/classic` — the CLI keeps the legacy flag values, where `overlimit` is Beyond mode):
+
+```bash
+python server.py --cli --input demo.png --gia-mode classic --output output.gia
+```
+
+The backend requires the `primitive` executable in the `tools/` directory (the app fails when processing images without it). You can build it from source:
+
+- Official repository: <https://github.com/fogleman/primitive/>
+- With Go installed: `go install github.com/fogleman/primitive@latest`
+- Windows: place it at `tools/primitive.exe`
+- Linux/macOS: place it at `tools/primitive`
+
+## Reference: in-game element IDs
+
+### Circles
+
+| Element | ID | Size |
+| :--- | :--- | :--- |
+| Adventure Coin | 10005009 | 1.0 |
+| Electro Element Badge | 20001281 | 0.3 |
+| Pyro Element Badge | 20001282 | 0.3 |
+| Dendro Element Badge | 20001283 | 0.3 |
+| Cryo Element Badge | 20001284 | 0.3 |
+| Geo Element Badge | 20001285 | 0.3 |
+| Hydro Element Badge | 20001286 | 0.3 |
+| Anemo Element Badge | 20001287 | 0.3 |
+
+### Rectangles
+
+| Element | ID | Size |
+| :--- | :--- | :--- |
+| Wooden Crate | 20001224 | 1.0 |
+| Stone Element Cube | 20001034 | 5.0 |
+| Wooden Crate (Green) | 20001237 | 1.5 |
+| Wooden Crate (Blue) | 20001238 | 1.5 |
+| Wooden Crate (Purple) | 20001239 | 1.5 |
+| Stone Wall (Yellow) | 20001869 | 3.0 |
+| Stone Wall (Red) | 20001870 | 3.0 |
+| Stone Wall (Gray) | 20001872 | 3.0 |
+| Water Cube | 20001874 | 1.0 |
+| Regular Cube (Cream Yellow) | 20001875 | 1.0 |
+| Sturdy Cube (Dark Blue) | 20001876 | 1.0 |
+| Ice Cube | 20001877 | 1.0 |
+| Fire Cube | 20001878 | 1.0 |
+| Electro Cube | 20001879 | 1.0 |
+| Rectangular Wooden Low Cabinet | 20001082 | 1.0 |
+| Building-Block Cube (Wood) | 20001096 | 6.0 |
+| Building-Block Cube (Dark) | 20001097 | 6.0 |
+| Building-Block Cube (Light) | 20001100 | 6.0 |
+| Stone Ceiling (White) | 20002146 | 5.0 |
+| Wooden Ceiling (Black) | 20002121 | 5.0 |
+| Building-Block Platform (Green) | 10005014 | 5.0 |
+
+## Links
+
+- Knowledge base: <https://ugc.070077.xyz/>
+- Repository: <https://github.com/Interverse/miliastra-image-to-primitive-shape-ui>
+- Original repository (decoration fitting historical commit): <https://github.com/1475505/Miliastra-toolbox-primitive-shape>
 
 ## TODO
-- 详见部署后网页
 
+See the deployed web page.
 
+## License
+
+[MIT](LICENSE)

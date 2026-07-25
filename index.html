@@ -3,9 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <script>
+    // theme before first paint (default dark); persisted in localStorage
+    document.documentElement.dataset.theme = (function () {
+      try { return localStorage.getItem("theme") || "dark"; } catch (e) { return "dark"; }
+    })();
+  </script>
   <title data-i18n="app.pageTitle">Miliastra Wonderland Image Fitter</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='38' cy='42' r='26' fill='%234355B9'/%3E%3Crect x='48' y='44' width='36' height='36' rx='6' fill='%23E8A317' transform='rotate(12 66 62)'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="css/style.css?v=8">
+  <link rel="stylesheet" href="css/style.css?v=10">
 </head>
 <body>
   <header class="topbar">
@@ -19,6 +26,7 @@
       <a href="#" id="outlineLink" class="topbar-link topbar-link-subtle" data-i18n="topbar.link.outline">Decorations</a>
     </div>
     <div class="topbar-right">
+      <button type="button" id="themeToggle" class="theme-toggle" data-i18n-aria-label="topbar.theme" aria-label="Toggle light/dark theme">🌙</button>
       <select id="langSelect" class="lang-select" data-i18n-aria-label="topbar.language"></select>
       <a href="https://github.com/Interverse/miliastra-image-to-primitive-shape-ui" target="_blank" rel="noopener noreferrer" class="topbar-link" data-i18n="topbar.repo">Repository</a>
       <a href="https://ugc.070077.xyz/" target="_blank" rel="noopener noreferrer" class="topbar-link topbar-link-subtle" data-i18n="topbar.kb">Knowledge Base</a>
@@ -280,6 +288,7 @@
           <label style="margin-left:8px">Y</label>
           <input type="number" id="originY" value="0" step="0.1" class="num-input">
         </div>
+        <button id="btnPickOrigin" class="btn-sm" data-i18n="result.origin.pick">Pick on canvas</button>
         <button id="btnResetOrigin" class="btn-sm" data-i18n="result.origin.reset">Reset to image center</button>
       </section>
 
@@ -357,6 +366,12 @@
         <label><input type="checkbox" id="showFill" checked> <span data-i18n="result.canvas.showFill">Fill</span></label>
         <label><input type="checkbox" id="showBorder"> <span data-i18n="result.canvas.showBorder">Border</span></label>
         <label><input type="checkbox" id="showOrigin" checked> <span data-i18n="result.canvas.showOrigin">Origin</span></label>
+        <label><input type="checkbox" id="cropToImage" checked> <span data-i18n="result.canvas.crop">Crop to image</span></label>
+        <span id="editTools" class="edit-tools">
+          <button type="button" id="btnUndo" class="btn-text" disabled data-i18n="result.edit.undo">Undo</button>
+          <button type="button" id="btnRedo" class="btn-text" disabled data-i18n="result.edit.redo">Redo</button>
+          <button type="button" id="btnDeleteSel" class="btn-text danger" disabled data-i18n="result.edit.delete">Delete</button>
+        </span>
       </div>
     </main>
 
@@ -377,6 +392,32 @@
           <tr><td data-i18n="result.info.size">Size</td><td id="infoSize">—</td></tr>
           <tr><td data-i18n="result.info.rotation">Rotation</td><td id="infoRotation">—</td></tr>
         </table></div>
+        <div id="editPanel" class="edit-panel" hidden>
+          <h3 data-i18n="result.edit.panelTitle">Edit Primitive</h3>
+          <div class="config-row">
+            <label>X</label>
+            <input type="number" id="editX" step="0.1" class="num-input">
+            <label style="margin-left:8px">Y</label>
+            <input type="number" id="editY" step="0.1" class="num-input">
+          </div>
+          <div class="config-row">
+            <label id="editSizeALabel">rx</label>
+            <input type="number" id="editSizeA" step="0.1" min="0.01" class="num-input">
+            <label id="editSizeBLabel" style="margin-left:8px">ry</label>
+            <input type="number" id="editSizeB" step="0.1" min="0.01" class="num-input">
+          </div>
+          <div class="config-row">
+            <label data-i18n="result.info.rotation">Rotation</label>
+            <input type="number" id="editRot" step="1" class="num-input">
+          </div>
+          <div class="config-row">
+            <label data-i18n="result.edit.color">Color</label>
+            <input type="color" id="editColor" class="color-input">
+            <label data-i18n="result.edit.alpha" style="margin-left:8px">Alpha %</label>
+            <input type="number" id="editAlpha" min="0" max="100" step="1" class="num-input">
+          </div>
+          <p class="hint" data-i18n="result.edit.hint"></p>
+        </div>
       </section>
     </aside>
   </div>
@@ -439,27 +480,27 @@
   </div>
 
   <!-- locales (order = Genshin official language list; en first as fallback) -->
-  <script src="js/locales/en.js?v=8"></script>
-  <script src="js/locales/zh-CN.js?v=8"></script>
-  <script src="js/locales/zh-TW.js?v=8"></script>
-  <script src="js/locales/ja.js?v=8"></script>
-  <script src="js/locales/ko.js?v=8"></script>
-  <script src="js/locales/fr.js?v=8"></script>
-  <script src="js/locales/de.js?v=8"></script>
-  <script src="js/locales/es.js?v=8"></script>
-  <script src="js/locales/pt.js?v=8"></script>
-  <script src="js/locales/ru.js?v=8"></script>
-  <script src="js/locales/th.js?v=8"></script>
-  <script src="js/locales/vi.js?v=8"></script>
-  <script src="js/locales/id.js?v=8"></script>
-  <script src="js/locales/tr.js?v=8"></script>
-  <script src="js/locales/it.js?v=8"></script>
+  <script src="js/locales/en.js?v=10"></script>
+  <script src="js/locales/zh-CN.js?v=10"></script>
+  <script src="js/locales/zh-TW.js?v=10"></script>
+  <script src="js/locales/ja.js?v=10"></script>
+  <script src="js/locales/ko.js?v=10"></script>
+  <script src="js/locales/fr.js?v=10"></script>
+  <script src="js/locales/de.js?v=10"></script>
+  <script src="js/locales/es.js?v=10"></script>
+  <script src="js/locales/pt.js?v=10"></script>
+  <script src="js/locales/ru.js?v=10"></script>
+  <script src="js/locales/th.js?v=10"></script>
+  <script src="js/locales/vi.js?v=10"></script>
+  <script src="js/locales/id.js?v=10"></script>
+  <script src="js/locales/tr.js?v=10"></script>
+  <script src="js/locales/it.js?v=10"></script>
 
-  <script src="js/i18n.js?v=8"></script>
-  <script src="js/zip.js?v=8"></script>
-  <script src="js/gia.js?v=8"></script>
-  <script src="js/gia-export.js?v=8"></script>
-  <script src="js/png-decode.js?v=8"></script>
-  <script src="js/app.js?v=8"></script>
+  <script src="js/i18n.js?v=10"></script>
+  <script src="js/zip.js?v=10"></script>
+  <script src="js/gia.js?v=10"></script>
+  <script src="js/gia-export.js?v=10"></script>
+  <script src="js/png-decode.js?v=10"></script>
+  <script src="js/app.js?v=10"></script>
 </body>
 </html>

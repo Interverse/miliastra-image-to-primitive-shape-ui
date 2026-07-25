@@ -1193,8 +1193,8 @@
 
   function drawElement(element, index) {
     const center = imagePointToElementCenter(element);
-    const selected = !isBackgroundElement(element) && index === R.selected;
-    const highlighted = !isBackgroundElement(element) && (selected || (R.selected === null && index === R.hovered));
+    const selected = !isBackgroundElement(element) && (R.selectedSet.has(index) || index === R.selected);
+    const highlighted = !isBackgroundElement(element) && !selected && index === R.hovered;
     const rawAlpha = Number(element.alpha);
     const fillAlpha = Number.isFinite(rawAlpha) ? Math.max(0, rawAlpha) : 0.5;
 
@@ -1251,6 +1251,16 @@
     R.scale = sTotal; // stroke widths in the draw helpers divide by this
 
     ctx.setTransform(sTotal, 0, 0, sTotal, offX, offY);
+    // "Crop to image": preview-only clip — the exported PNG canvas is
+    // image-sized either way, so exports are unaffected by the toggle.
+    const cropEl = $("cropToImage");
+    const crop = cropEl ? cropEl.checked : true;
+    if (crop) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, imageWidth, imageHeight);
+      ctx.clip();
+    }
     if (!R.outputHasTransparency) {
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, imageWidth, imageHeight);
@@ -1268,6 +1278,7 @@
     renderOrderedElements(data).forEach((element) => {
       drawElement(element, data.elements.indexOf(element));
     });
+    if (crop) ctx.restore(); // origin cross stays visible outside the crop
     drawOriginCross();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
@@ -1485,23 +1496,24 @@
       scale: 1,
       hovered: null,
       selected: keepState && R && R.job === job ? R.selected : null,
+      selectedSet: keepState && R && R.job === job ? R.selectedSet : new Set(),
       outputHasTransparency: Boolean(data.config && data.config.output_has_transparency),
     };
+    if (!job.editUndo) { job.editUndo = []; job.editRedo = []; }
     $("exportFileName").value = job.baseName;
     $("originX").value = R.origin.x;
     $("originY").value = R.origin.y;
     fillRetryInputs(job);
     setView("result");
     updateStats();
-    if (R.selected !== null && data.elements[R.selected]) showDetail(data.elements[R.selected], R.selected);
-    else clearDetail();
+    refreshSelectionUI();
     $("coordsDisplay").textContent = t("result.canvas.coords", { coords: "—" });
     renderCanvas(); // setView already forced layout; render synchronously so
                     // the canvas is correct even in background tabs
 
   }
 
-  ["showImage", "showMask", "showFill", "showBorder", "showOrigin"].forEach((id) => {
+  ["showImage", "showMask", "showFill", "showBorder", "showOrigin", "cropToImage"].forEach((id) => {
     $(id).addEventListener("change", renderCanvas);
   });
 
@@ -1526,7 +1538,7 @@
 
   canvas.addEventListener("pointerdown", (event) => {
     if (!R) return;
-    if (event.button !== 0) return; // right-click keeps the origin gesture
+    if (event.button !== 0) return; // left button only; right-click stays free
     try { canvas.setPointerCapture(event.pointerId); } catch (e) { /* synthetic/expired pointer */ }
     pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     dragMoved = false;
@@ -1534,6 +1546,30 @@
     if (pointers.size === 2) {
       const [a, b] = [...pointers.values()];
       pinchStart = { dist: Math.hypot(a.x - b.x, a.y - b.y), zoom: currentView().zoom };
+      elementDrag = null; // a second finger means pinch, not element move
+    }
+    // grabbing an element starts a move gesture instead of a pan
+    if (!originArmed && pointers.size === 1) {
+      const point = canvasToImagePoint(event);
+      const hit = hitTest(point.x, point.y);
+      if (hit !== null) {
+        if (!R.selectedSet.has(hit)) {
+          if (event.ctrlKey || event.metaKey || event.shiftKey) R.selectedSet.add(hit);
+          else { R.selectedSet.clear(); R.selectedSet.add(hit); }
+          R.selected = hit;
+          suppressSelectClick = true; // selection handled here — don't let the
+                                      // trailing click event toggle it back
+          refreshSelectionUI();
+          renderCanvas();
+        }
+        const indices = [...R.selectedSet];
+        elementDrag = {
+          startX: point.x, startY: point.y, indices,
+          origCenters: indices.map((i) => ({ x: R.data.elements[i].center.x, y: R.data.elements[i].center.y })),
+          undoJson: JSON.stringify(R.data.elements),
+          pushed: false,
+        };
+      }
     }
   });
 
@@ -1558,6 +1594,24 @@
       return;
     }
 
+    if (elementDrag && pointers.size === 1) {
+      const point = canvasToImagePoint(event);
+      const dwx = (point.x - elementDrag.startX) / R.ppu;
+      const dwy = -(point.y - elementDrag.startY) / R.ppu;
+      if (dwx !== 0 || dwy !== 0) {
+        if (!elementDrag.pushed) { pushUndoSnapshot(elementDrag.undoJson); elementDrag.pushed = true; }
+        elementDrag.indices.forEach((idx, k) => {
+          const el = R.data.elements[idx];
+          el.center.x = elementDrag.origCenters[k].x + dwx;
+          el.center.y = elementDrag.origCenters[k].y + dwy;
+        });
+        elementDragged = true;
+        refreshSelectionUI();
+        scheduleRender();
+      }
+      return;
+    }
+
     if (pointers.size === 1 && (dx !== 0 || dy !== 0)) {
       const view = currentView();
       view.panX += dx;
@@ -1573,6 +1627,7 @@
     if (pointers.has(event.pointerId)) pointers.delete(event.pointerId);
     if (pointers.size < 2) pinchStart = null;
     if (pointers.size === 0) canvas.classList.remove("dragging");
+    elementDrag = null; // elementDragged persists until the click event fires
   }
   canvas.addEventListener("pointerup", endPointer);
   canvas.addEventListener("pointercancel", endPointer);
@@ -1621,23 +1676,36 @@
   canvas.addEventListener("click", (event) => {
     if (!R) return;
     if (dragMoved) { dragMoved = false; return; } // pan gestures don't select
+    if (elementDragged) { elementDragged = false; suppressSelectClick = false; return; } // element move, not a select
+    if (suppressSelectClick) { suppressSelectClick = false; return; } // pointerdown already selected
     const point = canvasToImagePoint(event);
-    R.selected = hitTest(point.x, point.y);
+    // origin placement: armed "Pick on canvas" tool, or Alt+click shortcut
+    // (right-click no longer changes the origin — it was too easy to hit)
+    if (originArmed || event.altKey) {
+      setOriginPoint(point);
+      disarmOriginPick();
+      return;
+    }
+    const hit = hitTest(point.x, point.y);
+    const multi = event.ctrlKey || event.metaKey || event.shiftKey;
+    if (multi && hit !== null) {
+      if (R.selectedSet.has(hit)) {
+        R.selectedSet.delete(hit);
+        if (R.selected === hit) {
+          R.selected = R.selectedSet.size ? [...R.selectedSet][R.selectedSet.size - 1] : null;
+        }
+      } else {
+        R.selectedSet.add(hit);
+        R.selected = hit;
+      }
+    } else {
+      R.selectedSet.clear();
+      if (hit !== null) R.selectedSet.add(hit);
+      R.selected = hit;
+    }
     R.hovered = null;
     renderCanvas();
-    if (R.selected === null) clearDetail();
-    else showDetail(R.data.elements[R.selected], R.selected);
-  });
-
-  canvas.addEventListener("contextmenu", (event) => {
-    if (!R) return;
-    event.preventDefault();
-    const point = canvasToImagePoint(event);
-    R.origin = { x: point.x, y: point.y };
-    $("originX").value = point.x.toFixed(1);
-    $("originY").value = point.y.toFixed(1);
-    if (R.selected !== null) showDetail(R.data.elements[R.selected], R.selected);
-    renderCanvas();
+    refreshSelectionUI();
   });
 
   $("originX").addEventListener("change", () => {
@@ -1662,6 +1730,257 @@
   });
 
   window.addEventListener("resize", () => { if (activeView === "result") renderCanvas(); });
+
+  /* ════════════════════ result editor (edit mode) ════════════════════ */
+
+  // editing is always available — no separate edit mode
+  let originArmed = false;
+  let elementDrag = null;         // active move gesture (see pointer handlers)
+  let elementDragged = false;     // suppresses the click that ends a move
+  let suppressSelectClick = false; // pointerdown already changed the selection
+
+  function updateEditButtons() {
+    const job = R && R.job;
+    $("btnUndo").disabled = !(job && job.editUndo && job.editUndo.length);
+    $("btnRedo").disabled = !(job && job.editRedo && job.editRedo.length);
+    $("btnDeleteSel").disabled = !(R && R.selectedSet.size);
+  }
+
+  /* Undo/redo are per-job element-array snapshots (elements are small plain
+   * objects; a 400-primitive job snapshots at ~100 KB, stack capped at 30). */
+  function pushUndoSnapshot(json) {
+    const job = R.job;
+    if (!job.editUndo) { job.editUndo = []; job.editRedo = []; }
+    job.editUndo.push(json !== undefined ? json : JSON.stringify(R.data.elements));
+    if (job.editUndo.length > 30) job.editUndo.shift();
+    job.editRedo.length = 0;
+    updateEditButtons();
+  }
+
+  function restoreElements(json) {
+    R.data.elements = JSON.parse(json);
+    R.data.elements_count = R.data.elements.length;
+    R.selectedSet.clear();
+    R.selected = null;
+    R.hovered = null;
+    refreshSelectionUI();
+    updateStats();
+    renderCanvas();
+  }
+
+  function doUndo() {
+    const job = R && R.job;
+    if (!job || !job.editUndo || !job.editUndo.length) return;
+    job.editRedo.push(JSON.stringify(R.data.elements));
+    restoreElements(job.editUndo.pop());
+    updateEditButtons();
+  }
+
+  function doRedo() {
+    const job = R && R.job;
+    if (!job || !job.editRedo || !job.editRedo.length) return;
+    job.editUndo.push(JSON.stringify(R.data.elements));
+    restoreElements(job.editRedo.pop());
+    updateEditButtons();
+  }
+
+  function deleteSelection() {
+    if (!R || !R.selectedSet.size) return;
+    pushUndoSnapshot();
+    const doomed = [...R.selectedSet].sort((a, b) => b - a);
+    for (const idx of doomed) R.data.elements.splice(idx, 1);
+    R.data.elements_count = R.data.elements.length;
+    R.selectedSet.clear();
+    R.selected = null;
+    R.hovered = null;
+    refreshSelectionUI();
+    updateStats();
+    renderCanvas();
+  }
+
+  $("btnUndo").addEventListener("click", doUndo);
+  $("btnRedo").addEventListener("click", doRedo);
+  $("btnDeleteSel").addEventListener("click", deleteSelection);
+
+  function refreshSelectionUI() {
+    if (!R) return;
+    if (R.selected !== null && R.data.elements[R.selected]) {
+      showDetail(R.data.elements[R.selected], R.selected);
+    } else {
+      clearDetail();
+    }
+    syncEditPanel();
+    updateEditButtons();
+  }
+
+  /* ── edit panel (properties of the primary selection) ── */
+
+  let editPanelSyncing = false;
+
+  function syncEditPanel() {
+    const panel = $("editPanel");
+    const el = R && R.selected !== null ? R.data.elements[R.selected] : null;
+    const show = Boolean(el);
+    panel.hidden = !show;
+    if (!show) return;
+    editPanelSyncing = true;
+    const type = normalizeType(el.type);
+    $("editX").value = Number(el.center.x).toFixed(2);
+    $("editY").value = Number(el.center.y).toFixed(2);
+    if (type === "ellipse") {
+      $("editSizeALabel").textContent = "rx";
+      $("editSizeBLabel").textContent = "ry";
+      $("editSizeA").value = Number(el.size.rx || 0).toFixed(2);
+      $("editSizeB").value = Number(el.size.ry || 0).toFixed(2);
+    } else {
+      $("editSizeALabel").textContent = t("result.edit.width");
+      $("editSizeBLabel").textContent = t("result.edit.height");
+      $("editSizeA").value = Number(el.size.width || 0).toFixed(2);
+      $("editSizeB").value = Number(el.size.height || 0).toFixed(2);
+    }
+    $("editRot").value = elementRotationZ(el).toFixed(1);
+    $("editColor").value = normalizeHexColor(el.color);
+    const a = Number(el.alpha);
+    $("editAlpha").value = Math.round((Number.isFinite(a) ? Math.min(Math.max(a, 0), 1) : 0.5) * 100);
+    editPanelSyncing = false;
+  }
+
+  function normalizeHexColor(color) {
+    if (Array.isArray(color)) {
+      const h = (v) => Math.min(255, Math.max(0, Math.round(v))).toString(16).padStart(2, "0");
+      return "#" + h(color[0]) + h(color[1]) + h(color[2]);
+    }
+    if (typeof color === "string" && /^#([a-f0-9]{3}|[a-f0-9]{6})$/i.test(color.trim())) {
+      let hex = color.trim().slice(1);
+      if (hex.length === 3) hex = hex.split("").map((c) => c + c).join("");
+      return "#" + hex.toLowerCase();
+    }
+    return "#ffcc00";
+  }
+
+  // engine parity: packColor rounds alpha*255 half-to-even (ARGB uint32)
+  function roundHalfEven(x) {
+    const f = Math.floor(x), d = x - f;
+    if (d < 0.5) return f;
+    if (d > 0.5) return f + 1;
+    return f % 2 === 0 ? f : f + 1;
+  }
+
+  function packColorHex(hex, alpha) {
+    let v = hex.replace("#", "");
+    if (v.length === 3) v = v.split("").map((c) => c + c).join("");
+    const r = parseInt(v.slice(0, 2), 16);
+    const g = parseInt(v.slice(2, 4), 16);
+    const b = parseInt(v.slice(4, 6), 16);
+    const a = Math.min(255, Math.max(0, roundHalfEven(alpha * 255)));
+    return (((a << 24) >>> 0) | (r << 16) | (g << 8) | b) >>> 0;
+  }
+
+  function applyEditField(mutate) {
+    if (editPanelSyncing || !R || R.selected === null) return;
+    const el = R.data.elements[R.selected];
+    if (!el) return;
+    pushUndoSnapshot();
+    mutate(el);
+    refreshSelectionUI();
+    updateStats();
+    renderCanvas();
+  }
+
+  $("editX").addEventListener("change", () => applyEditField((el) => { el.center.x = Number($("editX").value) || 0; }));
+  $("editY").addEventListener("change", () => applyEditField((el) => { el.center.y = Number($("editY").value) || 0; }));
+  $("editSizeA").addEventListener("change", () => applyEditField((el) => {
+    const v = Math.max(0.01, Number($("editSizeA").value) || 0.01);
+    if (normalizeType(el.type) === "ellipse") el.size.rx = v; else el.size.width = v;
+  }));
+  $("editSizeB").addEventListener("change", () => applyEditField((el) => {
+    const v = Math.max(0.01, Number($("editSizeB").value) || 0.01);
+    if (normalizeType(el.type) === "ellipse") el.size.ry = v; else el.size.height = v;
+  }));
+  $("editRot").addEventListener("change", () => applyEditField((el) => {
+    const v = Number($("editRot").value) || 0;
+    if (el.rotation && typeof el.rotation === "object") el.rotation.z = v;
+    else el.rotation = v;
+  }));
+
+  function applyColorAlpha() {
+    applyEditField((el) => {
+      const hex = $("editColor").value || "#ffcc00";
+      const alphaRaw = Number($("editAlpha").value);
+      const alpha = Math.min(100, Math.max(0, Number.isFinite(alphaRaw) ? alphaRaw : 100)) / 100;
+      el.color = hex;
+      el.alpha = alpha;
+      el.packed_color = packColorHex(hex, alpha); // GIA export copies this verbatim
+    });
+  }
+  $("editColor").addEventListener("change", applyColorAlpha);
+  $("editAlpha").addEventListener("change", applyColorAlpha);
+
+  /* ── origin pick tool (replaces the old right-click gesture) ── */
+
+  function setOriginPoint(point) {
+    R.origin = { x: point.x, y: point.y };
+    $("originX").value = point.x.toFixed(1);
+    $("originY").value = point.y.toFixed(1);
+    if (R.selected !== null && R.data.elements[R.selected]) showDetail(R.data.elements[R.selected], R.selected);
+    renderCanvas();
+  }
+
+  function disarmOriginPick() {
+    originArmed = false;
+    $("btnPickOrigin").classList.remove("active");
+    canvas.classList.remove("picking");
+  }
+
+  $("btnPickOrigin").addEventListener("click", () => {
+    if (!R) return;
+    originArmed = !originArmed;
+    $("btnPickOrigin").classList.toggle("active", originArmed);
+    canvas.classList.toggle("picking", originArmed);
+  });
+
+  /* ── keyboard: Del/Backspace delete, Ctrl+Z/Y undo/redo, Esc ── */
+
+  document.addEventListener("keydown", (event) => {
+    if (activeView !== "result" || !R) return;
+    const target = event.target;
+    const typing = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" ||
+      target.tagName === "SELECT" || target.isContentEditable);
+    if (event.key === "Escape") {
+      if (originArmed) { disarmOriginPick(); return; }
+      if (!typing && R.selectedSet.size) {
+        R.selectedSet.clear();
+        R.selected = null;
+        refreshSelectionUI();
+        renderCanvas();
+      }
+      return;
+    }
+    if (typing) return;
+    const mod = event.ctrlKey || event.metaKey;
+    if (mod && !event.shiftKey && (event.key === "z" || event.key === "Z")) { event.preventDefault(); doUndo(); return; }
+    if (mod && (event.key === "y" || event.key === "Y" || (event.shiftKey && (event.key === "z" || event.key === "Z")))) {
+      event.preventDefault(); doRedo(); return;
+    }
+    if (event.key === "Delete" || event.key === "Backspace") {
+      event.preventDefault();
+      deleteSelection();
+    }
+  });
+
+  /* ════════════════════ theme toggle ════════════════════ */
+
+  function applyThemeButton() {
+    const dark = document.documentElement.dataset.theme !== "light";
+    $("themeToggle").textContent = dark ? "🌙" : "☀️"; // icon shows the current theme
+  }
+  $("themeToggle").addEventListener("click", () => {
+    const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("theme", next); } catch (e) { /* storage unavailable */ }
+    applyThemeButton();
+  });
+  applyThemeButton();
 
   /* ════════════════════ exports ════════════════════ */
 
