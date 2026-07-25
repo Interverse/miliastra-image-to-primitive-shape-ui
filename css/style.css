@@ -288,6 +288,22 @@ body {
   margin-bottom: 12px;
 }
 
+/* Start Processing stays pinned to the bottom of the left panel, so it is
+   reachable without scrolling past every parameter. The negative offsets
+   cancel the panel's 16px padding so the bar spans the full panel width. */
+.panel-submit {
+  position: sticky;
+  bottom: -16px;
+  z-index: 5;
+  margin: 12px -16px -16px;
+  padding: 12px 16px 16px;
+  border: none;
+  border-top: 1px solid var(--md-outline-variant);
+  border-radius: 0;
+  background: var(--md-surface);
+  box-shadow: 0 -6px 14px rgba(0, 0, 0, .10);
+}
+
 .panel-section > h3 {
   font-size: 12px;
   font-weight: 600;
@@ -1086,6 +1102,17 @@ input[type="range"]::-webkit-slider-thumb {
     padding: 10px 16px;
   }
   .topbar-subtitle { display: none; }
+  /* stacked layout scrolls the page, not the panel: a pinned bar would
+     float over the job list, so it goes back to a normal section */
+  .panel-submit {
+    position: static;
+    margin: 0;
+    padding: 16px;
+    border: 1px solid var(--md-outline-variant);
+    border-radius: var(--md-shape-lg);
+    background: var(--md-surface-container-lowest);
+    box-shadow: none;
+  }
   /* narrow screens: both topbar rows wrap instead of overflowing */
   .topbar-left { flex-wrap: wrap; overflow: visible; row-gap: 6px; }
   .topbar-right { flex-wrap: wrap; flex-shrink: 1; min-width: 0; row-gap: 6px; justify-content: flex-end; }
