@@ -55,6 +55,7 @@ function clamp(x, lo, hi) { return x < lo ? lo : (x > hi ? hi : x); }
  * little-endian platforms (every realistic browser/CPU today); the energy
  * loops keep an exact byte-wise fallback for big-endian. */
 const IS_LE = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
+const _v2pt = new Float64Array(2); // guided-sampling scratch (single-threaded worker)
 
 /* Exact integer division truncating toward zero (Go int64 `/`), for operands
  * whose magnitudes are < 2^53. Corrects the ±1 float-division misround that can
@@ -166,8 +167,14 @@ class TriangleShape {
   /* NewRandomTriangle body — identical RNG consumption to the constructor. */
   initRandom() {
     const rnd = this.rnd;
-    this.x1 = rnd.intn(this.w);
-    this.y1 = rnd.intn(this.h);
+    if (this.model && this.model._guided) {
+      this.model.samplePoint(_v2pt);
+      this.x1 = _v2pt[0] | 0;
+      this.y1 = _v2pt[1] | 0;
+    } else {
+      this.x1 = rnd.intn(this.w);
+      this.y1 = rnd.intn(this.h);
+    }
     this.x2 = this.x1 + rnd.intn(31) - 15;
     this.y2 = this.y1 + rnd.intn(31) - 15;
     this.x3 = this.x1 + rnd.intn(31) - 15;
@@ -298,8 +305,14 @@ class RotatedRectShape {
   /* NewRandomRotatedRectangle body — identical RNG consumption. */
   initRandom() {
     const rnd = this.rnd;
-    this.x = rnd.intn(this.w);
-    this.y = rnd.intn(this.h);
+    if (this.model && this.model._guided) {
+      this.model.samplePoint(_v2pt);
+      this.x = _v2pt[0] | 0;
+      this.y = _v2pt[1] | 0;
+    } else {
+      this.x = rnd.intn(this.w);
+      this.y = rnd.intn(this.h);
+    }
     this.sx = rnd.intn(32) + 1;
     this.sy = rnd.intn(32) + 1;
     this.angle = rnd.intn(360);
@@ -424,8 +437,14 @@ class RotatedEllipseShape {
   /* NewRandomRotatedEllipse body — identical RNG consumption. */
   initRandom() {
     const rnd = this.rnd;
-    this.x = rnd.float64() * this.w;
-    this.y = rnd.float64() * this.h;
+    if (this.model && this.model._guided) {
+      this.model.samplePoint(_v2pt);
+      this.x = _v2pt[0];
+      this.y = _v2pt[1];
+    } else {
+      this.x = rnd.float64() * this.w;
+      this.y = rnd.float64() * this.h;
+    }
     this.rx = rnd.float64() * 32 + 1;
     this.ry = rnd.float64() * 32 + 1;
     this.angle = rnd.float64() * 360;
@@ -560,6 +579,9 @@ class PrimitiveModel {
      * every product < 2^53) and integer float64 addition is exact, so the
      * reassociated totals are bit-identical to the per-pixel loops.
      * Gated by image size to bound memory (20 bytes/px). */
+    this._guided = false; // v2: error-guided candidate placement
+    this._ecp = null;
+    this._erp = null;
     this._usePrefix = n <= 2 * 1024 * 1024;
     if (this._usePrefix) {
       const stride = w + 1;
@@ -596,6 +618,60 @@ class PrimitiveModel {
     for (let p = rowLast - 1; p >= rowStart; p--) {
       runEnd[p] = c32[p] === c32[p + 1] ? runEnd[p + 1] : p;
     }
+  }
+
+  /* ── v2: error-guided candidate placement ──
+   * Per-pixel squared error (vs target) as a 2-level sampling distribution:
+   * per-row column prefixes + a row-total prefix. Candidate centers are
+   * drawn proportional to residual error via two inverse-CDF binary
+   * searches, consuming exactly two RNG draws (same as the uniform draws
+   * they replace). Deterministic for a fixed seed. */
+  enableGuidedSampling() {
+    const w = this.w, h = this.h;
+    this._guided = true;
+    this._ecp = new Float64Array((w + 1) * h);
+    this._erp = new Float64Array(h + 1);
+    for (let y = 0; y < h; y++) this._rebuildErrRow(y);
+    this._rebuildRowPrefix();
+  }
+
+  _rebuildErrRow(y) {
+    const w = this.w, t = this.target, c = this.current, ecp = this._ecp;
+    let i = y * w * 4, o = y * (w + 1);
+    let sum = 0;
+    ecp[o] = 0;
+    for (let x = 0; x < w; x++, i += 4, o++) {
+      const dr = t[i] - c[i], dg = t[i + 1] - c[i + 1];
+      const db = t[i + 2] - c[i + 2], da = t[i + 3] - c[i + 3];
+      sum += dr * dr + dg * dg + db * db + da * da;
+      ecp[o + 1] = sum;
+    }
+  }
+
+  _rebuildRowPrefix() {
+    const w = this.w, h = this.h, ecp = this._ecp, erp = this._erp;
+    let sum = 0;
+    erp[0] = 0;
+    for (let y = 0; y < h; y++) { sum += ecp[y * (w + 1) + w]; erp[y + 1] = sum; }
+  }
+
+  samplePoint(out) {
+    const w = this.w, h = this.h, erp = this._erp, ecp = this._ecp;
+    const u1 = this.rnd.float64(), u2 = this.rnd.float64();
+    const total = erp[h];
+    if (!(total > 0)) { out[0] = u1 * w; out[1] = u2 * h; return; }
+    let target = u1 * total;
+    let lo = 0, hi = h - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (erp[mid + 1] > target) hi = mid; else lo = mid + 1; }
+    const y = lo;
+    const rowBase = y * (w + 1);
+    const rowTotal = ecp[rowBase + w];
+    if (!(rowTotal > 0)) { out[0] = u2 * w; out[1] = y + 0.5; return; }
+    let target2 = u2 * rowTotal;
+    let lo2 = 0, hi2 = w - 1;
+    while (lo2 < hi2) { const mid = (lo2 + hi2) >> 1; if (ecp[rowBase + mid + 1] > target2) hi2 = mid; else lo2 = mid + 1; }
+    out[0] = lo2 + 0.5;
+    out[1] = y + 0.5;
   }
 
   differenceFull() {
@@ -1067,15 +1143,16 @@ class PrimitiveModel {
   }
 
   makeShapeUninit(type) {
+    let s;
     switch (type) {
-      case SHAPE_TRIANGLE: return TriangleShape.uninit(this.rnd, this.w, this.h);
-      case SHAPE_ROTATED_RECT: return RotatedRectShape.uninit(this.rnd, this.w, this.h);
-      default: {
-        const e = RotatedEllipseShape.uninit(this.rnd, this.w, this.h);
-        e.rasterizer = this.rasterizer;
-        return e;
-      }
+      case SHAPE_TRIANGLE: s = TriangleShape.uninit(this.rnd, this.w, this.h); break;
+      case SHAPE_ROTATED_RECT: s = RotatedRectShape.uninit(this.rnd, this.w, this.h); break;
+      default:
+        s = RotatedEllipseShape.uninit(this.rnd, this.w, this.h);
+        s.rasterizer = this.rasterizer;
     }
+    s.model = this;
+    return s;
   }
 
   bestHillClimbState(type, alpha, n, age, m) {
@@ -1104,6 +1181,14 @@ class PrimitiveModel {
         const y = lines.y[li];
         if (y !== prevY) { this._rebuildRunsRow(y); prevY = y; }
       }
+    }
+    if (this._guided) {
+      let pv = -1;
+      for (let li = 0; li < lines.n; li++) {
+        const y = lines.y[li];
+        if (y !== pv) { this._rebuildErrRow(y); pv = y; }
+      }
+      this._rebuildRowPrefix();
     }
     this.shapes.push(shape);
     this.colors.push(color);
@@ -1398,9 +1483,11 @@ function processFill(jobId, rgba, width, height, config) {
   const model = new PrimitiveModel(workImage, workWidth, workHeight, 255, 255, 255, bgA, seed);
   const shapeConfigs = buildShapeConfigs(config.allowed_shapes, numPrimitives);
 
-  // Go search defaults: n=1000 random, age=100 hill-climb, m=16 climbs (one
-  // worker → wm=16). Required for bit-exact parity with `primitive -j 1`.
-  const SEARCH_N = 1000, SEARCH_AGE = 100, SEARCH_M = 16;
+  // v2 prototype: search budget and guided placement are configurable.
+  const SEARCH_N = Math.max(1, Number(config.search_n || 1000) | 0);
+  const SEARCH_AGE = Math.max(1, Number(config.search_age || 100) | 0);
+  const SEARCH_M = Math.max(1, Number(config.search_m || 16) | 0);
+  if (config.guided_sampling) model.enableGuidedSampling();
 
   const results = [];
   let done = 0;

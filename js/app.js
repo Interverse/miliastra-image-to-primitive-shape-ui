@@ -535,6 +535,15 @@
       cfg.image_scale = Number($("imageScale").value);
       cfg.output_alpha = Number($("outputAlpha").value) / 100;
       cfg.enable_png_mode = $("enablePngMode").checked;
+      if ($("enhancedMode").checked) {
+        // Enhanced mode: error-guided candidate placement with a reduced
+        // search budget (~9x faster per primitive, deterministic; see
+        // the algorithm-redesign investigation). Off = bit-exact original.
+        cfg.guided_sampling = true;
+        cfg.search_n = 150;
+        cfg.search_age = 100;
+        cfg.search_m = 4;
+      }
       const allowed = [];
       if ($("shapeCircle").checked) allowed.push("circle");
       if ($("shapeRect").checked) allowed.push("rect");
