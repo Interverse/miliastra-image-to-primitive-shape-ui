@@ -3,7 +3,9 @@
  *
  * Locales register themselves on window.LOCALES (see js/locales/*.js).
  * English is the fallback for any missing key. Language choice persists in
- * localStorage and defaults from navigator.language.
+ * the toolkit-wide "miliastra-lang" localStorage entry (shared by all
+ * Miliastra Toolkit sites on this origin — see docs/language-sync.md) and
+ * defaults from navigator.language.
  *
  * Usage:
  *   I18N.t("upload.title")                  → translated string
@@ -16,7 +18,19 @@
 window.LOCALES = window.LOCALES || {};
 
 const I18N = (() => {
-  const STORAGE_KEY = "shaper_lang";
+  /* Toolkit-wide shared preference (docs/language-sync.md). The shared key
+   * stores canonical codes (zhs/zht for Chinese); this site keeps its
+   * internal zh-CN/zh-TW codes and translates at the storage boundary. */
+  const SHARED_KEY = "miliastra-lang";
+  const LEGACY_KEY = "shaper_lang"; // pre-toolkit key; migrated once, then unused
+  const CANONICAL_LANGS = [
+    "en", "zhs", "zht", "ja", "ko", "es", "fr", "ru",
+    "th", "vi", "de", "id", "pt", "tr", "it",
+  ];
+  const CANONICAL_TO_INTERNAL = { zhs: "zh-CN", zht: "zh-TW" };
+  const INTERNAL_TO_CANONICAL = { "zh-CN": "zhs", "zh-TW": "zht" };
+  const toInternal = (code) => CANONICAL_TO_INTERNAL[code] || code;
+  const toCanonical = (code) => INTERNAL_TO_CANONICAL[code] || code;
   const FALLBACK = "en";
 
   /* Order matches Genshin Impact's official language list. */
@@ -42,8 +56,22 @@ const I18N = (() => {
   const listeners = [];
 
   function detectLanguage() {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored && window.LOCALES[stored]) return stored;
+    try {
+      // 1. Toolkit-wide preference; ignore (don't delete) invalid values.
+      const shared = localStorage.getItem(SHARED_KEY);
+      if (CANONICAL_LANGS.includes(shared)) {
+        const internal = toInternal(shared);
+        if (window.LOCALES[internal]) return internal;
+      }
+      // 2. One-time migration of this site's old key.
+      const legacy = localStorage.getItem(LEGACY_KEY);
+      if (legacy && window.LOCALES[legacy]) {
+        localStorage.setItem(SHARED_KEY, toCanonical(legacy));
+        localStorage.removeItem(LEGACY_KEY);
+        return legacy;
+      }
+    } catch (e) { /* storage unavailable — fall back to detection */ }
+    // 3. Browser language auto-detection (not persisted).
     const navLangs = navigator.languages || [navigator.language || "en"];
     for (const raw of navLangs) {
       const lang = String(raw);
@@ -94,13 +122,17 @@ const I18N = (() => {
     });
   }
 
-  function setLang(code) {
-    if (!window.LOCALES[code]) code = FALLBACK;
+  function applyLang(code) {
     current = code;
-    localStorage.setItem(STORAGE_KEY, code);
     document.documentElement.lang = code;
     apply();
     listeners.forEach((fn) => fn(code));
+  }
+
+  function setLang(code) {
+    if (!window.LOCALES[code]) code = FALLBACK;
+    try { localStorage.setItem(SHARED_KEY, toCanonical(code)); } catch (e) {}
+    applyLang(code);
   }
 
   function onChange(fn) { listeners.push(fn); }
@@ -109,6 +141,13 @@ const I18N = (() => {
     current = detectLanguage();
     document.documentElement.lang = current;
     apply();
+    // Live sync: language picked on another toolkit site/tab applies here
+    // without a reload. Must never write back to localStorage.
+    window.addEventListener("storage", (e) => {
+      if (e.key !== SHARED_KEY || !CANONICAL_LANGS.includes(e.newValue)) return;
+      const internal = toInternal(e.newValue);
+      if (window.LOCALES[internal] && internal !== current) applyLang(internal);
+    });
   }
 
   return {

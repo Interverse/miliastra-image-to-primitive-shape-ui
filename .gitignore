@@ -36,3 +36,5 @@ tests/parity/shapely/decision_log.jsonl
 tests/parity/shapely/goldens.json
 tests/parity/shapely/simplify.json
 tests/parity/shapely/_unit_circles.json
+
+docs/

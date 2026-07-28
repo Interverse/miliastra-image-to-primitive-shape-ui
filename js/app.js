@@ -71,6 +71,7 @@
   I18N.init();
   langSelect.value = I18N.lang;
   langSelect.addEventListener("change", () => I18N.setLang(langSelect.value));
+  I18N.onChange((code) => { langSelect.value = code; });
 
   /* ════════════════════ view + mode switching ════════════════════ */
 
