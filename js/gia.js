@@ -18,7 +18,8 @@ var GIA = (function () {
   "use strict";
 
   var MODE_DECORATION = "decoration";
-  var MODE_IMAGE = "image";
+  var MODE_IMAGE = "image"; // Server Control Template image group
+  var MODE_CLIENT_IMAGE = "client_image"; // Client Control Template image group
 
   var DEFAULT_IMAGE_ASSET_REFS = {
     rectangle: 100001,
@@ -890,6 +891,50 @@ var GIA = (function () {
   // Identical algorithm to _order_elements_for_image_mode (mirrors the Python).
   var _storage_order_elements_for_image_mode = _order_elements_for_image_mode;
 
+  /* ── hierarchy order, as *indices* into the source element list ──────
+   *
+   * `elements` is in painter order: elements[0] is drawn first and ends up
+   * at the bottom. Every other consumer in this project relies on that —
+   * the canvas preview, the SVG export and the CSS export all paint
+   * `renderOrderedElements()` (background, then foreground, unreversed) and
+   * are visually correct.
+   *
+   * The two control templates composite their children in OPPOSITE
+   * directions, so each gets its own permutation:
+   *
+   *   Server: the writer emits background, then foreground REVERSED —
+   *           i.e. the last-painted (topmost) primitive is child #1. This
+   *           is byte-verified against the original Python writer, so the
+   *           Server format must render its hierarchy back-to-front:
+   *           earlier child = drawn later = on top.
+   *
+   *   Client: earlier in the hierarchy is rendered FIRST and is therefore
+   *           BEHIND later siblings. The hierarchy is the painter order
+   *           itself, unreversed.
+   *
+   * Index permutations (rather than element references) keep this exact
+   * even if the same element object appears twice in the list. */
+  function _split_indices(elements) {
+    var foreground = [];
+    var background = [];
+    var list = elements || [];
+    for (var i = 0; i < list.length; i++) {
+      if (get(list[i], "is_background", undefined)) background.push(i);
+      else foreground.push(i);
+    }
+    return { foreground: foreground, background: background };
+  }
+
+  function _order_indices_for_image_mode(elements) {
+    var split = _split_indices(elements);
+    return split.background.concat(split.foreground.slice().reverse());
+  }
+
+  function _order_indices_for_client_image_mode(elements) {
+    var split = _split_indices(elements);
+    return split.background.concat(split.foreground);
+  }
+
   function create_ui_image_payload(opts) {
     var guid = opts.guid;
     var index = opts.index;
@@ -1415,16 +1460,1934 @@ var GIA = (function () {
     return pr_writer.get_bytes();
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // Logical Image Representation (shared by the Server and Client
+  // serializers)
+  //
+  //   image processing → logical image representation → Server .gia
+  //   image processing → logical image representation → Client .gia
+  //
+  // `buildImageScene` is the single place where a result payload is turned
+  // into positioned, sized, coloured image objects; neither serializer may
+  // re-derive any of it. In particular the image/resource ID table
+  // (DEFAULT_IMAGE_ASSET_REFS + each element's `image_asset_ref`) is
+  // resolved here exactly once, so a given element always maps to the same
+  // ID in both outputs.
+  // ══════════════════════════════════════════════════════════════════
+
+  var DEFAULT_PACKED_COLOR = 2164260863; // 0x80FFFFFF
+
+  /* Resolve one element into the shared object model. Mirrors the original
+   * Python writer's per-element arithmetic exactly — the Server serializer
+   * is byte-compared against it, so nothing here may change. */
+  function _build_image_object(element, i) {
+    var shape_type = _normalize_element_shape_type(
+      get(element, "type", undefined)
+    );
+    var center = pyOr(
+      get(element, "relative", undefined),
+      get(element, "center", undefined),
+      {}
+    );
+    var size = pyOr(get(element, "size", undefined), {});
+    var rot = pyOr(get(element, "rotation", undefined), {});
+    var rot_z =
+      rot !== null && typeof rot === "object" && !Array.isArray(rot)
+        ? get(rot, "z", 0.0)
+        : rot;
+
+    var size_x, size_y;
+    if (shape_type === "ellipse") {
+      var rx = Number(get(size, "rx", 1.0));
+      var ry = Number(get(size, "ry", 1.0));
+      size_x = rx * 2.0;
+      size_y = ry * 2.0;
+    } else if (
+      shape_type === "rectangle" ||
+      shape_type === "triangle" ||
+      shape_type === "four_point_star" ||
+      shape_type === "five_point_star"
+    ) {
+      size_x = Number(get(size, "width", 1.0));
+      size_y = Number(get(size, "height", 1.0));
+    } else {
+      size_x = Number(get(size, "width", 1.0));
+      size_y = Number(get(size, "height", 1.0));
+    }
+
+    var image_asset_ref = Math.trunc(
+      Number(
+        get(
+          element,
+          "image_asset_ref",
+          Object.prototype.hasOwnProperty.call(
+            DEFAULT_IMAGE_ASSET_REFS,
+            shape_type
+          )
+            ? DEFAULT_IMAGE_ASSET_REFS[shape_type]
+            : 100002
+        )
+      )
+    );
+    // Python: int(element.get("packed_color", default)) — a present-but-None
+    // value raises TypeError in the original (this is how the currently
+    // broken decoration→GIA export fails upstream); replicate the error
+    // instead of coercing null to 0.
+    var rawPackedColor = get(element, "packed_color", DEFAULT_PACKED_COLOR);
+    if (rawPackedColor === null) {
+      throw new TypeError(
+        "int() argument must be a string, a bytes-like object or a real number, not 'NoneType'"
+      );
+    }
+    var packed_color = Math.trunc(Number(rawPackedColor));
+    packed_color = _color_to_packed(
+      get(element, "color", undefined),
+      get(element, "alpha", undefined),
+      packed_color
+    );
+
+    return {
+      element: element, // identity key (mirror Python id(element))
+      shape_type: shape_type,
+      name: String(i + 1),
+      index: i + 2,
+      offset_x: Number(get(center, "x", 0)),
+      offset_y: Number(get(center, "y", 0)),
+      size_x: size_x,
+      size_y: size_y,
+      rot_z: rot_z,
+      image_asset_ref: image_asset_ref,
+      packed_color: packed_color,
+    };
+  }
+
+  /* ── The Client container is always an image ─────────────────────────
+   *
+   * Reverse-engineered from assets/client_mask_off_template.gia and
+   * assets/client_mask_template.gia — the same object exported twice with
+   * the in-game mask toggled. The only difference between them is one
+   * varint, `505[slot 74 / type 97].503.85.501`: present ⇒ mask on, absent
+   * ⇒ mask off. Everything else, including the container's image settings,
+   * is byte-identical.
+   *
+   * So a Client masking parent is just an ordinary image that happens to
+   * have children and a toggle. Generated output therefore ALWAYS gives the
+   * group an image parent, sized to the source image rectangle, tinted
+   * fully transparent so it is never drawn, with the toggle OFF — the
+   * player turns it on in game and the group clips exactly to the source
+   * image. Because the parent's rect carries an offset, every child offset
+   * is compensated by that much, once. See docs/client-gia-format.md §11. */
+
+  // Tint on the parent image: ARGB alpha 0, so it clips (when toggled on)
+  // without ever being drawn. Taken verbatim from both references.
+  var CLIENT_PARENT_HIDDEN_COLOR = 16777215; // 0x00FFFFFF
+
+  function _rect_of_elements(objects) {
+    if (!objects.length) return null;
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (var i = 0; i < objects.length; i++) {
+      var o = objects[i];
+      var hw = Math.abs(Number(o.size_x) || 0) / 2;
+      var hh = Math.abs(Number(o.size_y) || 0) / 2;
+      minX = Math.min(minX, o.offset_x - hw);
+      maxX = Math.max(maxX, o.offset_x + hw);
+      minY = Math.min(minY, o.offset_y - hh);
+      maxY = Math.max(maxY, o.offset_y + hh);
+    }
+    if (!isFinite(minX) || !isFinite(minY)) return null;
+    return {
+      x: (minX + maxX) / 2,
+      y: (minY + maxY) / 2,
+      width: maxX - minX,
+      height: maxY - minY,
+    };
+  }
+
+  /* The parent image's rect. `image_bounds` (from gia-export.js) is the
+   * source image rectangle and is what the toggle is meant to clip to;
+   * the other two are fallbacks for payloads assembled by hand. */
+  function _build_client_container(json_data, mask_settings, objects) {
+    var bounds = json_data && json_data.image_bounds;
+    var rect = null;
+    if (
+      bounds &&
+      isFinite(Number(bounds.width)) &&
+      isFinite(Number(bounds.height)) &&
+      Number(bounds.width) > 0 &&
+      Number(bounds.height) > 0
+    ) {
+      rect = {
+        x: Number(bounds.x) || 0,
+        y: Number(bounds.y) || 0,
+        width: Number(bounds.width),
+        height: Number(bounds.height),
+      };
+    } else if (
+      mask_settings &&
+      Number(mask_settings.size_x) > 0 &&
+      Number(mask_settings.size_y) > 0
+    ) {
+      rect = {
+        x: Number(mask_settings.position_x) || 0,
+        y: Number(mask_settings.position_y) || 0,
+        width: Number(mask_settings.size_x),
+        height: Number(mask_settings.size_y),
+      };
+    } else {
+      rect = _rect_of_elements(objects) || { x: 0, y: 0, width: 0, height: 0 };
+    }
+
+    return {
+      offset_x: rect.x,
+      offset_y: rect.y,
+      size_x: rect.width,
+      size_y: rect.height,
+      // The parent is the source image rectangle, so: rectangle resource,
+      // from the one shared ID table.
+      image_asset_ref: DEFAULT_IMAGE_ASSET_REFS.rectangle,
+      packed_color: CLIENT_PARENT_HIDDEN_COLOR,
+      // Off by default — the mask is a toggle the player owns. A payload
+      // may pre-enable it, which is the same one-varint difference the two
+      // references differ by.
+      mask_enabled: !!(json_data && json_data.client_mask_enabled),
+    };
+  }
+
+  /* The logical scene both serializers consume.
+   *
+   *   scene.objects       — Server hierarchy order (child #1 = topmost).
+   *   scene.clientObjects — Client hierarchy order (child #1 = bottom-most,
+   *                         i.e. painter order), because the Client
+   *                         renderer draws earlier siblings first.
+   *
+   * Both arrays describe the SAME primitives with the same geometry,
+   * colour and image IDs; only `index` (the sibling position) and the array
+   * order differ. `name` is deliberately stable across the two, so a given
+   * primitive carries the same label in both files and the outputs stay
+   * comparable. */
+  function buildImageScene(json_data) {
+    var elements = json_data && json_data.elements ? json_data.elements : [];
+    var ordered = _order_elements_for_image_mode(elements);
+    var serialized = _storage_order_elements_for_image_mode(elements);
+    var objects = [];
+    var i;
+    for (i = 0; i < ordered.length; i++) {
+      objects.push(_build_image_object(ordered[i], i));
+    }
+
+    // Map each source element position to its Server hierarchy position, so
+    // the Client can reuse the same names while re-ordering the hierarchy.
+    var serverOrderIdx = _order_indices_for_image_mode(elements);
+    var serverPosOf = new Array(elements.length);
+    for (i = 0; i < serverOrderIdx.length; i++) serverPosOf[serverOrderIdx[i]] = i;
+
+    var mask = _normalize_mask_settings(json_data ? json_data.mask : undefined);
+    var clientContainer = _build_client_container(json_data, mask, objects);
+
+    var clientOrderIdx = _order_indices_for_client_image_mode(elements);
+    var clientObjects = [];
+    for (i = 0; i < clientOrderIdx.length; i++) {
+      var sourceIdx = clientOrderIdx[i];
+      var base = objects[serverPosOf[sourceIdx]];
+      var copy = {};
+      for (var k in base) {
+        if (Object.prototype.hasOwnProperty.call(base, k)) copy[k] = base[k];
+      }
+      copy.index = i + 2; // sibling position in the Client hierarchy
+      copy.sourceIndex = sourceIdx;
+      copy.serverIndex = base.index;
+      // Child offsets are relative to the parent image's rect, so they
+      // shift by its offset. Applied exactly once, here, never again at
+      // serialization.
+      copy.offset_x = base.offset_x - clientContainer.offset_x;
+      copy.offset_y = base.offset_y - clientContainer.offset_y;
+      copy.parentOffsetX = clientContainer.offset_x;
+      copy.parentOffsetY = clientContainer.offset_y;
+      clientObjects.push(copy);
+    }
+
+    var group_name = _normalize_group_name(
+      json_data && Object.prototype.hasOwnProperty.call(json_data, "group_name")
+        ? json_data.group_name
+        : ""
+    );
+
+    // The Client container node, modelled explicitly rather than being
+    // conjured during serialization.
+    clientContainer.name = group_name;
+    clientContainer.is_mask = clientContainer.mask_enabled;
+    clientContainer.children = clientObjects;
+
+    return {
+      group_name: group_name,
+      mask: mask,
+      clientContainer: clientContainer,
+      elements: elements,
+      ordered: ordered,
+      serialized: serialized,
+      objects: objects,
+      clientObjects: clientObjects,
+    };
+  }
+
+  // ------------------------------------------------------------------
+  // Shared container/GUID plumbing
+  // ------------------------------------------------------------------
+
+  var UI_IMAGE_CLASS = 15; // per-image child resource class (server + client)
+
+  function _collect_entry_guids_of_class(root_fields, cls) {
+    var out = new Set();
+    for (var i = 0; i < root_fields.length; i++) {
+      if (root_fields[i][0] !== 2) continue;
+      var val = root_fields[i][2];
+      if (!_isBytes(val)) continue;
+      var info = parse_resource_entry(val);
+      if (info["class"] !== cls) continue;
+      out.add(info["guid"]);
+    }
+    return out;
+  }
+
+  function _find_primary_resource(root_fields) {
+    var pr_data = null;
+    for (var i = 0; i < root_fields.length; i++) {
+      if (root_fields[i][0] === 1 && _isBytes(root_fields[i][2])) {
+        pr_data = root_fields[i][2];
+        break;
+      }
+    }
+    var fields = parse_primary_resource(pr_data);
+    var guid = 0;
+    for (var j = 0; j < fields.length; j++) {
+      if (fields[j].tag === 1) {
+        guid = check_locator_guid(fields[j].data);
+        break;
+      }
+    }
+    var cls = null;
+    for (var k = 0; k < fields.length; k++) {
+      if (fields[k].tag === 5 && fields[k].wire === WireType.VARINT) {
+        cls = fields[k].value;
+        break;
+      }
+    }
+    return { data: pr_data, fields: fields, guid: guid, resourceClass: cls };
+  }
+
+  /* GUID allocation: reuse the removed image GUIDs' range, never collide
+   * with a GUID the template still references. */
+  function _make_guid_allocator(root_fields, removed_guids) {
+    var existing_guids = new Set();
+    for (var i = 0; i < root_fields.length; i++) {
+      var tag = root_fields[i][0];
+      var val = root_fields[i][2];
+      if (tag === 1 && _isBytes(val)) {
+        existing_guids.add(check_locator_guid(val));
+      } else if (tag === 2 && _isBytes(val)) {
+        var info = parse_resource_entry(val);
+        if (info["guid"]) existing_guids.add(info["guid"]);
+      }
+    }
+    var reserved_guids = new Set();
+    existing_guids.forEach(function (g) {
+      if (!removed_guids.has(g)) reserved_guids.add(g);
+    });
+
+    var next_guid;
+    if (removed_guids.size > 0) {
+      var mx = -Infinity;
+      removed_guids.forEach(function (g) {
+        if (g > mx) mx = g;
+      });
+      next_guid = mx + 1;
+    } else {
+      next_guid = 1073749460;
+    }
+    while (reserved_guids.has(next_guid)) next_guid += 1;
+
+    return {
+      reserved: reserved_guids,
+      next: function () {
+        while (reserved_guids.has(next_guid)) next_guid += 1;
+        var g = next_guid;
+        reserved_guids.add(g);
+        next_guid += 1;
+        return g;
+      },
+    };
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // Client Control Template serializer
+  //
+  // Reverse-engineered from assets/client_image_template.gia (the supplied
+  // working reference: "Image Container" → Square, Circle). See
+  // docs/client-gia-format.md for the full field survey.
+  //
+  // What the two templates share
+  //   • 20-byte header + 4-byte trailer container, root fields 1/2/3/5.
+  //   • The per-image child resource class (15) and its reference locators
+  //     (kind 8).
+  //   • The rect-transform layout: 501 scale3, 502 anchorMin, 503 anchorMax,
+  //     504 anchoredPosition, 505 sizeDelta, 506 pivot, 508 rotation — the
+  //     reference's Circle sits at anchoredPosition.x ≈ +100 relative to the
+  //     Square, which is what pins this down.
+  //   • Component slots 1 (transform, type 12) and 2 (name, type 15).
+  //   • Image/resource IDs (100001 Square, 100002 Circle, …).
+  //
+  // What differs
+  //   • Container resource class: server 61, client 70.
+  //   • Image settings: server slot 21 / type 38, payload field 31
+  //     {2: id, 3: source_meta, 4: colour}; client slot 73 / type 96,
+  //     payload field 84 {502: colour, 503: id}.
+  //   • The server's "field14" component is slot 4 / type 23; the client's
+  //     is slot 4 / type 86 with a different inner shape.
+  //   • The container's child list is a packed varint field in the client
+  //     and a repeated varint field in the server template.
+  //   • Client-only components: slot 63/type 83, 67/type 90, 68/type 91
+  //     (container), 74/type 97 (children). Their payloads are identical
+  //     across Square and Circle, so they are carried over verbatim.
+  //   • No mask component exists in the client reference (see MASK note).
+  //
+  // Generation strategy: the reference file IS the template. Its container
+  // is kept and re-pointed; one of its image children is used as a
+  // prototype that is cloned per element and patched in place, so every
+  // byte whose purpose is still unknown survives untouched.
+  // ══════════════════════════════════════════════════════════════════
+
+  var CLIENT_CONTAINER_CLASS = 70; // server image container is class 61
+  var SERVER_CONTAINER_CLASS = 61;
+
+  // Component type ids (field 502 of a 505 component record).
+  var COMPONENT_TYPE = {
+    TRANSFORM: 12, // shared
+    NAME: 15, // shared
+    SERVER_FIELD14: 23,
+    SERVER_IMAGE: 38,
+    SERVER_MASK: 56,
+    CLIENT_FIELD14: 86,
+    CLIENT_IMAGE: 96,
+    CLIENT_IMAGE_EXTRA: 97,
+  };
+
+  // Components that must never appear in Client Control Template output.
+  var SERVER_ONLY_COMPONENT_TYPES = [
+    COMPONENT_TYPE.SERVER_FIELD14,
+    COMPONENT_TYPE.SERVER_IMAGE,
+    COMPONENT_TYPE.SERVER_MASK,
+  ];
+
+  // Payload field numbers inside a client component's detail record.
+  var CLIENT_TRANSFORM_FIELD = 13;
+  var CLIENT_IMAGE_FIELD = 84;
+  var CLIENT_IMAGE_COLOR_FIELD = 502;
+  var CLIENT_IMAGE_REF_FIELD = 503;
+  var NAME_PAYLOAD_FIELD = 12;
+  // Image-extra payload; field 501 inside it is the mask flag — the single
+  // structural difference between the masked and unmasked references.
+  var CLIENT_IMAGE_EXTRA_FIELD = 85;
+  var CLIENT_MASK_FLAG_FIELD = 501;
+
+  // ------------------------------------------------------------------
+  // Small message-editing helpers (preserve everything not named)
+  // ------------------------------------------------------------------
+
+  function _writer_from_bytes(bytes) {
+    return { buffer: Array.prototype.slice.call(bytes) };
+  }
+
+  function _msg_set_varint(data, tag, value) {
+    var fields = parse_message_fields(data);
+    var found = false;
+    for (var i = 0; i < fields.length; i++) {
+      if (fields[i].tag === tag && fields[i].wire === WireType.VARINT) {
+        fields[i] = { tag: tag, wire: WireType.VARINT, value: value };
+        found = true;
+        break;
+      }
+    }
+    if (!found) fields.push({ tag: tag, wire: WireType.VARINT, value: value });
+    return build_message(fields);
+  }
+
+  function _msg_set_bytes(data, tag, payload) {
+    var fields = parse_message_fields(data);
+    var found = false;
+    for (var i = 0; i < fields.length; i++) {
+      if (fields[i].tag === tag && fields[i].wire === WireType.LENGTH_DELIMITED) {
+        fields[i] = { tag: tag, wire: WireType.LENGTH_DELIMITED, data: payload };
+        found = true;
+        break;
+      }
+    }
+    if (!found)
+      fields.push({ tag: tag, wire: WireType.LENGTH_DELIMITED, data: payload });
+    return build_message(fields);
+  }
+
+  function _msg_delete_field(data, tag) {
+    var fields = parse_message_fields(data);
+    var out = [];
+    for (var i = 0; i < fields.length; i++) {
+      if (fields[i].tag !== tag) out.push(fields[i]);
+    }
+    return out.length === fields.length ? data : build_message(out);
+  }
+
+  function _lenField(tag, data) {
+    return { tag: tag, wire: WireType.LENGTH_DELIMITED, data: data };
+  }
+
+  function _varField(tag, value) {
+    return { tag: tag, wire: WireType.VARINT, value: value };
+  }
+
+  /* Re-point an asset-info locator ({2: 1, 3: 8, 4: guid}) at the cloned
+   * object. Anything that is not this exact prototype's locator is left
+   * alone. */
+  function _client_repoint_locator(data, proto_guid, new_guid) {
+    if (check_locator_guid(data) !== proto_guid) return data;
+    return _msg_set_varint(data, 4, new_guid);
+  }
+
+  // ------------------------------------------------------------------
+  // Prototype cloning
+  // ------------------------------------------------------------------
+
+  function _client_patch_rect_transform(rt_bytes, obj) {
+    var fields = parse_message_fields(rt_bytes);
+    var out = [];
+    var wrote_offset = false;
+    var wrote_size = false;
+    var wrote_rot = false;
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i];
+      if (f.tag === 504 && f.wire === WireType.LENGTH_DELIMITED) {
+        out.push(
+          _lenField(504, _build_vector2(obj.offset_x, obj.offset_y).get_bytes())
+        );
+        wrote_offset = true;
+        continue;
+      }
+      if (f.tag === 505 && f.wire === WireType.LENGTH_DELIMITED) {
+        out.push(
+          _lenField(505, _build_vector2(obj.size_x, obj.size_y).get_bytes())
+        );
+        wrote_size = true;
+        continue;
+      }
+      if (f.tag === 508 && f.wire === WireType.LENGTH_DELIMITED) {
+        out.push(_lenField(508, _build_rotation(obj.rot_z).get_bytes()));
+        wrote_rot = true;
+        continue;
+      }
+      out.push(f);
+    }
+    if (!wrote_offset)
+      out.push(
+        _lenField(504, _build_vector2(obj.offset_x, obj.offset_y).get_bytes())
+      );
+    if (!wrote_size)
+      out.push(
+        _lenField(505, _build_vector2(obj.size_x, obj.size_y).get_bytes())
+      );
+    if (!wrote_rot)
+      out.push(_lenField(508, _build_rotation(obj.rot_z).get_bytes()));
+    return build_message(out);
+  }
+
+  /* The transform is stored once per platform variant (4 of them in both
+   * templates); every variant carries the same rect transform. */
+  function _client_patch_multi_platform(mp_bytes, obj) {
+    var fields = parse_message_fields(mp_bytes);
+    var out = [];
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i];
+      if (f.tag !== 501 || f.wire !== WireType.LENGTH_DELIMITED) {
+        out.push(f);
+        continue;
+      }
+      var pf = parse_message_fields(f.data);
+      var po = [];
+      for (var j = 0; j < pf.length; j++) {
+        var g = pf[j];
+        if (g.tag === 502 && g.wire === WireType.LENGTH_DELIMITED) {
+          po.push(_lenField(502, _client_patch_rect_transform(g.data, obj)));
+        } else {
+          po.push(g);
+        }
+      }
+      out.push(_lenField(501, build_message(po)));
+    }
+    return build_message(out);
+  }
+
+  function _client_patch_transform_payload(data, obj) {
+    var fields = parse_message_fields(data);
+    var out = [];
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i];
+      if (f.tag === 12 && f.wire === WireType.LENGTH_DELIMITED) {
+        out.push(_lenField(12, _client_patch_multi_platform(f.data, obj)));
+      } else {
+        out.push(f);
+      }
+    }
+    return build_message(out);
+  }
+
+  /* Mirror ProtoWriter.write_int32: a negative int is written as its
+   * two's-complement 64-bit value, not as a raw (never-terminating) varint. */
+  function _asWireVarint(value) {
+    if (typeof value === "bigint") return value < 0n ? value + TWO_POW_64 : value;
+    return value < 0 ? BigInt(value) + TWO_POW_64 : value;
+  }
+
+  function _client_patch_image_payload(data, obj) {
+    var patched = _msg_set_varint(
+      data,
+      CLIENT_IMAGE_COLOR_FIELD,
+      _asWireVarint(obj.packed_color)
+    );
+    return _msg_set_varint(
+      patched,
+      CLIENT_IMAGE_REF_FIELD,
+      _asWireVarint(obj.image_asset_ref)
+    );
+  }
+
+  function _client_name_payload(name) {
+    var w = new ProtoWriter();
+    if (name) w.write_string(501, name);
+    return w.get_bytes();
+  }
+
+  /* Patch one component record (a 505 field) and its detail sub-record. */
+  function _client_patch_component(comp_bytes, proto_guid, new_guid, obj) {
+    var fields = parse_message_fields(comp_bytes);
+    var type = _find_varint(fields, 502);
+    var out = [];
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i];
+      if (f.wire !== WireType.LENGTH_DELIMITED) {
+        out.push(f);
+        continue;
+      }
+      if (f.tag === 503) {
+        out.push(
+          _lenField(
+            503,
+            _client_patch_component_detail(f.data, proto_guid, new_guid, obj, type)
+          )
+        );
+        continue;
+      }
+      if (type === COMPONENT_TYPE.NAME && f.tag === NAME_PAYLOAD_FIELD) {
+        out.push(_lenField(f.tag, _client_name_payload(obj.name)));
+        continue;
+      }
+      out.push(f);
+    }
+    return build_message(out);
+  }
+
+  function _client_patch_component_detail(
+    detail_bytes,
+    proto_guid,
+    new_guid,
+    obj,
+    type
+  ) {
+    var fields = parse_message_fields(detail_bytes);
+    var out = [];
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i];
+      if (f.wire !== WireType.LENGTH_DELIMITED) {
+        out.push(f);
+        continue;
+      }
+      if (f.tag === 504) {
+        out.push(
+          _lenField(504, _client_repoint_locator(f.data, proto_guid, new_guid))
+        );
+        continue;
+      }
+      if (f.tag === 503) {
+        // nested detail (not present in the reference, handled defensively)
+        out.push(
+          _lenField(
+            503,
+            _client_patch_component_detail(f.data, proto_guid, new_guid, obj, type)
+          )
+        );
+        continue;
+      }
+      if (type === COMPONENT_TYPE.TRANSFORM && f.tag === CLIENT_TRANSFORM_FIELD) {
+        out.push(_lenField(f.tag, _client_patch_transform_payload(f.data, obj)));
+        continue;
+      }
+      if (type === COMPONENT_TYPE.CLIENT_IMAGE && f.tag === CLIENT_IMAGE_FIELD) {
+        out.push(_lenField(f.tag, _client_patch_image_payload(f.data, obj)));
+        continue;
+      }
+      if (
+        type === COMPONENT_TYPE.CLIENT_IMAGE_EXTRA &&
+        f.tag === CLIENT_IMAGE_EXTRA_FIELD
+      ) {
+        // The mask toggle: present ⇒ on, absent ⇒ off. Set or clear it
+        // explicitly so the result does not depend on which reference the
+        // template came from; every other field in the payload is left
+        // exactly as the template had it.
+        out.push(
+          _lenField(
+            f.tag,
+            obj.is_mask
+              ? _msg_set_varint(f.data, CLIENT_MASK_FLAG_FIELD, 1)
+              : _msg_delete_field(f.data, CLIENT_MASK_FLAG_FIELD)
+          )
+        );
+        continue;
+      }
+      if (type === COMPONENT_TYPE.NAME && f.tag === NAME_PAYLOAD_FIELD) {
+        out.push(_lenField(f.tag, _client_name_payload(obj.name)));
+        continue;
+      }
+      out.push(f);
+    }
+    return build_message(out);
+  }
+
+  /* The 502 "info" records: slot 1 holds the object GUID, slot 2 its
+   * sibling index. Other slots (e.g. the container's slot 4 ancestor list)
+   * are template data and are copied through. */
+  function _client_patch_info(info_bytes, new_guid, index) {
+    var fields = parse_message_fields(info_bytes);
+    var slot = _find_varint(fields, 501);
+    var out = [];
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i];
+      if (slot === 1 && f.tag === 11 && f.wire === WireType.LENGTH_DELIMITED) {
+        out.push(_lenField(11, _msg_set_varint(f.data, 501, new_guid)));
+        continue;
+      }
+      if (slot === 2 && f.tag === 12 && f.wire === WireType.LENGTH_DELIMITED) {
+        out.push(_lenField(12, _msg_set_varint(f.data, 501, index)));
+        continue;
+      }
+      out.push(f);
+    }
+    return build_message(out);
+  }
+
+  function _client_patch_child_content(
+    proto_content,
+    proto_guid,
+    new_guid,
+    parent_guid,
+    obj
+  ) {
+    var fields = parse_message_fields(proto_content);
+    var out = [];
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i];
+      if (f.tag === 501 && f.wire === WireType.VARINT) {
+        out.push(_varField(501, new_guid));
+        continue;
+      }
+      if (f.tag === 504 && f.wire === WireType.VARINT) {
+        out.push(_varField(504, parent_guid));
+        continue;
+      }
+      if (f.tag === 502 && f.wire === WireType.LENGTH_DELIMITED) {
+        out.push(_lenField(502, _client_patch_info(f.data, new_guid, obj.index)));
+        continue;
+      }
+      if (f.tag === 505 && f.wire === WireType.LENGTH_DELIMITED) {
+        out.push(
+          _lenField(505, _client_patch_component(f.data, proto_guid, new_guid, obj))
+        );
+        continue;
+      }
+      out.push(f);
+    }
+    return build_message(out);
+  }
+
+  function _client_build_entry(proto_entry_fields, new_guid, name, content_bytes) {
+    var out = [];
+    for (var i = 0; i < proto_entry_fields.length; i++) {
+      var f = proto_entry_fields[i];
+      if (f.tag === 1 && f.wire === WireType.LENGTH_DELIMITED) {
+        out.push(_lenField(1, _msg_set_varint(f.data, 4, new_guid)));
+        continue;
+      }
+      if (f.tag === 3 && f.wire === WireType.LENGTH_DELIMITED) {
+        out.push(_lenField(3, encodeUtf8(name)));
+        continue;
+      }
+      if (f.tag === 19 && f.wire === WireType.LENGTH_DELIMITED) {
+        var uf = parse_message_fields(f.data);
+        var uo = [];
+        for (var j = 0; j < uf.length; j++) {
+          var g = uf[j];
+          if (g.tag === 1 && g.wire === WireType.LENGTH_DELIMITED) {
+            uo.push(_lenField(1, content_bytes));
+          } else {
+            uo.push(g);
+          }
+        }
+        out.push(_lenField(19, build_message(uo)));
+        continue;
+      }
+      out.push(f);
+    }
+    return build_message(out);
+  }
+
+  // ------------------------------------------------------------------
+  // Container (primary resource) patching
+  // ------------------------------------------------------------------
+
+  /* Patch the container's object content. `mask_obj` is non-null only when
+   * the container is acting as a mask; it then also carries the mask
+   * shape's image ID, the mask rect as the container's own transform, the
+   * transparent tint and the mask flag — all applied through the same
+   * component patcher the children use, so unknown components survive. */
+  function _client_patch_container_content(
+    content,
+    group_name,
+    child_guids,
+    container_guid,
+    mask_obj
+  ) {
+    var fields = parse_message_fields(content);
+    var out = [];
+    var children_written = false;
+    var name_written = false;
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i];
+      // Drop every existing child list, in either wire form, so no stale
+      // GUID survives; re-emit one packed list in the template's position.
+      if (f.tag === 503) {
+        if (!children_written) {
+          if (child_guids.length)
+            out.push(_lenField(503, encode_packed_varints(child_guids)));
+          children_written = true;
+        }
+        continue;
+      }
+      if (f.tag === 505 && f.wire === WireType.LENGTH_DELIMITED) {
+        var cf = parse_message_fields(f.data);
+        var ctype = _find_varint(cf, 502);
+        if (mask_obj) {
+          // Name, transform, image settings and the mask flag all go
+          // through the shared component patcher.
+          out.push(
+            _lenField(
+              505,
+              _client_patch_component(f.data, container_guid, container_guid, mask_obj)
+            )
+          );
+          if (ctype === COMPONENT_TYPE.NAME) name_written = true;
+          continue;
+        }
+        if (group_name && ctype === COMPONENT_TYPE.NAME) {
+          var co = [];
+          for (var j = 0; j < cf.length; j++) {
+            var g = cf[j];
+            if (
+              g.tag === NAME_PAYLOAD_FIELD &&
+              g.wire === WireType.LENGTH_DELIMITED
+            ) {
+              co.push(_lenField(g.tag, _client_name_payload(group_name)));
+            } else {
+              co.push(g);
+            }
+          }
+          out.push(_lenField(505, build_message(co)));
+          name_written = true;
+          continue;
+        }
+      }
+      out.push(f);
+    }
+    if (!children_written && child_guids.length) {
+      out.push(_lenField(503, encode_packed_varints(child_guids)));
+    }
+    if (group_name && !name_written) {
+      out.push(_lenField(505, _build_name_data(group_name).get_bytes()));
+    }
+    return build_message(out);
+  }
+
+  function _client_patch_primary_resource(
+    pr_fields,
+    removed_guids,
+    new_refs,
+    new_child_guids,
+    group_name,
+    container_guid,
+    mask_obj
+  ) {
+    var pr_writer = new ProtoWriter();
+    var inserted_new_refs = false;
+    var resource_name_written = false;
+    for (var i = 0; i < pr_fields.length; i++) {
+      var f = pr_fields[i];
+      if (f.tag === 2) {
+        var ref_guid = check_locator_guid(f.data);
+        if (removed_guids.has(ref_guid)) {
+          if (!inserted_new_refs) {
+            for (var r = 0; r < new_refs.length; r++)
+              pr_writer.write_message(2, new_refs[r]);
+            inserted_new_refs = true;
+          }
+          continue;
+        }
+        pr_writer.write_tag(2, WireType.LENGTH_DELIMITED);
+        pr_writer.write_varint(f.data.length);
+        pr_writer.extend(f.data);
+      } else if (f.tag === 19) {
+        var ui_fields = parse_message_fields(f.data);
+        var new_ui_fields = [];
+        for (var u = 0; u < ui_fields.length; u++) {
+          var uf = ui_fields[u];
+          if (uf.tag === 1 && uf.wire === WireType.LENGTH_DELIMITED) {
+            new_ui_fields.push(
+              _lenField(
+                1,
+                _client_patch_container_content(
+                  uf.data,
+                  group_name,
+                  new_child_guids,
+                  container_guid,
+                  mask_obj
+                )
+              )
+            );
+          } else {
+            new_ui_fields.push(uf);
+          }
+        }
+        var patched_ui = build_message(new_ui_fields);
+        pr_writer.write_tag(19, WireType.LENGTH_DELIMITED);
+        pr_writer.write_varint(patched_ui.length);
+        pr_writer.extend(patched_ui);
+      } else if (
+        f.tag === 3 &&
+        f.wire === WireType.LENGTH_DELIMITED &&
+        group_name
+      ) {
+        pr_writer.write_string(3, group_name);
+        resource_name_written = true;
+      } else if ("data" in f) {
+        pr_writer.write_tag(f.tag, WireType.LENGTH_DELIMITED);
+        pr_writer.write_varint(f.data.length);
+        pr_writer.extend(f.data);
+      } else if ("value" in f) {
+        pr_writer.write_tag(f.tag, WireType.VARINT);
+        pr_writer.write_varint(f.value);
+      } else if ("raw" in f) {
+        pr_writer.write_tag(f.tag, f.wire);
+        pr_writer.extend(f.raw);
+      }
+    }
+    if (!inserted_new_refs) {
+      for (var s = 0; s < new_refs.length; s++)
+        pr_writer.write_message(2, new_refs[s]);
+    }
+    if (group_name && !resource_name_written) {
+      pr_writer.write_string(3, group_name);
+    }
+    return pr_writer.get_bytes();
+  }
+
+  // ------------------------------------------------------------------
+  // Prototype discovery
+  // ------------------------------------------------------------------
+
+  function _client_read_entry_image_ref(content) {
+    var fields = parse_message_fields(content);
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i];
+      if (f.tag !== 505 || f.wire !== WireType.LENGTH_DELIMITED) continue;
+      var cf = parse_message_fields(f.data);
+      if (_find_varint(cf, 502) !== COMPONENT_TYPE.CLIENT_IMAGE) continue;
+      var detail = null;
+      for (var j = 0; j < cf.length; j++) {
+        if (cf[j].tag === 503 && cf[j].wire === WireType.LENGTH_DELIMITED)
+          detail = cf[j].data;
+      }
+      if (!detail) continue;
+      var df = parse_message_fields(detail);
+      for (var k = 0; k < df.length; k++) {
+        if (
+          df[k].tag === CLIENT_IMAGE_FIELD &&
+          df[k].wire === WireType.LENGTH_DELIMITED
+        ) {
+          return _find_varint(
+            parse_message_fields(df[k].data),
+            CLIENT_IMAGE_REF_FIELD
+          );
+        }
+      }
+    }
+    return null;
+  }
+
+  /* Pick the image child that every generated object is cloned from. The
+   * reference's Square and Circle are byte-identical apart from name,
+   * GUID, image ID and anchoredPosition, so the choice only has to be
+   * deterministic; the rectangle is preferred so the un-patched bytes come
+   * from the un-offset object. */
+  function _client_find_prototype(root_fields) {
+    var candidates = [];
+    for (var i = 0; i < root_fields.length; i++) {
+      if (root_fields[i][0] !== 2) continue;
+      var val = root_fields[i][2];
+      if (!_isBytes(val)) continue;
+      var info = parse_resource_entry(val);
+      if (info["class"] !== UI_IMAGE_CLASS) continue;
+      var fields = parse_message_fields(val);
+      var ui = null;
+      for (var j = 0; j < fields.length; j++) {
+        if (fields[j].tag === 19 && fields[j].wire === WireType.LENGTH_DELIMITED)
+          ui = fields[j].data;
+      }
+      if (!ui) continue;
+      var content = null;
+      var uf = parse_message_fields(ui);
+      for (var k = 0; k < uf.length; k++) {
+        if (uf[k].tag === 1 && uf[k].wire === WireType.LENGTH_DELIMITED)
+          content = uf[k].data;
+      }
+      if (!content) continue;
+      candidates.push({
+        guid: info["guid"],
+        name: info["name"],
+        entryFields: fields,
+        content: content,
+        imageRef: _client_read_entry_image_ref(content),
+      });
+    }
+    if (!candidates.length) return null;
+    for (var c = 0; c < candidates.length; c++) {
+      if (candidates[c].imageRef === DEFAULT_IMAGE_ASSET_REFS.rectangle)
+        return candidates[c];
+    }
+    return candidates[0];
+  }
+
+  // ------------------------------------------------------------------
+  // Client conversion entry point
+  // ------------------------------------------------------------------
+
+  /* The generated container is an image parent, so the template's must be
+   * one too — its image and image-extra components are cloned, never
+   * synthesized. (The mask toggle inside them is ours to set.) */
+  function _client_template_container(pr_fields) {
+    for (var i = 0; i < pr_fields.length; i++) {
+      if (pr_fields[i].tag !== 19 || !("data" in pr_fields[i])) continue;
+      var content = _find_bytes(parse_message_fields(pr_fields[i].data), 1);
+      if (!content) continue;
+      return _decodeObjectContent(content);
+    }
+    return null;
+  }
+
+  function _convert_client_image_mode(
+    json_data,
+    header,
+    content_len,
+    root_fields,
+    tail
+  ) {
+    var scene = buildImageScene(json_data);
+    var group_name = scene.group_name;
+    var container = scene.clientContainer;
+
+    var primary = _find_primary_resource(root_fields);
+    if (!primary.data) {
+      throw new Error("Client GIA template has no primary resource");
+    }
+    if (primary.resourceClass !== CLIENT_CONTAINER_CLASS) {
+      throw new Error(
+        "Client GIA template container is class " +
+          primary.resourceClass +
+          ", expected " +
+          CLIENT_CONTAINER_CLASS +
+          (primary.resourceClass === SERVER_CONTAINER_CLASS
+            ? " (this is a Server Control Template)"
+            : "")
+      );
+    }
+
+    var templateContainer = _client_template_container(primary.fields);
+    if (!templateContainer || !(templateContainer.imageAssetRef > 0)) {
+      throw new Error(
+        "Client GIA template's container is not an image parent — use " +
+          "assets/client_mask_off_template.gia"
+      );
+    }
+    if (
+      !isFinite(container.offset_x) ||
+      !isFinite(container.offset_y) ||
+      !isFinite(container.size_x) ||
+      !isFinite(container.size_y)
+    ) {
+      throw new Error("Client parent image has a non-finite transform");
+    }
+    if (scene.clientObjects.length && !(container.size_x > 0 && container.size_y > 0)) {
+      throw new Error(
+        "Client parent image is " +
+          container.size_x +
+          "×" +
+          container.size_y +
+          " — toggling the mask on would clip the whole image away"
+      );
+    }
+
+    var removed_guids = _collect_entry_guids_of_class(root_fields, UI_IMAGE_CLASS);
+    var prototype = _client_find_prototype(root_fields);
+    if (!prototype) {
+      throw new Error(
+        "Client GIA template has no image child to use as a prototype"
+      );
+    }
+
+    var allocator = _make_guid_allocator(root_fields, removed_guids);
+    var parent_guid = primary.guid;
+
+    // Client hierarchy order: earlier siblings are rendered first and are
+    // therefore BEHIND later ones, so the children go out in painter order
+    // (scene.clientObjects) — the reverse of the Server hierarchy. Entry
+    // order, GUID allocation, the sibling index and the container's child
+    // list all follow this one order, so nothing can disagree about
+    // compositing.
+    var new_entries = [];
+    var new_child_guids = [];
+    var new_refs = [];
+    for (var i = 0; i < scene.clientObjects.length; i++) {
+      var obj = scene.clientObjects[i];
+      var new_guid = allocator.next();
+      var content = _client_patch_child_content(
+        prototype.content,
+        prototype.guid,
+        new_guid,
+        parent_guid,
+        obj
+      );
+      new_entries.push(
+        _writer_from_bytes(
+          _client_build_entry(
+            prototype.entryFields,
+            new_guid,
+            obj.name,
+            content
+          )
+        )
+      );
+      new_child_guids.push(new_guid);
+      new_refs.push(create_reference_locator(new_guid, 8));
+    }
+
+    // The container is always an image parent: source-image rect,
+    // invisible tint, mask toggle off unless explicitly asked for.
+    var container_obj = {
+      name: group_name,
+      is_mask: !!container.mask_enabled,
+      offset_x: container.offset_x,
+      offset_y: container.offset_y,
+      size_x: container.size_x,
+      size_y: container.size_y,
+      rot_z: 0.0,
+      image_asset_ref: container.image_asset_ref,
+      packed_color: container.packed_color,
+    };
+
+    var pr_bytes = _client_patch_primary_resource(
+      primary.fields,
+      removed_guids,
+      new_refs,
+      new_child_guids,
+      group_name,
+      parent_guid,
+      container_obj
+    );
+    return _rebuild_gia(
+      header,
+      content_len,
+      root_fields,
+      tail,
+      new_entries,
+      pr_bytes,
+      UI_IMAGE_CLASS
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // Structural decoder — diagnostics, validation and tests
+  //
+  // `describeGia` decodes either flavour into one shared model so a Server
+  // and a Client file can be compared field by field instead of byte by
+  // byte. `tools/gia-diff.js` and the client validator both run on it.
+  // ══════════════════════════════════════════════════════════════════
+
+  var COMPONENT_TYPE_NAMES = {
+    12: "transform",
+    15: "name",
+    23: "server:field14",
+    38: "server:image-settings",
+    56: "server:mask-settings",
+    83: "client:unknown-83",
+    86: "client:field14",
+    90: "client:unknown-90",
+    91: "client:unknown-91",
+    96: "client:image-settings",
+    97: "client:image-extra",
+  };
+
+  function _readFloat32(raw) {
+    _floatView.setUint8(0, raw[0]);
+    _floatView.setUint8(1, raw[1]);
+    _floatView.setUint8(2, raw[2]);
+    _floatView.setUint8(3, raw[3]);
+    return _floatView.getFloat32(0, true);
+  }
+
+  function _find_fixed32(fields, tag) {
+    for (var i = 0; i < fields.length; i++) {
+      if (fields[i].tag === tag && fields[i].wire === WireType.FIXED32)
+        return _readFloat32(fields[i].raw);
+    }
+    return null;
+  }
+
+  function _find_bytes(fields, tag) {
+    for (var i = 0; i < fields.length; i++) {
+      if (fields[i].tag === tag && fields[i].wire === WireType.LENGTH_DELIMITED)
+        return fields[i].data;
+    }
+    return null;
+  }
+
+  function _find_all_bytes(fields, tag) {
+    var out = [];
+    for (var i = 0; i < fields.length; i++) {
+      if (fields[i].tag === tag && fields[i].wire === WireType.LENGTH_DELIMITED)
+        out.push(fields[i].data);
+    }
+    return out;
+  }
+
+  /* Absent float fields mean zero — the in-game editor omits defaults while
+   * this writer always emits them, so normalize before comparing. */
+  function _readVector2(data) {
+    if (data === null || data === undefined) return { x: 0, y: 0 };
+    var f = parse_message_fields(data);
+    return { x: _find_fixed32(f, 501) || 0, y: _find_fixed32(f, 502) || 0 };
+  }
+
+  function _readVector3(data) {
+    if (data === null || data === undefined) return { x: 0, y: 0, z: 0 };
+    var f = parse_message_fields(data);
+    return {
+      x: _find_fixed32(f, 1) || 0,
+      y: _find_fixed32(f, 2) || 0,
+      z: _find_fixed32(f, 3) || 0,
+    };
+  }
+
+  function _readRotationZ(data) {
+    if (data === null || data === undefined) return 0;
+    return _find_fixed32(parse_message_fields(data), 3) || 0;
+  }
+
+  function _decodeRectTransform(rt) {
+    var f = parse_message_fields(rt);
+    return {
+      scale: _readVector3(_find_bytes(f, 501)),
+      anchorMin: _readVector2(_find_bytes(f, 502)),
+      anchorMax: _readVector2(_find_bytes(f, 503)),
+      offset: _readVector2(_find_bytes(f, 504)),
+      size: _readVector2(_find_bytes(f, 505)),
+      pivot: _readVector2(_find_bytes(f, 506)),
+      rotationZ: _readRotationZ(_find_bytes(f, 508)),
+    };
+  }
+
+  function _decodeTransformComponent(detail) {
+    var df = parse_message_fields(detail);
+    var payload = _find_bytes(df, CLIENT_TRANSFORM_FIELD);
+    if (!payload) return null;
+    var pf = parse_message_fields(payload);
+    var mp = _find_bytes(pf, 12);
+    if (!mp) return null;
+    var mpf = parse_message_fields(mp);
+    var platforms = _find_all_bytes(mpf, 501);
+    var rects = [];
+    for (var i = 0; i < platforms.length; i++) {
+      var plf = parse_message_fields(platforms[i]);
+      var rt = _find_bytes(plf, 502);
+      if (rt) rects.push(_decodeRectTransform(rt));
+    }
+    if (!rects.length) return null;
+    var agree = true;
+    var first = JSON.stringify(rects[0]);
+    for (var j = 1; j < rects.length; j++) {
+      if (JSON.stringify(rects[j]) !== first) {
+        agree = false;
+        break;
+      }
+    }
+    var out = rects[0];
+    out.platformCount = platforms.length;
+    out.platformDiscriminator = _find_varint(mpf, 502);
+    out.platformsAgree = agree;
+    return out;
+  }
+
+  function _decodeServerImageComponent(detail) {
+    var df = parse_message_fields(detail);
+    var payload = _find_bytes(df, 31);
+    if (!payload) return null;
+    var pf = parse_message_fields(payload);
+    return {
+      imageAssetRef: _find_varint(pf, 2),
+      packedColor: _find_varint(pf, 4),
+    };
+  }
+
+  function _decodeClientImageComponent(detail) {
+    var df = parse_message_fields(detail);
+    var payload = _find_bytes(df, CLIENT_IMAGE_FIELD);
+    if (!payload) return null;
+    var pf = parse_message_fields(payload);
+    return {
+      imageAssetRef: _find_varint(pf, CLIENT_IMAGE_REF_FIELD),
+      packedColor: _find_varint(pf, CLIENT_IMAGE_COLOR_FIELD),
+    };
+  }
+
+  /* The mask flag lives in the image-extra component's payload. It is the
+   * ONLY structural difference between the masked and unmasked references,
+   * and it appears on exactly one object: the parent that does the
+   * clipping. */
+  function _decodeClientImageExtra(detail) {
+    var df = parse_message_fields(detail);
+    var payload = _find_bytes(df, CLIENT_IMAGE_EXTRA_FIELD);
+    if (!payload) return null;
+    var pf = parse_message_fields(payload);
+    var extraTags = [];
+    for (var i = 0; i < pf.length; i++) extraTags.push(pf[i].tag);
+    return {
+      maskFlag: _find_varint(pf, CLIENT_MASK_FLAG_FIELD),
+      payloadTags: extraTags,
+    };
+  }
+
+  function _decodeServerMaskComponent(detail) {
+    var df = parse_message_fields(detail);
+    var payload = _find_bytes(df, 47);
+    if (!payload) return null;
+    var pf = parse_message_fields(payload);
+    return {
+      position: _readVector2(_find_bytes(pf, 1)),
+      size: _readVector2(_find_bytes(pf, 2)),
+      shapeType: _find_varint(pf, 3),
+      enabled: _find_varint(pf, 4) === 1,
+    };
+  }
+
+  function _decodeObjectContent(content) {
+    var f = parse_message_fields(content);
+    var out = {
+      guid: _find_varint(f, 501),
+      parentGuid: _find_varint(f, 504),
+      index: null,
+      childGuids: [],
+      components: [],
+      componentTypes: [],
+      transform: null,
+      imageAssetRef: null,
+      packedColor: null,
+      mask: null,
+      isMask: false,
+      maskFlag: null,
+      infoSlots: [],
+    };
+
+    for (var i = 0; i < f.length; i++) {
+      var fld = f[i];
+      if (fld.tag === 503) {
+        if (fld.wire === WireType.VARINT) {
+          out.childGuids.push(fld.value);
+        } else if (fld.wire === WireType.LENGTH_DELIMITED) {
+          var r = new ProtoReader(fld.data);
+          while (!r.eof()) out.childGuids.push(r.read_varint());
+        }
+        continue;
+      }
+      if (fld.tag === 502 && fld.wire === WireType.LENGTH_DELIMITED) {
+        var inf = parse_message_fields(fld.data);
+        var slot = _find_varint(inf, 501);
+        out.infoSlots.push({ slot: slot, type: _find_varint(inf, 502) });
+        if (slot === 2) {
+          var idxMsg = _find_bytes(inf, 12);
+          if (idxMsg) out.index = _find_varint(parse_message_fields(idxMsg), 501);
+        }
+        continue;
+      }
+      if (fld.tag !== 505 || fld.wire !== WireType.LENGTH_DELIMITED) continue;
+
+      var cf = parse_message_fields(fld.data);
+      var type = _find_varint(cf, 502);
+      var detail = _find_bytes(cf, 503);
+      var detailFields = detail ? parse_message_fields(detail) : [];
+      var comp = {
+        slot: _find_varint(cf, 501),
+        type: type,
+        typeName: COMPONENT_TYPE_NAMES[type] || "unknown",
+        payloadTags: [],
+        detailSlot: detail ? _find_varint(detailFields, 501) : null,
+        detailType: detail ? _find_varint(detailFields, 502) : null,
+        known: Object.prototype.hasOwnProperty.call(COMPONENT_TYPE_NAMES, type),
+      };
+      for (var t = 0; t < cf.length; t++) {
+        if (cf[t].tag < 500) comp.payloadTags.push(cf[t].tag);
+      }
+      out.components.push(comp);
+      out.componentTypes.push(type);
+
+      if (type === COMPONENT_TYPE.NAME) {
+        var nameMsg = _find_bytes(cf, NAME_PAYLOAD_FIELD);
+        if (nameMsg) {
+          var nb = _find_bytes(parse_message_fields(nameMsg), 501);
+          out.componentName = nb ? decodeUtf8(nb) : "";
+        }
+      } else if (type === COMPONENT_TYPE.TRANSFORM && detail) {
+        out.transform = _decodeTransformComponent(detail);
+      } else if (type === COMPONENT_TYPE.SERVER_IMAGE && detail) {
+        var si = _decodeServerImageComponent(detail);
+        if (si) {
+          out.imageAssetRef = si.imageAssetRef;
+          out.packedColor = si.packedColor;
+        }
+      } else if (type === COMPONENT_TYPE.CLIENT_IMAGE && detail) {
+        var ci = _decodeClientImageComponent(detail);
+        if (ci) {
+          out.imageAssetRef = ci.imageAssetRef;
+          out.packedColor = ci.packedColor;
+        }
+      } else if (type === COMPONENT_TYPE.CLIENT_IMAGE_EXTRA && detail) {
+        var ce = _decodeClientImageExtra(detail);
+        if (ce) {
+          out.isMask = ce.maskFlag === 1;
+          out.maskFlag = ce.maskFlag;
+          out.imageExtraTags = ce.payloadTags;
+        }
+      } else if (type === COMPONENT_TYPE.SERVER_MASK && detail) {
+        out.mask = _decodeServerMaskComponent(detail);
+      }
+    }
+    return out;
+  }
+
+  function _decodeResource(bytes, isPrimary) {
+    var fields = parse_message_fields(bytes);
+    var info = parse_resource_entry(bytes);
+    var obj = {
+      role: isPrimary ? "container" : "child",
+      resourceClass: info["class"],
+      resourceName: info["name"],
+      guid: info["guid"],
+      byteLength: bytes.length,
+      referenceGuids: [],
+      fieldTags: [],
+    };
+    for (var i = 0; i < fields.length; i++) {
+      obj.fieldTags.push(fields[i].tag);
+      if (fields[i].tag === 2 && fields[i].wire === WireType.LENGTH_DELIMITED) {
+        obj.referenceGuids.push(check_locator_guid(fields[i].data));
+      }
+    }
+    var ui = _find_bytes(fields, 19);
+    if (ui) {
+      var content = _find_bytes(parse_message_fields(ui), 1);
+      if (content) {
+        var decoded = _decodeObjectContent(content);
+        for (var k in decoded) {
+          if (Object.prototype.hasOwnProperty.call(decoded, k)) obj[k] = decoded[k];
+        }
+      }
+    }
+    obj.hasDecorationPayload = !!_find_bytes(fields, 21);
+    return obj;
+  }
+
+  function describeGia(input) {
+    var data = toUint8(input);
+    var parsed = _parse_gia_root_fields(data);
+    var out = {
+      byteLength: data.length,
+      header: {
+        fileSizeField: intFromBytesBE(parsed.header, 0, 4),
+        middleHex: Array.prototype.map
+          .call(parsed.header.subarray(4, 16), function (b) {
+            return (b < 16 ? "0" : "") + b.toString(16);
+          })
+          .join(""),
+        contentLength: parsed.content_len,
+      },
+      tailHex: Array.prototype.map
+        .call(parsed.tail, function (b) {
+          return (b < 16 ? "0" : "") + b.toString(16);
+        })
+        .join(""),
+      rootTags: [],
+      sourcePath: null,
+      version: null,
+      isClassic: false,
+      container: null,
+      children: [],
+    };
+
+    for (var i = 0; i < parsed.root_fields.length; i++) {
+      var tag = parsed.root_fields[i][0];
+      var val = parsed.root_fields[i][2];
+      out.rootTags.push(tag);
+      if (tag === 1 && _isBytes(val)) {
+        out.container = _decodeResource(val, true);
+      } else if (tag === 2 && _isBytes(val)) {
+        out.children.push(_decodeResource(val, false));
+      } else if (tag === 3 && _isBytes(val)) {
+        out.sourcePath = decodeUtf8(val);
+      } else if (tag === 4) {
+        out.isClassic = true;
+      } else if (tag === 5 && _isBytes(val)) {
+        out.version = decodeUtf8(val);
+      }
+    }
+
+    var cls = out.container ? out.container.resourceClass : null;
+    out.templateKind =
+      cls === CLIENT_CONTAINER_CLASS
+        ? "client"
+        : cls === SERVER_CONTAINER_CLASS
+        ? "server"
+        : "unknown";
+    out.containerClass = cls;
+    out.maskRelationships = _describeMaskRelationships(out);
+    return out;
+  }
+
+  /* Mask relationships, resolved to a human-readable tree. A Client mask is
+   * a parent→children relationship carried by the masking object, so the
+   * "content" of a mask is simply its child list. */
+  function _describeMaskRelationships(model) {
+    var out = [];
+    var all = [];
+    if (model.container) all.push(model.container);
+    for (var i = 0; i < model.children.length; i++) all.push(model.children[i]);
+
+    var byGuid = Object.create(null);
+    for (var g = 0; g < all.length; g++) byGuid[all[g].guid] = all[g];
+
+    for (var n = 0; n < all.length; n++) {
+      var node = all[n];
+      if (node.isMask) {
+        var content = [];
+        for (var c = 0; c < (node.childGuids || []).length; c++) {
+          var kid = byGuid[node.childGuids[c]];
+          content.push({
+            guid: node.childGuids[c],
+            name: kid ? kid.resourceName : null,
+            resolved: !!kid,
+            imageAssetRef: kid ? kid.imageAssetRef : null,
+            transform: kid ? kid.transform : null,
+          });
+        }
+        out.push({
+          kind: "client",
+          via: "parent→children (hierarchy); no GUID reference either way",
+          maskGuid: node.guid,
+          maskName: node.resourceName,
+          maskImageAssetRef: node.imageAssetRef,
+          maskPackedColor: node.packedColor,
+          maskGraphicVisible: ((node.packedColor >>> 24) & 255) !== 0,
+          maskTransform: node.transform,
+          maskFlagField: "505[type 97].503.85.501",
+          content: content,
+        });
+      }
+      if (node.mask) {
+        out.push({
+          kind: "server",
+          via: "mask-settings component on the container (own geometry)",
+          maskGuid: node.guid,
+          maskName: node.resourceName,
+          settings: node.mask,
+        });
+      }
+    }
+    return out;
+  }
+
+  // ------------------------------------------------------------------
+  // Client output validation
+  // ------------------------------------------------------------------
+
+  /* Runs before a Client Image download is offered. `expected` is optional:
+   *   {groupName, objects}  — the scene the bytes were generated from. */
+  function validateClientImage(input, expected) {
+    var errors = [];
+    var warnings = [];
+    var model = null;
+    try {
+      model = describeGia(input);
+    } catch (e) {
+      return {
+        ok: false,
+        errors: ["Generated file does not parse: " + (e && e.message)],
+        warnings: warnings,
+        model: null,
+      };
+    }
+    expected = expected || {};
+
+    if (!model.container) {
+      errors.push("No container (primary resource) in the generated file");
+      return { ok: false, errors: errors, warnings: warnings, model: model };
+    }
+
+    var container = model.container;
+    if (container.resourceClass !== CLIENT_CONTAINER_CLASS) {
+      errors.push(
+        "Container resource class is " +
+          container.resourceClass +
+          ", expected the Client Control Template class " +
+          CLIENT_CONTAINER_CLASS
+      );
+    }
+    if (container.resourceName === "Image Container") {
+      errors.push(
+        'Container is still named "Image Container" — it must take the image name'
+      );
+    }
+    if (!container.resourceName) {
+      errors.push("Container has no name");
+    }
+    if (expected.groupName && container.resourceName !== expected.groupName) {
+      errors.push(
+        'Container name is "' +
+          container.resourceName +
+          '", expected "' +
+          expected.groupName +
+          '"'
+      );
+    }
+    if (container.componentName !== undefined && container.componentName !== container.resourceName) {
+      errors.push(
+        "Container resource name and name component disagree (" +
+          container.resourceName +
+          " vs " +
+          container.componentName +
+          ")"
+      );
+    }
+
+    var childGuids = container.childGuids || [];
+    var entryGuids = [];
+    var seen = Object.create(null);
+    for (var i = 0; i < model.children.length; i++) {
+      var child = model.children[i];
+      var label = 'child "' + child.resourceName + '"';
+      if (child.resourceClass !== UI_IMAGE_CLASS) {
+        errors.push(label + " has class " + child.resourceClass + ", expected " + UI_IMAGE_CLASS);
+      }
+      if (!child.guid) {
+        errors.push(label + " has no GUID");
+      } else if (seen[child.guid]) {
+        errors.push("Duplicate GUID " + child.guid + " (" + label + ")");
+      } else {
+        seen[child.guid] = true;
+      }
+      if (child.guid === container.guid) {
+        errors.push(label + " reuses the container GUID " + container.guid);
+      }
+      if (child.parentGuid !== container.guid) {
+        errors.push(
+          label + " points at parent " + child.parentGuid + ", expected " + container.guid
+        );
+      }
+      if (!child.transform) {
+        errors.push(label + " has no transform");
+      } else {
+        var tvals = [
+          child.transform.offset.x,
+          child.transform.offset.y,
+          child.transform.size.x,
+          child.transform.size.y,
+          child.transform.rotationZ,
+        ];
+        for (var t = 0; t < tvals.length; t++) {
+          if (!isFinite(tvals[t])) {
+            errors.push(label + " has a non-finite transform value");
+            break;
+          }
+        }
+      }
+      if (
+        !(typeof child.imageAssetRef === "number" && child.imageAssetRef > 0)
+      ) {
+        errors.push(label + " has no valid image ID (got " + child.imageAssetRef + ")");
+      }
+      if (
+        !(typeof child.packedColor === "number" && child.packedColor >= 0)
+      ) {
+        errors.push(label + " has no valid packed colour");
+      }
+      for (var s = 0; s < SERVER_ONLY_COMPONENT_TYPES.length; s++) {
+        if (child.componentTypes.indexOf(SERVER_ONLY_COMPONENT_TYPES[s]) >= 0) {
+          errors.push(
+            label +
+              " carries Server-only component type " +
+              SERVER_ONLY_COMPONENT_TYPES[s]
+          );
+        }
+      }
+      entryGuids.push(child.guid);
+    }
+
+    for (var c = 0; c < SERVER_ONLY_COMPONENT_TYPES.length; c++) {
+      if (
+        (container.componentTypes || []).indexOf(SERVER_ONLY_COMPONENT_TYPES[c]) >= 0
+      ) {
+        errors.push(
+          "Container carries Server-only component type " +
+            SERVER_ONLY_COMPONENT_TYPES[c]
+        );
+      }
+    }
+
+    // Child list / entry list / reference list must agree exactly.
+    if (childGuids.length !== entryGuids.length) {
+      errors.push(
+        "Container lists " +
+          childGuids.length +
+          " children but the file has " +
+          entryGuids.length +
+          " image entries"
+      );
+    }
+    for (var g = 0; g < childGuids.length; g++) {
+      if (entryGuids.indexOf(childGuids[g]) < 0) {
+        errors.push("Dangling child reference: GUID " + childGuids[g] + " has no entry");
+      }
+    }
+    for (var e = 0; e < entryGuids.length; e++) {
+      if (childGuids.indexOf(entryGuids[e]) < 0) {
+        errors.push("Image entry " + entryGuids[e] + " is not listed as a container child");
+      }
+    }
+    var refs = container.referenceGuids || [];
+    for (var r = 0; r < entryGuids.length; r++) {
+      if (refs.indexOf(entryGuids[r]) < 0) {
+        errors.push("Image entry " + entryGuids[r] + " has no container reference locator");
+      }
+    }
+
+    // Compositing order. The container's child list IS the render order —
+    // earlier siblings are drawn first and sit behind later ones — so it
+    // must match the expected painter order exactly, and the sibling index
+    // stored on each child must agree with its position in that list.
+    var entryByGuid = Object.create(null);
+    for (var b = 0; b < model.children.length; b++) {
+      entryByGuid[model.children[b].guid] = model.children[b];
+    }
+    for (var p = 0; p < childGuids.length; p++) {
+      var listed = entryByGuid[childGuids[p]];
+      if (!listed) continue; // already reported as dangling
+      if (listed.index !== p + 2) {
+        errors.push(
+          'Image object "' +
+            listed.resourceName +
+            '" is at hierarchy position ' +
+            p +
+            " but carries sibling index " +
+            listed.index +
+            " (expected " +
+            (p + 2) +
+            ") — render order is ambiguous"
+        );
+      }
+    }
+
+    if (expected.objects) {
+      if (expected.objects.length !== model.children.length) {
+        errors.push(
+          "Generated " +
+            model.children.length +
+            " image objects, expected " +
+            expected.objects.length
+        );
+      } else {
+        var byName = Object.create(null);
+        for (var m = 0; m < model.children.length; m++) {
+          byName[model.children[m].resourceName] = model.children[m];
+        }
+        for (var o = 0; o < expected.objects.length; o++) {
+          var want = expected.objects[o];
+          var got = byName[want.name];
+          if (!got) {
+            errors.push('Expected image object "' + want.name + '" is missing');
+            continue;
+          }
+          if (got.imageAssetRef !== want.image_asset_ref) {
+            errors.push(
+              'Image object "' +
+                want.name +
+                '" has ID ' +
+                got.imageAssetRef +
+                ", expected " +
+                want.image_asset_ref
+            );
+          }
+          // expected.objects is in Client hierarchy (painter) order.
+          if (childGuids.length === expected.objects.length) {
+            var atPos = entryByGuid[childGuids[o]];
+            if (atPos && atPos.resourceName !== want.name) {
+              errors.push(
+                "Hierarchy position " +
+                  o +
+                  ' holds "' +
+                  atPos.resourceName +
+                  '" but the render order requires "' +
+                  want.name +
+                  '" — overlapping primitives would composite in the wrong order'
+              );
+            }
+          }
+        }
+      }
+    }
+
+    // ── the parent image and the mask toggle ──────────────────────────
+    // Every Client group gets an image parent sized to the source image,
+    // so the in-game mask toggle clips to exactly what the source shows.
+    // The toggle itself is off unless the caller asked for it.
+    var wantMask = !!(expected.container && expected.container.mask_enabled);
+
+    if (!(typeof container.imageAssetRef === "number" && container.imageAssetRef > 0)) {
+      errors.push(
+        "The container is not an image parent (image ID " +
+          container.imageAssetRef +
+          ") — the in-game mask toggle would have nothing to clip to"
+      );
+    }
+    if (((container.packedColor >>> 24) & 255) !== 0) {
+      warnings.push(
+        "The parent image is not fully transparent, so it will be drawn" +
+          " behind the group instead of only clipping when toggled on."
+      );
+    }
+    if (container.isMask !== wantMask) {
+      errors.push(
+        wantMask
+          ? "The mask toggle should be on but the container does not carry it"
+          : "The mask toggle should be off by default but the container carries it"
+      );
+    }
+    for (var mc = 0; mc < model.children.length; mc++) {
+      if (model.children[mc].isMask) {
+        errors.push(
+          'Image object "' +
+            model.children[mc].resourceName +
+            '" carries the mask toggle — only the parent may mask'
+        );
+      }
+    }
+    if (!container.transform) {
+      errors.push("The container has no transform");
+    } else {
+      var mt = container.transform;
+      var mvals = [mt.offset.x, mt.offset.y, mt.size.x, mt.size.y];
+      for (var mv = 0; mv < mvals.length; mv++) {
+        if (!isFinite(mvals[mv])) {
+          errors.push("The parent image rect has a non-finite value");
+          break;
+        }
+      }
+      if (model.children.length && !(mt.size.x > 0 && mt.size.y > 0)) {
+        errors.push(
+          "The parent image rect is " +
+            mt.size.x +
+            "×" +
+            mt.size.y +
+            " — toggling the mask on would clip the whole image away"
+        );
+      }
+      if (expected.container) {
+        if (
+          Math.abs(mt.size.x - expected.container.size_x) > 1e-3 ||
+          Math.abs(mt.size.y - expected.container.size_y) > 1e-3
+        ) {
+          errors.push(
+            "Parent image is " +
+              mt.size.x +
+              "×" +
+              mt.size.y +
+              ", expected the source image rect " +
+              expected.container.size_x +
+              "×" +
+              expected.container.size_y
+          );
+        }
+        if (
+          Math.abs(mt.offset.x - expected.container.offset_x) > 1e-3 ||
+          Math.abs(mt.offset.y - expected.container.offset_y) > 1e-3
+        ) {
+          errors.push(
+            "Parent image is at (" +
+              mt.offset.x +
+              ", " +
+              mt.offset.y +
+              "), expected (" +
+              expected.container.offset_x +
+              ", " +
+              expected.container.offset_y +
+              ")"
+          );
+        }
+      }
+    }
+
+    return { ok: errors.length === 0, errors: errors, warnings: warnings, model: model };
+  }
+
   // ------------------------------------------------------------------
   // Top-level conversion
   // ------------------------------------------------------------------
 
+  /* `baseGiaBytes` is the template to build on. MODE_CLIENT_IMAGE wants
+   * assets/client_mask_off_template.gia — an image-parent container with
+   * the mask toggle off, which is the shape every Client export takes. */
   function convertJsonToGiaBytes(json_data, baseGiaBytes, mode) {
     if (mode === undefined) mode = MODE_DECORATION;
     var file_data = toUint8(baseGiaBytes);
     var parsed = _parse_gia_root_fields(file_data);
     if (mode === MODE_IMAGE) {
       return _convert_image_mode(
+        json_data,
+        parsed.header,
+        parsed.content_len,
+        parsed.root_fields,
+        parsed.tail
+      );
+    }
+    if (mode === MODE_CLIENT_IMAGE) {
+      return _convert_client_image_mode(
         json_data,
         parsed.header,
         parsed.content_len,
@@ -1616,179 +3579,52 @@ var GIA = (function () {
     root_fields,
     tail
   ) {
-    var group_name = _normalize_group_name(
-      json_data && Object.prototype.hasOwnProperty.call(json_data, "group_name")
-        ? json_data.group_name
-        : ""
-    );
-    var removed_guids = new Set();
-    var i, tag, val, info;
-    for (i = 0; i < root_fields.length; i++) {
-      tag = root_fields[i][0];
-      val = root_fields[i][2];
-      if (tag !== 2) continue;
-      if (!_isBytes(val)) continue;
-      info = parse_resource_entry(val);
-      if (info["class"] !== 15) continue;
-      removed_guids.add(info["guid"]);
-    }
+    var scene = buildImageScene(json_data);
+    var group_name = scene.group_name;
+    var mask_settings = scene.mask;
 
-    var parent_guid = 0;
-    var pr_data = null;
-    for (i = 0; i < root_fields.length; i++) {
-      if (root_fields[i][0] === 1 && _isBytes(root_fields[i][2])) {
-        pr_data = root_fields[i][2];
-        break;
-      }
-    }
-    var pr_fields = parse_primary_resource(pr_data);
-    for (i = 0; i < pr_fields.length; i++) {
-      if (pr_fields[i].tag === 1) {
-        parent_guid = check_locator_guid(pr_fields[i].data);
-        break;
-      }
-    }
+    var removed_guids = _collect_entry_guids_of_class(root_fields, UI_IMAGE_CLASS);
+    var i;
 
-    var existing_guids = new Set();
-    for (i = 0; i < root_fields.length; i++) {
-      tag = root_fields[i][0];
-      val = root_fields[i][2];
-      if (tag === 1 && _isBytes(val)) {
-        existing_guids.add(check_locator_guid(val));
-      } else if (tag === 2 && _isBytes(val)) {
-        info = parse_resource_entry(val);
-        if (info["guid"]) existing_guids.add(info["guid"]);
-      }
-    }
-    var reserved_guids = new Set();
-    existing_guids.forEach(function (g) {
-      if (!removed_guids.has(g)) reserved_guids.add(g);
-    });
+    var primary = _find_primary_resource(root_fields);
+    var pr_fields = primary.fields;
+    var parent_guid = primary.guid;
 
-    var next_guid;
-    if (removed_guids.size > 0) {
-      var mx = -Infinity;
-      removed_guids.forEach(function (g) {
-        if (g > mx) mx = g;
-      });
-      next_guid = mx + 1;
-    } else {
-      next_guid = 1073749460;
-    }
-    while (reserved_guids.has(next_guid)) next_guid += 1;
+    var allocator = _make_guid_allocator(root_fields, removed_guids);
 
     var new_image_entries = [];
     var new_refs = [];
     var new_child_guids = [];
 
-    var default_packed_color = 2164260863;
-    var mask_settings = _normalize_mask_settings(
-      json_data ? json_data.mask : undefined
-    );
-
-    var elements = json_data && json_data.elements ? json_data.elements : [];
-    var ordered_elements = _order_elements_for_image_mode(elements);
-    var serialized_elements = _storage_order_elements_for_image_mode(elements);
+    var ordered_elements = scene.ordered;
+    var serialized_elements = scene.serialized;
     var indexed_items = [];
 
-    for (i = 0; i < ordered_elements.length; i++) {
-      var element = ordered_elements[i];
-      var shape_type = _normalize_element_shape_type(
-        get(element, "type", undefined)
-      );
-      var center = pyOr(
-        get(element, "relative", undefined),
-        get(element, "center", undefined),
-        {}
-      );
-      var size = pyOr(get(element, "size", undefined), {});
-      var rot = pyOr(get(element, "rotation", undefined), {});
-      var rot_z =
-        rot !== null && typeof rot === "object" && !Array.isArray(rot)
-          ? get(rot, "z", 0.0)
-          : rot;
-
-      while (reserved_guids.has(next_guid)) next_guid += 1;
-      var new_guid = next_guid;
-      reserved_guids.add(new_guid);
-      next_guid += 1;
-
-      var name = String(i + 1);
-      var offset_x = Number(get(center, "x", 0));
-      var offset_y = Number(get(center, "y", 0));
-
-      var size_x, size_y;
-      if (shape_type === "ellipse") {
-        var rx = Number(get(size, "rx", 1.0));
-        var ry = Number(get(size, "ry", 1.0));
-        size_x = rx * 2.0;
-        size_y = ry * 2.0;
-      } else if (
-        shape_type === "rectangle" ||
-        shape_type === "triangle" ||
-        shape_type === "four_point_star" ||
-        shape_type === "five_point_star"
-      ) {
-        size_x = Number(get(size, "width", 1.0));
-        size_y = Number(get(size, "height", 1.0));
-      } else {
-        size_x = Number(get(size, "width", 1.0));
-        size_y = Number(get(size, "height", 1.0));
-      }
-
-      var image_asset_ref = Math.trunc(
-        Number(
-          get(
-            element,
-            "image_asset_ref",
-            Object.prototype.hasOwnProperty.call(
-              DEFAULT_IMAGE_ASSET_REFS,
-              shape_type
-            )
-              ? DEFAULT_IMAGE_ASSET_REFS[shape_type]
-              : 100002
-          )
-        )
-      );
-      // Python: int(element.get("packed_color", default)) — a present-but-None
-      // value raises TypeError in the original (this is how the currently
-      // broken decoration→GIA export fails upstream); replicate the error
-      // instead of coercing null to 0.
-      var rawPackedColor = get(element, "packed_color", default_packed_color);
-      if (rawPackedColor === null) {
-        throw new TypeError(
-          "int() argument must be a string, a bytes-like object or a real number, not 'NoneType'"
-        );
-      }
-      var packed_color = Math.trunc(Number(rawPackedColor));
-      packed_color = _color_to_packed(
-        get(element, "color", undefined),
-        get(element, "alpha", undefined),
-        packed_color
-      );
-      var index = i + 2;
+    for (i = 0; i < scene.objects.length; i++) {
+      var obj = scene.objects[i];
+      var new_guid = allocator.next();
 
       var ui_content = create_ui_image_payload({
         guid: new_guid,
-        index: index,
+        index: obj.index,
         parent_guid: parent_guid,
-        offset_x: offset_x,
-        offset_y: offset_y,
-        size_x: size_x,
-        size_y: size_y,
-        image_asset_ref: image_asset_ref,
-        packed_color: packed_color,
-        rot_z: rot_z,
+        offset_x: obj.offset_x,
+        offset_y: obj.offset_y,
+        size_x: obj.size_x,
+        size_y: obj.size_y,
+        image_asset_ref: obj.image_asset_ref,
+        packed_color: obj.packed_color,
+        rot_z: obj.rot_z,
         pivot_x: 0.5,
         pivot_y: 0.5,
-        name: name,
+        name: obj.name,
       });
 
       indexed_items.push({
-        element: element, // identity key (mirror Python id(element))
+        element: obj.element, // identity key (mirror Python id(element))
         guid: new_guid,
-        name: name,
-        entry: create_ui_image_entry(new_guid, name, ui_content),
+        name: obj.name,
+        entry: create_ui_image_entry(new_guid, obj.name, ui_content),
         ref: create_reference_locator(new_guid, 8),
       });
     }
@@ -2014,7 +3850,16 @@ var GIA = (function () {
   return {
     MODE_DECORATION: MODE_DECORATION,
     MODE_IMAGE: MODE_IMAGE,
+    MODE_CLIENT_IMAGE: MODE_CLIENT_IMAGE,
+    SERVER_CONTAINER_CLASS: SERVER_CONTAINER_CLASS,
+    CLIENT_CONTAINER_CLASS: CLIENT_CONTAINER_CLASS,
+    UI_IMAGE_CLASS: UI_IMAGE_CLASS,
+    COMPONENT_TYPE: COMPONENT_TYPE,
+    DEFAULT_IMAGE_ASSET_REFS: DEFAULT_IMAGE_ASSET_REFS,
     convertJsonToGiaBytes: convertJsonToGiaBytes,
+    buildImageScene: buildImageScene,
+    describeGia: describeGia,
+    validateClientImage: validateClientImage,
     toClassic: toClassic,
     toOverlimit: toOverlimit,
   };

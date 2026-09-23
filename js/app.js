@@ -1276,9 +1276,52 @@
       ctx.restore();
     }
 
+    // Client mask preview: the Client .gia clips every child to the
+    // masking container's rect, so clip the same way here. Element draw
+    // order already matches the Client hierarchy (renderOrderedElements is
+    // painter order, and an earlier Client sibling renders first), so with
+    // this clip the preview composites exactly like the exported file.
+    const clientMaskEl = $("showClientMask");
+    const clientMask = clientMaskEl && clientMaskEl.checked ? currentClientMaskRect() : null;
+    if (clientMask) {
+      ctx.save();
+      ctx.beginPath();
+      if (clientMask.shapeType === 2) {
+        ctx.ellipse(clientMask.cx, clientMask.cy, clientMask.width / 2, clientMask.height / 2, 0, 0, Math.PI * 2);
+      } else {
+        ctx.rect(
+          clientMask.cx - clientMask.width / 2,
+          clientMask.cy - clientMask.height / 2,
+          clientMask.width,
+          clientMask.height
+        );
+      }
+      ctx.clip();
+    }
     renderOrderedElements(data).forEach((element) => {
       drawElement(element, data.elements.indexOf(element));
     });
+    if (clientMask) {
+      ctx.restore();
+      // Outline the mask so its position and dimensions are verifiable.
+      ctx.save();
+      ctx.strokeStyle = "#00b0a0";
+      ctx.setLineDash([6 / sTotal, 4 / sTotal]);
+      ctx.lineWidth = 1.5 / sTotal;
+      ctx.beginPath();
+      if (clientMask.shapeType === 2) {
+        ctx.ellipse(clientMask.cx, clientMask.cy, clientMask.width / 2, clientMask.height / 2, 0, 0, Math.PI * 2);
+      } else {
+        ctx.rect(
+          clientMask.cx - clientMask.width / 2,
+          clientMask.cy - clientMask.height / 2,
+          clientMask.width,
+          clientMask.height
+        );
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
     if (crop) ctx.restore(); // origin cross stays visible outside the crop
     drawOriginCross();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1531,6 +1574,7 @@
     refreshSelectionUI();
     // cleanup only applies to transparent outputs (PNG mode)
     $("btnCleanTransparency").disabled = !R.outputHasTransparency;
+    updateClientGiaNote();
     $("cleanupStatus").textContent = "";
     $("coordsDisplay").textContent = t("result.canvas.coords", { coords: "—" });
     renderCanvas(); // setView already forced layout; render synchronously so
@@ -1538,7 +1582,7 @@
 
   }
 
-  ["showImage", "showMask", "showFill", "showBorder", "showOrigin", "cropToImage"].forEach((id) => {
+  ["showImage", "showMask", "showFill", "showBorder", "showOrigin", "cropToImage", "showClientMask"].forEach((id) => {
     $(id).addEventListener("change", renderCanvas);
   });
 
@@ -2296,20 +2340,24 @@
   /* ─────────────── GIA generation (port of server._convert_result_to_gia_bytes) ─────────────── */
 
   let templatePromise = null;
+  function fetchTemplate(name) {
+    return fetch(`assets/${name}`).then((r) => {
+      if (!r.ok) throw new Error(`${name} HTTP ${r.status}`);
+      return r.arrayBuffer();
+    });
+  }
   function loadTemplates() {
     if (!templatePromise) {
       templatePromise = Promise.all([
-        fetch("assets/image_template.gia").then((r) => {
-          if (!r.ok) throw new Error("image_template.gia HTTP " + r.status);
-          return r.arrayBuffer();
-        }),
-        fetch("assets/template.gia").then((r) => {
-          if (!r.ok) throw new Error("template.gia HTTP " + r.status);
-          return r.arrayBuffer();
-        }),
-      ]).then(([image, decoration]) => ({
+        fetchTemplate("image_template.gia"),
+        fetchTemplate("template.gia"),
+        fetchTemplate("client_mask_off_template.gia"),
+      ]).then(([image, decoration, clientImage]) => ({
         image: new Uint8Array(image),
         decoration: new Uint8Array(decoration),
+        // Image-parent container with the in-game mask toggle off — the
+        // shape every Client export takes.
+        client: new Uint8Array(clientImage),
       })).catch((error) => {
         templatePromise = null;
         throw error;
@@ -2324,13 +2372,21 @@
     return GiaExport.convertResultToGiaJson(resultData, cfg, imageName, originX, originY);
   }
 
+  /* Current result → the GIA writer's logical image payload. Both the
+   * Server and the Client serializer consume this same object, which is
+   * what guarantees identical pixel layout, colours and image IDs. */
+  function currentGiaJson() {
+    return convertResultToGiaJson(
+      R.data, R.job.config, currentExportBaseName(), R.origin.x, R.origin.y
+    );
+  }
+
+  /* Server Control Template export — unchanged behaviour and file names. */
   async function exportGia(classic) {
     if (!R) return;
     try {
       const templates = await loadTemplates();
-      const jsonData = convertResultToGiaJson(
-        R.data, R.job.config, currentExportBaseName(), R.origin.x, R.origin.y
-      );
+      const jsonData = currentGiaJson();
       let bytes = GIA.convertJsonToGiaBytes(jsonData, templates.image, GIA.MODE_IMAGE);
       let name = exportFileName("gia");
       if (classic) {
@@ -2342,6 +2398,197 @@
       alert(t("result.export.failed", { error: error && error.message ? error.message : error }));
     }
   }
+
+  /* Client Control Template export. Every file is structurally validated
+   * before it is offered for download — a malformed .gia is never written
+   * out silently. */
+  function buildClientGiaBytes(jsonData, clientTemplates) {
+    const bytes = GIA.convertJsonToGiaBytes(jsonData, clientTemplates, GIA.MODE_CLIENT_IMAGE);
+    const scene = GIA.buildImageScene(jsonData);
+    const report = GIA.validateClientImage(bytes, {
+      groupName: scene.group_name,
+      objects: scene.clientObjects,
+      container: scene.clientContainer,
+    });
+    if (!report.ok) throw new Error(report.errors.join("; "));
+    if (report.warnings.length) console.warn("[client gia]", report.warnings.join(" "));
+    return bytes;
+  }
+
+  async function exportClientGia(classic) {
+    if (!R) return;
+    try {
+      const templates = await loadTemplates();
+      const jsonData = currentGiaJson();
+      let bytes = buildClientGiaBytes(jsonData, templates.client);
+      let name = `${currentExportBaseName()}_client.gia`;
+      if (classic) {
+        bytes = GIA.toClassic(bytes);
+        name = `${currentExportBaseName()}_client_classic.gia`;
+      }
+      downloadBlob(new Blob([bytes], { type: "application/octet-stream" }), name);
+    } catch (error) {
+      alert(t("result.export.gia.clientFailed", {
+        error: error && error.message ? error.message : error,
+      }));
+    }
+  }
+
+  /* Every Client export has a parent image, so the mask toggle is always
+   * meaningful — it previews what the player sees after switching the mask
+   * on in game. */
+  function updateClientGiaNote() {
+    const row = $("clientMaskPreviewRow");
+    if (!row) return;
+    row.hidden = !R;
+  }
+
+  /* The parent image's rect exactly as the Client .gia carries it, in
+   * image pixels. Derived from the same logical model the exporter uses,
+   * so the preview cannot drift from the file. */
+  function currentClientMaskRect() {
+    if (!R) return null;
+    let scene;
+    try { scene = GIA.buildImageScene(currentGiaJson()); } catch (e) { return null; }
+    const container = scene.clientContainer;
+    if (!container || !(container.size_x > 0 && container.size_y > 0)) return null;
+    const ppu = R.ppu || 1;
+    // Logical units → image pixels, undoing gia-export's origin shift.
+    return {
+      cx: container.offset_x * ppu + R.origin.x,
+      cy: R.origin.y - container.offset_y * ppu,
+      width: container.size_x * ppu,
+      height: container.size_y * ppu,
+      shapeType: 1,
+    };
+  }
+
+  /* ── structural diff / debug mode ───────────────────────────────────
+   * Browser-side twin of `node tools/gia-diff.js`. From the console:
+   *   await GiaDebug.compare()   → {server, client, differences, validation}
+   *   await GiaDebug.bytes()     → {server, client} Uint8Arrays
+   * Decodes both outputs into the same model so hierarchy, names, control
+   * type, image IDs, transforms, parent IDs, GUIDs, component slot/type
+   * numbers and record counts can be compared without hex diffing. */
+  window.GiaDebug = {
+    async bytes() {
+      if (!R) throw new Error("no result open");
+      const templates = await loadTemplates();
+      const jsonData = currentGiaJson();
+      return {
+        json: jsonData,
+        server: GIA.convertJsonToGiaBytes(jsonData, templates.image, GIA.MODE_IMAGE),
+        client: GIA.convertJsonToGiaBytes(jsonData, templates.client, GIA.MODE_CLIENT_IMAGE),
+      };
+    },
+    async compare() {
+      const { json, server, client } = await this.bytes();
+      const s = GIA.describeGia(server);
+      const c = GIA.describeGia(client);
+      const slots = (o) => o.components.map((x) => `${x.slot}/${x.type}`).join(" ");
+      const differences = {
+        templateKind: [s.templateKind, c.templateKind],
+        containerClass: [s.containerClass, c.containerClass],
+        containerName: [s.container.resourceName, c.container.resourceName],
+        containerComponents: [slots(s.container), slots(c.container)],
+        childComponents: [
+          s.children[0] ? slots(s.children[0]) : null,
+          c.children[0] ? slots(c.children[0]) : null,
+        ],
+        recordCounts: [s.children.length, c.children.length],
+        editorVersion: [s.version, c.version],
+        transformPlatformTag: [
+          s.children[0] ? s.children[0].transform.platformDiscriminator : null,
+          c.children[0] ? c.children[0].transform.platformDiscriminator : null,
+        ],
+        parentImage: [
+          s.container.imageAssetRef !== null ? `image ${s.container.imageAssetRef}` : "none",
+          c.container.imageAssetRef !== null ? `image ${c.container.imageAssetRef}` : "none",
+        ],
+        maskMechanism: [
+          s.container.mask
+            ? `mask-settings component, enabled=${s.container.mask.enabled}`
+            : "none",
+          c.container.isMask
+            ? "parent image clips children (toggle ON)"
+            : "parent image present, mask toggle OFF (player toggles in game)",
+        ],
+      };
+      const scene = GIA.buildImageScene(json);
+      const pair = (m) => {
+        const byName = Object.create(null);
+        for (const o of m.children) byName[o.componentName] = o;
+        return byName;
+      };
+      const S = pair(s);
+      const C = pair(c);
+      // Only the *content* of the transform has to match, and it has to
+      // match in ABSOLUTE terms: the platform discriminator beside it is a
+      // template-format tag (server 9, client 23), and a Client mask moves
+      // the container to the mask centre while compensating every child,
+      // so raw child offsets differ by design. Sibling indices are
+      // MIRRORED, because the two formats composite in opposite
+      // directions.
+      const absOffset = (model, child) => {
+        const ct = model.container && model.container.transform;
+        return {
+          x: child.transform.offset.x + (ct ? ct.offset.x : 0),
+          y: child.transform.offset.y + (ct ? ct.offset.y : 0),
+        };
+      };
+      const shape = (t) => t && JSON.stringify([t.size, t.pivot, t.rotationZ, t.anchorMin, t.anchorMax, t.scale]);
+      const n = s.children.length;
+      const contentMismatches = [];
+      for (const k of Object.keys(S)) {
+        const a = S[k];
+        const b = C[k];
+        if (!b) { contentMismatches.push(`${k}: missing from client`); continue; }
+        if (a.imageAssetRef !== b.imageAssetRef) contentMismatches.push(`${k}: image ID`);
+        if ((a.packedColor >>> 0) !== (b.packedColor >>> 0)) contentMismatches.push(`${k}: colour`);
+        if (a.index + b.index !== n + 3) contentMismatches.push(`${k}: index not mirrored`);
+        const sa = absOffset(s, a);
+        const ca = absOffset(c, b);
+        if (Math.abs(sa.x - ca.x) > 1e-4 || Math.abs(sa.y - ca.y) > 1e-4)
+          contentMismatches.push(`${k}: absolute position`);
+        if (shape(a.transform) !== shape(b.transform)) contentMismatches.push(`${k}: size/rotation`);
+      }
+      const out = {
+        server: s,
+        client: c,
+        differences,
+        contentMismatches,
+        maskRelationships: {
+          server: s.maskRelationships,
+          client: c.maskRelationships,
+        },
+        validation: GIA.validateClientImage(client, {
+          groupName: scene.group_name,
+          objects: scene.clientObjects,
+          container: scene.clientContainer,
+        }),
+      };
+      console.table(differences);
+      for (const rel of c.maskRelationships) {
+        console.log(
+          `mask: "${rel.maskName}" (image ${rel.maskImageAssetRef}, graphic ` +
+            `${rel.maskGraphicVisible ? "visible" : "hidden"}) clips ` +
+            `${rel.content.length} child object(s) via ${rel.via}`
+        );
+      }
+      console.log(
+        contentMismatches.length
+          ? `${contentMismatches.length} content mismatches`
+          : `content parity: ${Object.keys(S).length}/${Object.keys(S).length} objects identical`
+      );
+      return out;
+    },
+    async download() {
+      const { server, client } = await this.bytes();
+      const base = currentExportBaseName();
+      downloadBlob(new Blob([server], { type: "application/octet-stream" }), `${base}_debug_server.gia`);
+      downloadBlob(new Blob([client], { type: "application/octet-stream" }), `${base}_debug_client.gia`);
+    },
+  };
 
   async function copyTextToClipboard(text) {
     if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
@@ -2433,6 +2680,8 @@
   });
   $("btnExportGIAOverlimit").addEventListener("click", () => exportGia(false));
   $("btnExportGIAClassic").addEventListener("click", () => exportGia(true));
+  $("btnExportClientGIAOverlimit").addEventListener("click", () => exportClientGia(false));
+  $("btnExportClientGIAClassic").addEventListener("click", () => exportClientGia(true));
 
   /* ─────────────── download all (ZIP) ─────────────── */
 
@@ -2460,6 +2709,11 @@
         const jsonData = convertResultToGiaJson(data, job.config, job.baseName, origin.x, origin.y);
         const giaBytes = GIA.convertJsonToGiaBytes(jsonData, templates.image, GIA.MODE_IMAGE);
         files.push({ name: uniqueName(job.baseName, "gia"), data: giaBytes });
+        // Same image, same IDs, Client Control Template structure.
+        files.push({
+          name: uniqueName(`${job.baseName}_client`, "gia"),
+          data: buildClientGiaBytes(jsonData, templates.client),
+        });
 
         // include the JSON payload alongside
         const originUnits = {

@@ -14,7 +14,7 @@ For the final technical design, see [tech.md](tech.md). For usage instructions, 
 
   Video tutorial (Bilibili): <https://www.bilibili.com/video/BV1kKDyB9EvY>
 
-- **GIA export** — exports both **Beyond mode** and **Classic mode** `.gia` files, byte-identical to the original tool's output.
+- **GIA export** — exports **Server Image** and **Client Image** `.gia` files, each in **Beyond mode** or **Classic mode**. The Server export is byte-identical to the original tool's output; the Client export targets the Client Control Template (see [docs/client-gia-format.md](docs/client-gia-format.md)).
 - **GIA mode conversion** — converts existing GIA files in both directions (Beyond ↔ Classic) from the upload page.
 - **Enhanced mode (default)** — error-guided fitting, roughly 9x faster per primitive, fully deterministic.
 - **Batch processing** — concurrent processing of multiple images via Web Workers.
@@ -42,8 +42,8 @@ The result page currently offers:
 - **Export SVG**
 - **Export PNG**
 - **Export CSS**
-- **Export Beyond-mode GIA**
-- **Export Classic-mode GIA**
+- **Download Server Image** — Beyond or Classic `.gia`
+- **Download Client Image** — Beyond or Classic `.gia`
 
 ### SVG
 
@@ -76,7 +76,35 @@ A ready-to-use `HTML + JavaScript` example is included as a comment at the top o
 
 ### GIA
 
-Both **Beyond** and **Classic** GIA formats can be downloaded directly from the result page. To batch-convert existing GIA files, use the **GIA Mode Convert** tool on the upload page.
+The result page offers two clearly separated `.gia` downloads, each available in **Beyond** and **Classic** mode:
+
+| Download | Structure | File name |
+|---|---|---|
+| **Download Server Image** | Server Control Template (container resource class 61) | `<name>.gia`, `<name>_classic.gia` |
+| **Download Client Image** | Client Control Template (container resource class 70) | `<name>_client.gia`, `<name>_client_classic.gia` |
+
+Both contain the same converted image: same pixel layout, colors, dimensions,
+optimization and **the same image/resource IDs**. Only the surrounding `.gia`
+structure differs — picking the wrong one produces a file the matching
+control template cannot load, which is why the two are visually separated in
+the UI. **Download All** in batch mode writes both files per image.
+
+Every Client export gives the group an **image parent** sized to the source
+image, tinted fully transparent so it is never drawn, with the in-game mask
+toggle **off** — flip it in the editor and the group clips to exactly what
+the source image shows. (The Server uses its own mask-settings component
+instead; see the format notes.) The result page has a **Client mask** toggle
+that previews what the player sees with the mask switched on.
+
+The Client output is structurally validated before it is offered; if it
+cannot be generated safely the download fails with an error instead of
+writing a malformed file.
+
+`docs/client-gia-format.md` documents the Client format field by field, and
+`node tools/gia-diff.js <a.gia> <b.gia>` prints a structural comparison of
+any two files (`--masks` gives a three-way mask report).
+
+To batch-convert existing GIA files, use the **GIA Mode Convert** tool on the upload page.
 
 ## Running locally
 

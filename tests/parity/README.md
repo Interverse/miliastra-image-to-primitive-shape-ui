@@ -15,6 +15,7 @@ change in generated results.
 | `shapely/` | GEOS geometry: buffer polygons, affine transforms, simplify, intersection areas, boundary interpolation | shapely |
 | `decode/` | Input decoding: PNG (exact JS decoder), JPEG/EXIF, WebP | cv2.imdecode |
 | `fill/` | Go fogleman/primitive engine: math/rand, ziggurat, freetype raster, Go libm ports, full step traces | instrumented Go harness (`harness.exe`, seeded, single-worker) |
+| `gia-client/` | Client Control Template `.gia`: reference fixtures decode as expected (Circle at +100 X; the masking container carries the mask flag); regenerated output is structurally equivalent; hierarchy/compositing order; Server vs Client parity (same pixels, colours, dimensions, image IDs); mask geometry and relationships; validation failure modes | `assets/client_image_template.gia`, `assets/client_mask_template.gia` (both SHA-256 pinned) |
 | `e2e/` | Full pipelines end-to-end on the fixture corpus: outline (`run_outline_e2e.js`), fill (`run_fill_e2e.js`), GIA bytes incl. error parity (`run_gia_e2e.js`), and `browser_smoke.html` (same cases in real browser workers) | shaper_core / Go+Python / reconstructed GIA writer |
 
 Run any suite with:
@@ -22,6 +23,12 @@ Run any suite with:
 ```bash
 python tests/parity/<suite>/gen_goldens.py
 node tests/parity/<suite>/run_tests.js
+```
+
+`gia-client/` needs no goldens — it runs off the committed reference `.gia`:
+
+```bash
+node tests/parity/gia-client/run_tests.js
 ```
 
 Goldens are regenerated from the reference environment and are not committed

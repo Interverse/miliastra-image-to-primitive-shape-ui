@@ -433,6 +433,84 @@ body {
 .export-action { display: flex; gap: 6px; margin-bottom: 8px; }
 .export-action .btn-sm { margin-bottom: 0; flex: 1; }
 
+/* ── GIA image download ──────────────────────────────────────
+   The Server and the Client output are the same image in two different
+   control-template structures, and picking the wrong one produces a file
+   the game will not load. They therefore get separate cards with their own
+   accent colour and an explicit badge, never two look-alike buttons. */
+.gia-export-group {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--md-outline-variant);
+  border-left: 4px solid var(--gia-accent);
+  border-radius: var(--md-shape-md);
+  background: var(--md-surface-container-low);
+}
+.gia-export-group--server {
+  --gia-accent: var(--md-primary);
+  --gia-badge-bg: var(--md-primary-container);
+  --gia-badge-fg: var(--md-on-primary-container);
+}
+.gia-export-group--client {
+  --gia-accent: var(--md-tertiary);
+  --gia-badge-bg: var(--md-tertiary-container);
+  --gia-badge-fg: var(--md-on-tertiary-container);
+}
+.gia-export-group__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.gia-export-group__badge {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  border-radius: var(--md-shape-full);
+  color: var(--gia-badge-fg);
+  background: var(--gia-badge-bg);
+}
+.gia-export-group__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--md-on-surface);
+}
+.gia-export-group__desc {
+  margin: 0 0 10px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--md-on-surface-variant);
+}
+.gia-export-group__note {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--md-on-surface-variant);
+  border-left: 2px solid var(--warning);
+  padding-left: 8px;
+}
+.gia-export-group__note[hidden] { display: none; }
+/* Stacked, full-width buttons: the mode names are long in several of the
+   15 locales and must never break mid-word inside a chip. */
+.gia-export-group .export-action {
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 0;
+}
+.gia-export-group .btn-sm {
+  color: var(--gia-accent);
+  padding: 8px 12px;
+  line-height: 1.3;
+}
+.gia-export-group .btn-sm:hover {
+  background: var(--gia-badge-bg);
+  border-color: var(--gia-badge-bg);
+  color: var(--gia-badge-fg);
+}
+
 /* ============================================================
    Drop zone
    ============================================================ */

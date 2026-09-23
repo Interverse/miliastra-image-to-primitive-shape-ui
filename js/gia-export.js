@@ -89,9 +89,24 @@ const GiaExport = (() => {
       };
     }
 
+    /* The source image rectangle, in the same local space as each element's
+     * `relative` offset. The Client exporter makes this the group's parent
+     * image, so toggling the in-game mask clips exactly to the source
+     * image. The Server writer ignores the key. */
+    const imageSize = resultData.image_size || {};
+    const imageWidth = Number(imageSize.width || 0);
+    const imageHeight = Number(imageSize.height || 0);
+    const imageBounds = {
+      x: imageWidth / 2 / pixelPerUnit - originUnitsX,
+      y: -(imageHeight / 2) / pixelPerUnit - originUnitsY,
+      width: imageWidth / pixelPerUnit,
+      height: imageHeight / pixelPerUnit,
+    };
+
     return {
       elements,
       mask: maskCfg,
+      image_bounds: imageBounds,
       group_name: exportBasename(imageName),
     };
   }

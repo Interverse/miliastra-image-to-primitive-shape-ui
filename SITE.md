@@ -36,11 +36,13 @@ python -m http.server 8321
 | `js/worker-outline.js` | Outline (decoration) mode — bit-exact port of `final_shaper.py` (`js/geometry.js` = Shapely/GEOS port) |
 | `js/imaging.js` | cv2/NumPy-exact primitives (validated byte-identical) |
 | `js/pynum.js`, `js/fillshaper.js` | CPython/NumPy-exact rounding & rasterizers |
-| `js/gia.js`, `js/gia-export.js` | GIA writer + overlimit/classic converters (byte-identical) |
+| `js/gia.js`, `js/gia-export.js` | GIA writers (Server + Client control templates) + overlimit/classic converters; the Server path is byte-identical to the original |
 | `js/png-decode.js` | Exact PNG decoder (byte-identical to cv2.imdecode) |
 | `js/zip.js` | Minimal ZIP writer for batch downloads |
 | `js/i18n.js`, `js/locales/*.js` | The 15 languages officially supported by Genshin Impact |
-| `assets/*.gia` | Binary GIA templates patched during export |
+| `assets/*.gia` | Binary GIA templates patched during export (`image_template.gia` = Server; `client_mask_off_template.gia` = Client generation template; `client_image_template.gia` and `client_mask_template.gia` = Client reference fixtures) |
+| `tools/gia-diff.js` | Structural dump/diff for `.gia` files (Node CLI); `window.GiaDebug` is the in-page twin |
+| `docs/client-gia-format.md` | Client Control Template format survey |
 
 Non-site directories: the legacy Python backend (`*.py`, `gia/`, `win/`,
 `third_party/`), `demo/`, and `tests/parity/` (regression suites proving
