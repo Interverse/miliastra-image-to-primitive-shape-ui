@@ -116,6 +116,9 @@ window.LOCALES["ko"] = {
   "batch.elements": "도형 {n}개",
   "batch.elapsed": "{s}s",
   "batch.downloadAllNothing": "아직 다운로드할 완료된 작업이 없습니다",
+  "batch.luaTemplate": "템플릿 인덱스",
+  "batch.luaTemplateOptional": "선택",
+  "batch.luaTemplateTitle": "ZIP의 Lua 스크립트에 사용할 이미지 컨트롤 템플릿 인덱스입니다. 비워 두면 스크립트에 TODO 자리 표시자가 남습니다.",
 
   /* ── result view ── */
   "result.back": "작업 목록으로",
@@ -140,6 +143,9 @@ window.LOCALES["ko"] = {
   "result.export.gia.modeOverlimit": "확장",
   "result.export.gia.modeClassic": "기본",
   "result.export.gia.sharedNote": "두 파일 모두 동일한 이미지, 색상, 이미지 ID를 담고 있으며 .gia 구조만 다릅니다.",
+  "result.export.gia.clientLua": "Lua 스크립트",
+  "result.export.gia.clientLuaTemplate": "이미지 컨트롤 템플릿 인덱스",
+  "result.export.gia.clientLuaTemplateHint": "Lua 스크립트에 필수: 프로젝트의 이미지 컨트롤 템플릿 인덱스입니다.",
   "result.export.gia.clientFailed": "클라이언트 이미지를 생성하지 못했습니다: {error}",
   "result.export.copy": "복사",
   "result.export.copied": "복사됨",

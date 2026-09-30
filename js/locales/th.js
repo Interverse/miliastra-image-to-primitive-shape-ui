@@ -116,6 +116,9 @@ window.LOCALES["th"] = {
   "batch.elements": "{n} รูปทรง",
   "batch.elapsed": "{s} วิ",
   "batch.downloadAllNothing": "ยังไม่มีงานที่เสร็จให้ดาวน์โหลด",
+  "batch.luaTemplate": "ดัชนีเทมเพลต",
+  "batch.luaTemplateOptional": "ไม่บังคับ",
+  "batch.luaTemplateTitle": "ดัชนีเทมเพลตคอนโทรลรูปภาพสำหรับสคริปต์ Lua ใน ZIP เว้นว่างไว้เพื่อคงตัวแทน TODO ในสคริปต์",
 
   /* ── result view ── */
   "result.back": "กลับไปหน้างาน",
@@ -140,6 +143,9 @@ window.LOCALES["th"] = {
   "result.export.gia.modeOverlimit": "สุดขีด",
   "result.export.gia.modeClassic": "คลาสสิก",
   "result.export.gia.sharedNote": "ทั้งสองไฟล์มีภาพ สี และรหัสภาพเหมือนกัน ต่างกันเฉพาะโครงสร้าง .gia เท่านั้น",
+  "result.export.gia.clientLua": "สคริปต์ Lua",
+  "result.export.gia.clientLuaTemplate": "ดัชนีเทมเพลตคอนโทรลรูปภาพ",
+  "result.export.gia.clientLuaTemplateHint": "จำเป็นสำหรับสคริปต์ Lua: ดัชนีของเทมเพลตคอนโทรลรูปภาพในโปรเจกต์ของคุณ",
   "result.export.gia.clientFailed": "สร้างภาพฝั่งไคลเอนต์ไม่สำเร็จ: {error}",
   "result.export.copy": "คัดลอก",
   "result.export.copied": "คัดลอกแล้ว",

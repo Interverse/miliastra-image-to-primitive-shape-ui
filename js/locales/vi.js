@@ -116,6 +116,9 @@ window.LOCALES["vi"] = {
   "batch.elements": "{n} hình",
   "batch.elapsed": "{s} giây",
   "batch.downloadAllNothing": "Chưa có tác vụ hoàn thành nào để tải",
+  "batch.luaTemplate": "Chỉ mục mẫu",
+  "batch.luaTemplateOptional": "tùy chọn",
+  "batch.luaTemplateTitle": "Chỉ mục mẫu Image Control cho các tập lệnh Lua trong ZIP. Để trống để giữ chỗ TODO trong tập lệnh.",
 
   /* ── result view ── */
   "result.back": "Về danh sách tác vụ",
@@ -140,6 +143,9 @@ window.LOCALES["vi"] = {
   "result.export.gia.modeOverlimit": "Siêu Hạn",
   "result.export.gia.modeClassic": "Kinh Điển",
   "result.export.gia.sharedNote": "Cả hai tệp đều chứa cùng hình ảnh, màu sắc và ID ảnh — chỉ khác cấu trúc .gia.",
+  "result.export.gia.clientLua": "Tập lệnh Lua",
+  "result.export.gia.clientLuaTemplate": "Chỉ mục mẫu Image Control",
+  "result.export.gia.clientLuaTemplateHint": "Bắt buộc cho tập lệnh Lua: chỉ mục của mẫu Image Control trong dự án của bạn.",
   "result.export.gia.clientFailed": "Không thể tạo ảnh Máy khách: {error}",
   "result.export.copy": "Sao chép",
   "result.export.copied": "Đã sao chép",

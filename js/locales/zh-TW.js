@@ -116,6 +116,9 @@ window.LOCALES["zh-TW"] = {
   "batch.elements": "{n} 個圖元",
   "batch.elapsed": "{s}s",
   "batch.downloadAllNothing": "還沒有可下載的已完成任務",
+  "batch.luaTemplate": "模板索引",
+  "batch.luaTemplateOptional": "選填",
+  "batch.luaTemplateTitle": "ZIP 中 Lua 腳本使用的圖片控制項模板索引。留空則腳本中保留 TODO 佔位符。",
 
   /* ── result view ── */
   "result.back": "返回任務列表",
@@ -140,6 +143,9 @@ window.LOCALES["zh-TW"] = {
   "result.export.gia.modeOverlimit": "超限模式",
   "result.export.gia.modeClassic": "經典模式",
   "result.export.gia.sharedNote": "兩種下載包含相同的圖像、色彩與圖片 ID，僅 .gia 結構不同。",
+  "result.export.gia.clientLua": "Lua 腳本",
+  "result.export.gia.clientLuaTemplate": "圖片控制項模板索引",
+  "result.export.gia.clientLuaTemplateHint": "Lua 腳本必填：你專案中圖片控制項模板的索引。",
   "result.export.gia.clientFailed": "用戶端圖片產生失敗: {error}",
   "result.export.copy": "複製",
   "result.export.copied": "已複製",

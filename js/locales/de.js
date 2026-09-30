@@ -116,6 +116,9 @@ window.LOCALES["de"] = {
   "batch.elements": "{n} Primitive",
   "batch.elapsed": "{s}s",
   "batch.downloadAllNothing": "Noch keine fertigen Aufträge zum Herunterladen",
+  "batch.luaTemplate": "Vorlagen-Index",
+  "batch.luaTemplateOptional": "optional",
+  "batch.luaTemplateTitle": "Index der Image-Control-Vorlage für die Lua-Skripte im ZIP. Leer lassen, um den TODO-Platzhalter in den Skripten zu behalten.",
 
   /* ── result view ── */
   "result.back": "Zurück zu den Aufträgen",
@@ -140,6 +143,9 @@ window.LOCALES["de"] = {
   "result.export.gia.modeOverlimit": "Beyond",
   "result.export.gia.modeClassic": "Klassisch",
   "result.export.gia.sharedNote": "Beide Downloads enthalten dasselbe Bild, dieselben Farben und dieselben Bild-IDs — nur die .gia-Struktur unterscheidet sich.",
+  "result.export.gia.clientLua": "Lua-Skript",
+  "result.export.gia.clientLuaTemplate": "Index der Image-Control-Vorlage",
+  "result.export.gia.clientLuaTemplateHint": "Für das Lua-Skript erforderlich: der Index der Image-Control-Vorlage in deinem Projekt.",
   "result.export.gia.clientFailed": "Client-Bild konnte nicht erzeugt werden: {error}",
   "result.export.copy": "Kopieren",
   "result.export.copied": "Kopiert",

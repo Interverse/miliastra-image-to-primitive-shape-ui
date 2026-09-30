@@ -116,6 +116,9 @@ window.LOCALES["tr"] = {
   "batch.elements": "{n} şekil",
   "batch.elapsed": "{s} sn",
   "batch.downloadAllNothing": "Henüz indirilecek tamamlanmış iş yok",
+  "batch.luaTemplate": "Şablon dizini",
+  "batch.luaTemplateOptional": "isteğe bağlı",
+  "batch.luaTemplateTitle": "ZIP içindeki Lua betikleri için Görsel Kontrol Şablonu dizini. Betiklerde TODO yer tutucusunu korumak için boş bırakın.",
 
   /* ── result view ── */
   "result.back": "İşlere dön",
@@ -140,6 +143,9 @@ window.LOCALES["tr"] = {
   "result.export.gia.modeOverlimit": "Sınırsız",
   "result.export.gia.modeClassic": "Klasik",
   "result.export.gia.sharedNote": "Her iki indirme de aynı görseli, renkleri ve görsel kimliklerini içerir; yalnızca .gia yapısı farklıdır.",
+  "result.export.gia.clientLua": "Lua Betiği",
+  "result.export.gia.clientLuaTemplate": "Görsel Kontrol Şablonu dizini",
+  "result.export.gia.clientLuaTemplateHint": "Lua Betiği için gerekli: projenizdeki Görsel Kontrol Şablonunun dizini.",
   "result.export.gia.clientFailed": "İstemci görseli oluşturulamadı: {error}",
   "result.export.copy": "Kopyala",
   "result.export.copied": "Kopyalandı",

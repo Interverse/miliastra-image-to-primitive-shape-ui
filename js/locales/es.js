@@ -116,6 +116,9 @@ window.LOCALES["es"] = {
   "batch.elements": "{n} primitivas",
   "batch.elapsed": "{s}s",
   "batch.downloadAllNothing": "Aún no hay tareas terminadas para descargar",
+  "batch.luaTemplate": "Índice de plantilla",
+  "batch.luaTemplateOptional": "opcional",
+  "batch.luaTemplateTitle": "Índice de la plantilla de control de imagen para los scripts Lua del ZIP. Déjalo vacío para mantener el marcador TODO en los scripts.",
 
   /* ── result view ── */
   "result.back": "Volver a las tareas",
@@ -140,6 +143,9 @@ window.LOCALES["es"] = {
   "result.export.gia.modeOverlimit": "Sin límites",
   "result.export.gia.modeClassic": "Clásico",
   "result.export.gia.sharedNote": "Ambas descargas contienen la misma imagen, los mismos colores y los mismos ID de imagen; solo cambia la estructura .gia.",
+  "result.export.gia.clientLua": "Script Lua",
+  "result.export.gia.clientLuaTemplate": "Índice de la plantilla de control de imagen",
+  "result.export.gia.clientLuaTemplateHint": "Obligatorio para el script Lua: el índice de la plantilla de control de imagen en tu proyecto.",
   "result.export.gia.clientFailed": "No se pudo generar la imagen de cliente: {error}",
   "result.export.copy": "Copiar",
   "result.export.copied": "Copiado",

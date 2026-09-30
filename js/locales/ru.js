@@ -116,6 +116,9 @@ window.LOCALES["ru"] = {
   "batch.elements": "Примитивов: {n}",
   "batch.elapsed": "{s} с",
   "batch.downloadAllNothing": "Пока нет завершённых задач для скачивания",
+  "batch.luaTemplate": "Индекс шаблона",
+  "batch.luaTemplateOptional": "необязательно",
+  "batch.luaTemplateTitle": "Индекс шаблона Image Control для Lua-скриптов в ZIP. Оставьте пустым, чтобы сохранить заглушку TODO в скриптах.",
 
   /* ── result view ── */
   "result.back": "К списку задач",
@@ -140,6 +143,9 @@ window.LOCALES["ru"] = {
   "result.export.gia.modeOverlimit": "Безграничный",
   "result.export.gia.modeClassic": "Классический",
   "result.export.gia.sharedNote": "Оба файла содержат одно и то же изображение, цвета и ID изображений — различается только структура .gia.",
+  "result.export.gia.clientLua": "Lua-скрипт",
+  "result.export.gia.clientLuaTemplate": "Индекс шаблона Image Control",
+  "result.export.gia.clientLuaTemplateHint": "Обязательно для Lua-скрипта: индекс шаблона Image Control в вашем проекте.",
   "result.export.gia.clientFailed": "Не удалось создать клиентское изображение: {error}",
   "result.export.copy": "Копировать",
   "result.export.copied": "Скопировано",

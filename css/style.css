@@ -510,6 +510,67 @@ body {
   border-color: var(--gia-badge-bg);
   color: var(--gia-badge-fg);
 }
+.gia-export-group .btn-sm:disabled:hover {
+  background: transparent;
+  border-color: var(--md-outline-variant);
+  color: var(--gia-accent);
+}
+/* Required input inside a card (the Lua script's Image Control Template
+   index): compact label with a required marker, and an error border once
+   something non-numeric is typed. */
+/* Same 10px step the card uses between its description and the buttons,
+   and the input shares the buttons' font size, padding and line height so
+   the stack reads as one column of equal-height controls. */
+.gia-export-group__field { margin: 10px 0 0; }
+.gia-export-group__field label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--md-on-surface-variant);
+  margin-bottom: 4px;
+}
+.gia-export-group__field label::after { content: " *"; color: var(--md-error); }
+.gia-export-group__field .form-input {
+  font-size: 13px;
+  padding: 8px 12px;
+  line-height: 1.3;
+}
+.gia-export-group__field .form-input.is-invalid { border-color: var(--md-error); }
+.gia-export-group__desc--field { margin: 4px 0 0; }
+
+/* Optional per-batch template index next to Download all (ZIP). The dashed,
+   borderless-looking field and italic placeholder read as "optional" beside
+   the tonal button; it is hidden together with the button. */
+.batch-template-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--md-on-surface-variant);
+}
+.batch-template-field[hidden] { display: none; }
+.batch-template-field input {
+  font-family: inherit;
+  font-size: 12px;
+  width: 120px;
+  padding: 6px 10px;
+  color: var(--md-on-surface);
+  background: transparent;
+  border: 1px dashed var(--md-outline, var(--md-outline-variant));
+  border-radius: var(--md-shape-full);
+}
+.batch-template-field input::placeholder {
+  color: var(--md-on-surface-variant);
+  opacity: .7;
+  font-style: italic;
+}
+.batch-template-field input:focus {
+  outline: 2px solid var(--md-primary);
+  outline-offset: -1px;
+  border-style: solid;
+  border-color: transparent;
+}
+.batch-template-field input.is-invalid { border-style: solid; border-color: var(--md-error); }
 
 /* ============================================================
    Drop zone

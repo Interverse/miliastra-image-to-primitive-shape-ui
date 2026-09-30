@@ -43,7 +43,7 @@ The result page currently offers:
 - **Export PNG**
 - **Export CSS**
 - **Download Server Image** — Beyond or Classic `.gia`
-- **Download Client Image** — Beyond or Classic `.gia`
+- **Download Client Image** — Beyond or Classic `.gia`, or a **Lua Script**
 
 ### SVG
 
@@ -99,6 +99,40 @@ that previews what the player sees with the mask switched on.
 The Client output is structurally validated before it is offered; if it
 cannot be generated safely the download fails with an error instead of
 writing a malformed file.
+
+### Lua Script
+
+The Client card also offers **Lua Script** (`<name>_client.lua`): a single
+self-contained client script that rebuilds the image from UI image controls
+at runtime. It has three sections and no `require` calls:
+
+1. **PrimitiveImage runtime library** — the community `PrimitiveImage.lua`,
+   embedded verbatim. `PrimitiveImage.Create(parent, art, props)` spawns a
+   transparent root, a canvas scaled to the requested size, and one image
+   control per primitive; the returned object has `SetVisible`,
+   `SetPosition`, `SetSize` and `Destroy`.
+2. **Image data** — `local MyImage = { ... }`, exactly what the community
+   `primitive_shaper_to_lua.py` converter writes for the exported JSON (see
+   `tests/parity/lua/`). Each row is
+   `{type, x, y, extentX, extentY, rotationZ, packedColor}` with `type` 1 =
+   ellipse, 2 = rectangle, 3 = triangle; positions, half-extents and rotation
+   are quantised to tenths of a unit (integers, ×10), and `packedColor` is the
+   ARGB `packed_color` from the JSON. The header carries the image size before
+   and after `image_scale`, the asset IDs (`100001`/`100002`/`100003`) and the
+   per-type counts.
+3. **Script hooks** — `OnStart` configures the library and creates the image
+   under `script.object`; `OnDestroy` tears it down. `IMAGE_TEMPLATE_INDEX`
+   is the index of an Image Control Template from your project; adjust the
+   props (`width`/`height`, `x`/`y`, `rotation`, `opacity`, `quality`, `clip`,
+   `mirrorX`/`mirrorY`) as needed.
+
+The **Image Control Template index** field below the button is required: the
+button stays disabled until a whole number is entered, and the value is
+written into the script. **Download All** includes the script next to each
+`.json`; the optional **Template index** field beside that button fills it
+in for every script in the ZIP, and when left empty the scripts keep a
+`TODO` placeholder to edit by hand. The value is remembered in the browser
+and shared between both fields.
 
 `docs/client-gia-format.md` documents the Client format field by field, and
 `node tools/gia-diff.js <a.gia> <b.gia>` prints a structural comparison of

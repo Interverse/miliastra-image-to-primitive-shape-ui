@@ -116,6 +116,9 @@ window.LOCALES["ja"] = {
   "batch.elements": "プリミティブ {n} 個",
   "batch.elapsed": "{s}s",
   "batch.downloadAllNothing": "ダウンロード可能な完了ジョブがまだありません",
+  "batch.luaTemplate": "テンプレートインデックス",
+  "batch.luaTemplateOptional": "任意",
+  "batch.luaTemplateTitle": "ZIP 内の Lua スクリプトに使う画像コントロールテンプレートのインデックス。空のままにするとスクリプトに TODO プレースホルダーが残ります。",
 
   /* ── result view ── */
   "result.back": "ジョブ一覧に戻る",
@@ -140,6 +143,9 @@ window.LOCALES["ja"] = {
   "result.export.gia.modeOverlimit": "アドバンス",
   "result.export.gia.modeClassic": "クラシック",
   "result.export.gia.sharedNote": "どちらも同じ画像・色・画像 ID を含み、異なるのは .gia の構造だけです。",
+  "result.export.gia.clientLua": "Lua スクリプト",
+  "result.export.gia.clientLuaTemplate": "画像コントロールテンプレートのインデックス",
+  "result.export.gia.clientLuaTemplateHint": "Lua スクリプトに必須：プロジェクト内の画像コントロールテンプレートのインデックスです。",
   "result.export.gia.clientFailed": "クライアント画像を生成できませんでした: {error}",
   "result.export.copy": "コピー",
   "result.export.copied": "コピーしました",

@@ -116,6 +116,9 @@ window.LOCALES["en"] = {
   "batch.elements": "{n} primitives",
   "batch.elapsed": "{s}s",
   "batch.downloadAllNothing": "No finished jobs to download yet",
+  "batch.luaTemplate": "Template index",
+  "batch.luaTemplateOptional": "optional",
+  "batch.luaTemplateTitle": "Image Control Template index for the Lua scripts in the ZIP. Leave empty to keep the TODO placeholder in the scripts.",
 
   /* ── result view ── */
   "result.back": "Back to jobs",
@@ -140,6 +143,9 @@ window.LOCALES["en"] = {
   "result.export.gia.modeOverlimit": "Beyond",
   "result.export.gia.modeClassic": "Classic",
   "result.export.gia.sharedNote": "Both downloads contain the same image, colours and image IDs — only the .gia structure differs.",
+  "result.export.gia.clientLua": "Lua Script",
+  "result.export.gia.clientLuaTemplate": "Image Control Template index",
+  "result.export.gia.clientLuaTemplateHint": "Required for the Lua Script: the index of the Image Control Template in your project.",
   "result.export.gia.clientFailed": "Client Image could not be generated: {error}",
   "result.export.copy": "Copy",
   "result.export.copied": "Copied",

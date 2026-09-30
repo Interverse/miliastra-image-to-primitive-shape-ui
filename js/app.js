@@ -863,6 +863,7 @@
     $("btnCancelAll").hidden = !hasWork;
     $("btnClearDone").hidden = !jobs.some((job) => ["done", "error", "cancelled"].includes(job.status));
     $("btnDownloadAll").hidden = doneCount === 0;
+    $("batchLuaTemplateField").hidden = doneCount === 0;
     if (!jobs.length) return;
     let totalProgress = 0;
     let denom = 0;
@@ -2172,7 +2173,7 @@
     const safeName = String(rawName || "").trim()
       .replace(/[<>:"/\\|?*\x00-\x1f]+/g, "_")
       .replace(/\s+/g, " ");
-    const baseName = safeName.replace(/\.(json|css|svg|png|gia)$/i, "").trim();
+    const baseName = safeName.replace(/\.(json|css|svg|png|gia|lua)$/i, "").trim();
     return baseName || (R ? R.job.baseName : "shaper_result");
   }
 
@@ -2434,6 +2435,54 @@
     }
   }
 
+  /* ── Image Control Template index for the Lua scripts ──
+   * One project-wide value: the result card field (required — the button
+   * stays disabled without it) and the batch field (optional) are kept in
+   * sync and remembered across sessions. */
+  const TEMPLATE_INDEX_KEY = "shaper_lua_template_index";
+  function templateIndexFields() { return [$("clientLuaTemplateIndex"), $("batchLuaTemplateIndex")]; }
+
+  function refreshTemplateIndexState() {
+    for (const field of templateIndexFields()) {
+      const text = field.value.trim();
+      field.classList.toggle("is-invalid", text !== "" && LuaExport.parseTemplateIndex(text) === null);
+    }
+    $("btnExportClientLua").disabled = LuaExport.parseTemplateIndex($("clientLuaTemplateIndex").value) === null;
+  }
+
+  function syncTemplateIndex(source) {
+    for (const field of templateIndexFields()) if (field !== source) field.value = source.value;
+    try { localStorage.setItem(TEMPLATE_INDEX_KEY, source.value); } catch (e) { /* storage unavailable */ }
+    refreshTemplateIndexState();
+  }
+
+  (function initTemplateIndex() {
+    let stored = "";
+    try { stored = localStorage.getItem(TEMPLATE_INDEX_KEY) || ""; } catch (e) { /* storage unavailable */ }
+    for (const field of templateIndexFields()) {
+      field.value = stored;
+      field.addEventListener("input", () => syncTemplateIndex(field));
+    }
+    refreshTemplateIndexState();
+  })();
+
+  /* Client Lua export: one self-contained script — PrimitiveImage runtime
+   * library + the Export JSON payload as a data table (port of the community
+   * primitive_shaper_to_lua.py converter) + OnStart/OnDestroy hooks. */
+  function exportClientLua() {
+    if (!R) return;
+    const imageTemplateIndex = LuaExport.parseTemplateIndex($("clientLuaTemplateIndex").value);
+    if (imageTemplateIndex === null) { $("clientLuaTemplateIndex").focus(); return; }
+    try {
+      const text = LuaExport.buildStandaloneLuaScript(buildJsonExportPayload(), { imageTemplateIndex });
+      downloadBlob(new Blob([text], { type: "text/x-lua" }), `${currentExportBaseName()}_client.lua`);
+    } catch (error) {
+      alert(t("result.export.gia.clientFailed", {
+        error: error && error.message ? error.message : error,
+      }));
+    }
+  }
+
   /* Every Client export has a parent image, so the mask toggle is always
    * meaningful — it previews what the player sees after switching the mask
    * on in game. */
@@ -2682,6 +2731,7 @@
   $("btnExportGIAClassic").addEventListener("click", () => exportGia(true));
   $("btnExportClientGIAOverlimit").addEventListener("click", () => exportClientGia(false));
   $("btnExportClientGIAClassic").addEventListener("click", () => exportClientGia(true));
+  $("btnExportClientLua").addEventListener("click", exportClientLua);
 
   /* ─────────────── download all (ZIP) ─────────────── */
 
@@ -2693,6 +2743,8 @@
     }
     try {
       const templates = await loadTemplates();
+      // Optional: null keeps the TODO placeholder in every Lua script.
+      const imageTemplateIndex = LuaExport.parseTemplateIndex($("batchLuaTemplateIndex").value);
       const files = [];
       const usedNames = new Set();
       const uniqueName = (base, ext) => {
@@ -2730,6 +2782,11 @@
           elements: data.elements,
         };
         files.push({ name: uniqueName(job.baseName, "json"), data: encoder.encode(JSON.stringify(payload, null, 2)) });
+        // ... and the same payload as the self-contained Client Lua script
+        files.push({
+          name: uniqueName(`${job.baseName}_client`, "lua"),
+          data: encoder.encode(LuaExport.buildStandaloneLuaScript(payload, { imageTemplateIndex })),
+        });
       }
       downloadBlob(MiniZip.build(files), "shaper_results.zip");
     } catch (error) {

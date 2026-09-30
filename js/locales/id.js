@@ -116,6 +116,9 @@ window.LOCALES["id"] = {
   "batch.elements": "{n} bentuk",
   "batch.elapsed": "{s} dtk",
   "batch.downloadAllNothing": "Belum ada tugas selesai untuk diunduh",
+  "batch.luaTemplate": "Indeks templat",
+  "batch.luaTemplateOptional": "opsional",
+  "batch.luaTemplateTitle": "Indeks Templat Image Control untuk skrip Lua di dalam ZIP. Kosongkan untuk mempertahankan placeholder TODO di skrip.",
 
   /* ── result view ── */
   "result.back": "Kembali ke tugas",
@@ -140,6 +143,9 @@ window.LOCALES["id"] = {
   "result.export.gia.modeOverlimit": "Beyond",
   "result.export.gia.modeClassic": "Klasik",
   "result.export.gia.sharedNote": "Kedua unduhan berisi gambar, warna, dan ID gambar yang sama — hanya struktur .gia yang berbeda.",
+  "result.export.gia.clientLua": "Skrip Lua",
+  "result.export.gia.clientLuaTemplate": "Indeks Templat Image Control",
+  "result.export.gia.clientLuaTemplateHint": "Wajib untuk Skrip Lua: indeks Templat Image Control di proyek Anda.",
   "result.export.gia.clientFailed": "Gambar Klien gagal dibuat: {error}",
   "result.export.copy": "Salin",
   "result.export.copied": "Tersalin",
