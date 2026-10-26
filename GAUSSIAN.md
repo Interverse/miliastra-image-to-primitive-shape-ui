@@ -20,14 +20,37 @@ through the ordered RGBA composite supplies gradients to Adam. All blobs
 are optimized together. The renderer uses 16-pixel tiles; prefixes for
 backpropagation are stored for only one sampled pixel at a time.
 
-The fitting image is area-downsampled to the selected longest side: 128
-(default), 256 or 512 pixels. Higher resolutions retain finer details but
-take longer and may need more optimization steps. Each step samples up to
-approximately 4,096 pixels, cycling through
-all pixel classes. The default is 600 steps (UI range 100–3,000); higher
-counts take longer. Full-image loss is checked every 20 steps and the best
-parameter set is retained. The final preview is rendered at input resolution.
-The fixed initial seed makes equal inputs/settings reproducible.
+The default fitting detail is **512 px**. The numeric detail field accepts
+higher values without a software upper bound, up to the source image's
+native size (larger values do not upscale the source). For example, enter
+768 for the supplied city photo or 1080 for the supplied illustration.
+Fitting progresses through the available 128 → 256 → 512 pyramid levels.
+Coarse stages establish the composition; the remaining primitive budget is
+placed into the high-resolution residual. The total always matches the
+requested count, rather than growing automatically into thousands of blobs.
+
+Placement is error-driven. Each candidate solves RGB and opacity against
+the current source-over canvas, then refines its geometry. Edge-weighted
+error gives outlines and small contrasting features more influence. The
+last stage measures the exact error cost of removing each blob, including
+occlusion by later layers. It reuses the weakest 15% of slots in areas with
+remaining error, accepting the replacement only when weighted error falls.
+
+Joint Adam refinement uses deterministic stratified 2D pixel samples,
+replacing the old vertical-stripe sampling pattern. Sample coverage now
+scales with the number of active blobs: a budget of 32 pixels per blob,
+at least 4,096 samples, up to the entire image. The stratification grid
+determines the actual sample count. This reduces missed updates for narrow
+splats, at the cost of more work per step. Full-image error is checked every
+20–200 steps, depending on resolution, and each pass retains its best parameters.
+
+The default is 600 optimization steps, divided across pyramid levels and
+the final refinement pass. Any positive step count can be requested without
+an upper software cap. Placement and optimization both remain cancellable.
+The final preview is rendered at input resolution. Equal inputs/settings
+and seed produce equal results. `initial_loss` is the unweighted error of
+the empty canvas at the final fitting resolution; `final_loss` is the fitted
+unweighted error. `weighted_loss` records the edge-weighted objective.
 
 PNG mode fits premultiplied RGB and alpha together, without flattening onto
 white. With PNG mode off, fitting uses the source flattened onto white.
@@ -35,8 +58,20 @@ Global output opacity scales the fitted blob opacities after optimization.
 
 The browser implementation uses source-over rather than GaussianImage's
 accumulated sum because the exported game UI controls use ordinary alpha
-blending. Colors are constrained to RGB [0,1] and opacity to [0.005,0.995].
+blending. Colors are constrained to RGB [0,1] and opacity to [0,0.999].
 Quantization/compression from the research codec is outside this feature.
+
+For detailed artwork, try **800 primitives, 512 px, 1,200 steps** as a
+starting point. Use 400 for a smaller export or 1,200 for more detail. These
+are suggested settings, not new limits. Blurred circles remain exclusive;
+mixing solid primitives is not part of this change.
+
+The paper and renderer differences, same-budget measurements, unsuccessful
+edge-loss experiments, and next directions are documented in
+[the quality investigation](GAUSSIAN-RESEARCH.md). Higher
+resolution and more steps do not guarantee sharper results at a small
+primitive count. Source-over blurred circles still have limited ability to
+represent sharp corners and dense fine detail.
 
 ## Gaussian texture approximation
 

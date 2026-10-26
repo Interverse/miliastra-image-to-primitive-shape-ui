@@ -84,11 +84,11 @@
           <div id="gaussianSettings" class="form-stack" hidden>
             <div class="form-field">
               <label for="gaussianIterations" data-i18n="fillParams.gaussianIterations">Fitting steps</label>
-              <input type="number" id="gaussianIterations" value="600" min="100" max="3000" step="100" class="num-input">
+              <input type="number" id="gaussianIterations" value="600" min="1" step="1" class="num-input">
             </div>
             <div class="form-field">
               <label for="gaussianResolution" data-i18n="fillParams.gaussianResolution">Detail (px)</label>
-              <select id="gaussianResolution" class="form-input"><option value="128">128 px</option><option value="256">256 px</option><option value="512">512 px</option></select>
+              <input type="number" id="gaussianResolution" value="512" min="32" step="1" class="num-input">
             </div>
           </div>
           <p class="hint" id="shapeHint" data-i18n="shapes.hint.fill"></p>
@@ -384,11 +384,11 @@
         <div id="retryGaussianSettings" class="form-stack" hidden>
           <div class="form-field">
             <label for="retryGaussianIterations" data-i18n="fillParams.gaussianIterations">Fitting steps</label>
-            <input type="number" id="retryGaussianIterations" value="600" min="100" max="3000" step="100" class="num-input">
+            <input type="number" id="retryGaussianIterations" value="600" min="1" step="1" class="num-input">
           </div>
           <div class="form-field">
             <label for="retryGaussianResolution" data-i18n="fillParams.gaussianResolution">Detail (px)</label>
-            <select id="retryGaussianResolution" class="form-input"><option value="128">128 px</option><option value="256">256 px</option><option value="512">512 px</option></select>
+            <input type="number" id="retryGaussianResolution" value="512" min="32" step="1" class="num-input">
           </div>
         </div>
         <div class="config-row">
@@ -610,6 +610,6 @@
   <script src="js/lua-export.js?v=25"></script>
   <script src="js/png-decode.js?v=24"></script>
   <script src="js/gaussian.js?v=25"></script>
-  <script src="js/app.js?v=26"></script>
+  <script src="js/app.js?v=30"></script>
 </body>
 </html>

@@ -26,6 +26,9 @@ frame.addEventListener('load',async()=>{
     $('shapeBlurredCircle').click();
     check(['shapeCircle','shapeRect','shapeTriangle'].every(id=>$(id).disabled&&!$(id).checked),'exclusive blurred primitive selection');
     check($('enhancedMode').disabled&&!$('gaussianSettings').hidden,'Gaussian controls replace enhanced fitter');
+    check($('gaussianResolution').value==='512','Gaussian detail defaults to 512 px');
+    check($('gaussianResolution').type==='number'&&!$('gaussianResolution').hasAttribute('max'),'detail accepts resolutions above 512 px');
+    $('gaussianResolution').value='768';
     $('numPrimsManual').value='40';$('gaussianIterations').value='100';
     const canvas=d.createElement('canvas');canvas.width=64;canvas.height=64;
     const ctx=canvas.getContext('2d');
@@ -40,6 +43,7 @@ frame.addEventListener('load',async()=>{
     d.querySelector('.job-actions button').click();
     check($('statGaussian').textContent==='40'&&$('statEllipse').textContent==='0','result identifies 40 blurred blobs separately');
     check($('retryShapeBlurredCircle').checked&&$('retryShapeCircle').disabled,'retry preserves exclusive primitive');
+    check($('retryGaussianResolution').value==='768'&&!$('retryGaussianResolution').hasAttribute('max'),'retry preserves higher fitting resolution');
     const urls=new Map(),downloads=[];
     const originalCreate=w.URL.createObjectURL.bind(w.URL);
     w.URL.createObjectURL=b=>{const url=originalCreate(b);urls.set(url,b);return url;};
@@ -70,7 +74,7 @@ frame.addEventListener('load',async()=>{
     check(!errors.length,'no runtime errors throughout workflow');
     // Cancellation must reach the worker between optimizer chunks; then a
     // pooled worker must be reusable with cancellation state reset.
-    const worker=new w.Worker('/js/worker-gaussian.js');
+    const worker=new w.Worker('/js/worker-gaussian.js?v=30');
     const image=ctx.getImageData(0,0,64,64).data;
     let phase='training',workerDone=false;
     worker.onmessage=({data})=>{
@@ -86,6 +90,28 @@ frame.addEventListener('load',async()=>{
       config:{num_primitives:40,gaussian_iterations:3000,enable_png_mode:true}});
     await wait(()=>workerDone);worker.terminate();
     check(!errors.length&&phase==='reused','real worker cancellation and reuse');
+    check(!$('gaussianIterations').hasAttribute('max')&&!$('retryGaussianIterations').hasAttribute('max'),'upload and retry have no upper step limit');
+    const hugeWorker=new w.Worker('/js/worker-gaussian.js?v=30');
+    let hugeTotal=0,hugeCancelled=false;
+    hugeWorker.onmessage=({data})=>{
+      if(data.type==='progress'){hugeTotal=data.total;hugeWorker.postMessage({cmd:'cancel'});}
+      if(data.type==='cancelled')hugeCancelled=true;
+      if(data.type==='error')errors.push(data.message);
+    };
+    hugeWorker.postMessage({cmd:'process',jobId:3,rgba:new Uint8ClampedArray(16).fill(255).buffer,width:2,height:2,
+      config:{num_primitives:1,gaussian_iterations:100000000,enable_png_mode:true}});
+    await wait(()=>hugeCancelled||errors.length);hugeWorker.terminate();
+    check(!errors.length&&hugeCancelled&&hugeTotal===100000000,'huge step count reaches the browser worker unchanged and cancels');
+    const pyramidWorker=new w.Worker('/js/worker-gaussian.js?v=30');
+    let pyramidResult=null;
+    pyramidWorker.onmessage=({data})=>{if(data.type==='done')pyramidResult=data.result;if(data.type==='error')errors.push(data.message);};
+    const pyramidPixels=new Uint8ClampedArray(256*128*4);
+    for(let i=0;i<256*128;i++)pyramidPixels.set([i%256,90,160,255],i*4);
+    pyramidWorker.postMessage({cmd:'process',jobId:4,rgba:pyramidPixels.buffer,width:256,height:128,
+      config:{num_primitives:4,gaussian_iterations:60,gaussian_resolution:256}});
+    await wait(()=>pyramidResult||errors.length);pyramidWorker.terminate();
+    check(!errors.length&&pyramidResult.config.fitting_stages.length===2,'real browser worker fits coarse to fine');
+    check(pyramidResult.elements_count===4&&pyramidResult.config.fitting_stages.reduce((n,s)=>n+s.steps,0)===60,'browser pyramid preserves primitive and step budgets');
     // Leave the final Gaussian result visible for visual inspection.
     d.querySelector('.job-card:last-child .job-actions button').click();
     report.textContent=`ALL PASS (${messages.length} browser checks)\n`+messages.join('\n');

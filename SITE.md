@@ -33,7 +33,7 @@ python -m http.server 8321
 | `css/style.css` | Material Design 3 styling |
 | `js/app.js` | UI controller, batch job queue (one Web Worker per job, pooled by CPU count), result canvas + JSON/CSS/SVG/PNG/GIA exports |
 | `js/worker-fill.js` | Fill mode — bit-exact port of the fogleman/primitive fitter (`js/gorand.js`, `js/gomath.js`, `js/goraster.js`) |
-| `js/worker-gaussian.js`, `js/gaussian.js` | Browser Gaussian optimization and shared blurred radial falloff; see `GAUSSIAN.md` |
+| `js/worker-gaussian.js`, `js/gaussian-seed.js`, `js/gaussian.js` | Multiscale Gaussian fitting, error-driven placement and shared blurred radial falloff; see `GAUSSIAN.md` |
 | `js/worker-outline.js` | Outline (decoration) mode — bit-exact port of `final_shaper.py` (`js/geometry.js` = Shapely/GEOS port) |
 | `js/imaging.js` | cv2/NumPy-exact primitives (validated byte-identical) |
 | `js/pynum.js`, `js/fillshaper.js` | CPython/NumPy-exact rounding & rasterizers |

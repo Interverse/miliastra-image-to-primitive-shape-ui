@@ -560,8 +560,8 @@
       if ($("shapeTriangle").checked) allowed.push("triangle");
       if ($("shapeBlurredCircle").checked) {
         allowed.splice(0, allowed.length, "blurred_circle");
-        cfg.gaussian_iterations = Math.max(100, Math.min(3000, Number($("gaussianIterations").value) || 600));
-        cfg.gaussian_resolution = Number($("gaussianResolution").value) || 128;
+        cfg.gaussian_iterations = Math.max(1, Math.round(Number($("gaussianIterations").value) || 600));
+        cfg.gaussian_resolution = Number($("gaussianResolution").value) || 512;
       }
       cfg.allowed_shapes = allowed.length ? allowed : ["circle"];
       const primitives = allowed.map((shape) => ({ shape, color: "#ffffff" }));
@@ -757,7 +757,7 @@
     if (job.status !== "processing") return; // cancelled during decode
 
     const workerFile = job.config.mode === "outline" ? "js/worker-outline.js" :
-      (job.config.allowed_shapes || []).includes("blurred_circle") ? "js/worker-gaussian.js" : "js/worker-fill.js";
+      (job.config.allowed_shapes || []).includes("blurred_circle") ? "js/worker-gaussian.js?v=30" : "js/worker-fill.js";
     const worker = acquireWorker(workerFile);
     job.worker = worker;
 
@@ -1521,7 +1521,7 @@
       $("retryShapeTriangle").checked = allowed.includes("triangle");
       $("retryShapeBlurredCircle").checked = allowed.includes("blurred_circle");
       $("retryGaussianIterations").value = cfg.gaussian_iterations || 600;
-      $("retryGaussianResolution").value = cfg.gaussian_resolution || 128;
+      $("retryGaussianResolution").value = cfg.gaussian_resolution || 512;
       syncRetryShapeLabels();
     } else {
       $("retryPrimSize").value = cfg.primitive_size != null ? cfg.primitive_size : 30;
@@ -1569,8 +1569,8 @@
       image_scale: Number($("retryImageScale").value) || 1.0,
       output_alpha: Math.max(0, Math.min(100, Number($("retryOutputAlpha").value))) / 100,
       allowed_shapes: shapes,
-      gaussian_iterations: Math.max(100, Math.min(3000, Number($("retryGaussianIterations").value) || 600)),
-      gaussian_resolution: Number($("retryGaussianResolution").value) || 128,
+      gaussian_iterations: Math.max(1, Math.round(Number($("retryGaussianIterations").value) || 600)),
+      gaussian_resolution: Number($("retryGaussianResolution").value) || 512,
       primitives: shapes.map((shape) => ({ shape, color: "#ffffff" })),
     });
   });
