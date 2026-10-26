@@ -184,13 +184,22 @@
 
   const fillShapeInputs = Array.from(document.querySelectorAll("#fillShapeSection .shape-check input"));
   function syncShapeLabels() {
+    const gaussian = $("shapeBlurredCircle").checked;
     fillShapeInputs.forEach((checkbox) => {
+      if (checkbox.id !== "shapeBlurredCircle") {
+        checkbox.disabled = gaussian;
+        if (gaussian) checkbox.checked = false;
+      }
       checkbox.closest(".shape-check").classList.toggle("active", checkbox.checked);
     });
+    $("gaussianHint").hidden = !gaussian;
+    $("shapeHint").hidden = gaussian;
+    $("gaussianSettings").hidden = !gaussian;
+    $("enhancedMode").disabled = gaussian;
   }
   fillShapeInputs.forEach((input) => {
     input.addEventListener("change", () => {
-      if (!fillShapeInputs.some((node) => node.checked)) input.checked = true;
+      if (!fillShapeInputs.some((node) => node.checked)) $("shapeCircle").checked = true;
       syncShapeLabels();
     });
   });
@@ -549,6 +558,11 @@
       if ($("shapeCircle").checked) allowed.push("circle");
       if ($("shapeRect").checked) allowed.push("rect");
       if ($("shapeTriangle").checked) allowed.push("triangle");
+      if ($("shapeBlurredCircle").checked) {
+        allowed.splice(0, allowed.length, "blurred_circle");
+        cfg.gaussian_iterations = Math.max(100, Math.min(3000, Number($("gaussianIterations").value) || 600));
+        cfg.gaussian_resolution = Number($("gaussianResolution").value) || 128;
+      }
       cfg.allowed_shapes = allowed.length ? allowed : ["circle"];
       const primitives = allowed.map((shape) => ({ shape, color: "#ffffff" }));
       if (primitives.length) cfg.primitives = primitives;
@@ -742,7 +756,8 @@
     }
     if (job.status !== "processing") return; // cancelled during decode
 
-    const workerFile = job.config.mode === "outline" ? "js/worker-outline.js" : "js/worker-fill.js";
+    const workerFile = job.config.mode === "outline" ? "js/worker-outline.js" :
+      (job.config.allowed_shapes || []).includes("blurred_circle") ? "js/worker-gaussian.js" : "js/worker-fill.js";
     const worker = acquireWorker(workerFile);
     job.worker = worker;
 
@@ -1210,7 +1225,8 @@
       if (selected) ctx.fillStyle = "rgba(37, 99, 235, 0.42)";
       else if (highlighted) ctx.fillStyle = "rgba(59, 130, 246, 0.28)";
       else ctx.fillStyle = cssColor(element.color, fillAlpha);
-      ctx.fill();
+      if (Gaussian.isGaussian(element) && !selected && !highlighted) Gaussian.draw(ctx, element, R.ppu);
+      else ctx.fill();
     }
     if ($("showBorder").checked) {
       if (selected) { ctx.strokeStyle = "#1d4ed8"; ctx.lineWidth = 2 / R.scale; }
@@ -1445,7 +1461,7 @@
     $("infoPanel").hidden = false;
     const relative = relativePosition(element);
     $("infoId").textContent = element.id != null ? element.id : displayElementIndex(R.data, index);
-    $("infoType").textContent = shapeDisplayName(element.type);
+    $("infoType").textContent = Gaussian.isGaussian(element) ? t("shapes.blurredCircle") : shapeDisplayName(element.type);
     $("infoCenter").textContent = `(${element.center.x.toFixed(2)}, ${element.center.y.toFixed(2)})`;
     $("infoRelative").textContent = `(${relative.x.toFixed(2)}, ${relative.y.toFixed(2)})`;
     $("infoSize").textContent = elementSizeText(element);
@@ -1455,18 +1471,20 @@
   function updateStats() {
     const data = R.data;
     const elements = visibleElements(data);
-    const ellipseCount = elements.filter((el) => normalizeType(el.type) === "ellipse").length;
+    const gaussianCount = elements.filter(Gaussian.isGaussian).length;
+    const ellipseCount = elements.filter((el) => normalizeType(el.type) === "ellipse" && !Gaussian.isGaussian(el)).length;
     const triangleCount = elements.filter((el) => normalizeType(el.type) === "triangle").length;
-    const rectCount = elements.length - ellipseCount - triangleCount;
+    const rectCount = elements.length - ellipseCount - triangleCount - gaussianCount;
     const mode = data.mode || "fill";
     const fillVariant = (data.config && data.config.fill_variant) || "mask";
     const modeText = mode === "fill"
       ? t(fillVariant === "png" ? "result.mode.fillPng" : "result.mode.fill")
       : t("result.mode.outline");
 
-    $("statMode").textContent = modeText;
+    $("statMode").textContent = gaussianCount ? "GaussianImage" : modeText;
     $("statTotal").textContent = String(elements.length);
     $("statEllipse").textContent = String(ellipseCount);
+    $("statGaussian").textContent = String(gaussianCount);
     $("statRect").textContent = String(rectCount);
     $("statTriangle").textContent = String(triangleCount);
     $("statImgSize").textContent = `${data.image_size.width}×${data.image_size.height}`;
@@ -1501,6 +1519,9 @@
       $("retryShapeCircle").checked = allowed.includes("circle");
       $("retryShapeRect").checked = allowed.includes("rect");
       $("retryShapeTriangle").checked = allowed.includes("triangle");
+      $("retryShapeBlurredCircle").checked = allowed.includes("blurred_circle");
+      $("retryGaussianIterations").value = cfg.gaussian_iterations || 600;
+      $("retryGaussianResolution").value = cfg.gaussian_resolution || 128;
       syncRetryShapeLabels();
     } else {
       $("retryPrimSize").value = cfg.primitive_size != null ? cfg.primitive_size : 30;
@@ -1520,11 +1541,20 @@
 
   const retryShapeInputs = Array.from(document.querySelectorAll("#retryShapeChecks .shape-check input"));
   function syncRetryShapeLabels() {
+    const gaussian = $("retryShapeBlurredCircle").checked;
+    $("retryGaussianSettings").hidden = !gaussian;
     retryShapeInputs.forEach((checkbox) => {
+      if (checkbox.id !== "retryShapeBlurredCircle") {
+        checkbox.disabled = gaussian;
+        if (gaussian) checkbox.checked = false;
+      }
       checkbox.closest(".shape-check").classList.toggle("active", checkbox.checked);
     });
   }
-  retryShapeInputs.forEach((input) => input.addEventListener("change", syncRetryShapeLabels));
+  retryShapeInputs.forEach((input) => input.addEventListener("change", () => {
+    if (!retryShapeInputs.some((node) => node.checked)) $("retryShapeCircle").checked = true;
+    syncRetryShapeLabels();
+  }));
 
   $("btnRetryFill").addEventListener("click", () => {
     if (!R) return;
@@ -1532,12 +1562,15 @@
     if ($("retryShapeCircle").checked) allowed.push("circle");
     if ($("retryShapeRect").checked) allowed.push("rect");
     if ($("retryShapeTriangle").checked) allowed.push("triangle");
+    if ($("retryShapeBlurredCircle").checked) allowed.splice(0, allowed.length, "blurred_circle");
     const shapes = allowed.length ? allowed : ["circle"]; // same fallback as the upload page
     retryJob(R.job, {
       num_primitives: Math.max(40, Math.min(3000, Number($("retryNumPrims").value) || 400)),
       image_scale: Number($("retryImageScale").value) || 1.0,
-      output_alpha: (Number($("retryOutputAlpha").value) || 100) / 100,
+      output_alpha: Math.max(0, Math.min(100, Number($("retryOutputAlpha").value))) / 100,
       allowed_shapes: shapes,
+      gaussian_iterations: Math.max(100, Math.min(3000, Number($("retryGaussianIterations").value) || 600)),
+      gaussian_resolution: Number($("retryGaussianResolution").value) || 128,
       primitives: shapes.map((shape) => ({ shape, color: "#ffffff" })),
     });
   });
@@ -2205,6 +2238,8 @@
         alpha: element.alpha,
         packed_color: element.packed_color,
         image_asset_ref: element.image_asset_ref,
+        primitive_type: element.primitive_type,
+        image_type: element.image_type,
         type_id: element.type_id,
         element_type_id: element.element_type_id,
         name: element.name,
@@ -2276,7 +2311,11 @@
       lines.push(`  top: ${center.y.toFixed(2)}px;`);
       lines.push(`  width: ${width.toFixed(2)}px;`);
       lines.push(`  height: ${height.toFixed(2)}px;`);
-      lines.push(`  background-color: ${color};`);
+      if (Gaussian.isGaussian(element)) {
+        const rgb = [1, 3, 5].map((i) => parseInt(element.color.slice(i, i + 2), 16));
+        const stops = Gaussian.stops.map(([r, a]) => `rgba(${rgb.join(",")},${a.toFixed(6)}) ${(r * 100).toFixed(3)}%`);
+        lines.push(`  background: radial-gradient(ellipse closest-side, ${stops.join(", ")});`);
+      } else lines.push(`  background-color: ${color};`);
       lines.push(`  opacity: ${alpha.toFixed(4)};`);
       lines.push(`  transform: translate(${txPercent}) rotate(${angle.toFixed(2)}deg);`);
       lines.push(`  transform-origin: ${transformOrigin};`);
@@ -2304,7 +2343,7 @@
       lines.push(`  <rect width="${imageWidth}" height="${imageHeight}" fill="#ffffff" />`);
     }
 
-    elements.forEach((element) => {
+    elements.forEach((element, index) => {
       const center = imagePointToElementCenter(element);
       const type = normalizeType(element.type);
       const angle = -elementRotationZ(element);
@@ -2315,6 +2354,12 @@
       if (type === "ellipse") {
         const rx = (element.size.rx || (element.size.width || 0) / 2) * R.ppu;
         const ry = (element.size.ry || (element.size.height || 0) / 2) * R.ppu;
+        if (Gaussian.isGaussian(element)) {
+          const id = `gaussian-${index}`;
+          lines.push(`  <defs><radialGradient id="${id}">${Gaussian.stops.map(([r, a]) => `<stop offset="${r}" stop-color="${color}" stop-opacity="${a}"/>`).join("")}</radialGradient></defs>`);
+          lines.push(`  <ellipse cx="${center.x}" cy="${center.y}" rx="${rx}" ry="${ry}" fill="url(#${id})" opacity="${alpha}" transform="rotate(${angle} ${center.x} ${center.y})" />`);
+          return;
+        }
         lines.push(`  <ellipse cx="${center.x.toFixed(2)}" cy="${center.y.toFixed(2)}" rx="${rx.toFixed(2)}" ry="${ry.toFixed(2)}" fill="${color}" fill-opacity="${alpha.toFixed(4)}" transform="rotate(${angle.toFixed(2)} ${center.x.toFixed(2)} ${center.y.toFixed(2)})" />`);
         return;
       }
@@ -2353,12 +2398,14 @@
         fetchTemplate("image_template.gia"),
         fetchTemplate("template.gia"),
         fetchTemplate("client_mask_off_template.gia"),
-      ]).then(([image, decoration, clientImage]) => ({
+        fetchTemplate("blurred_circle_server.gia"),
+      ]).then(([image, decoration, clientImage, serverImage]) => ({
         image: new Uint8Array(image),
         decoration: new Uint8Array(decoration),
         // Image-parent container with the in-game mask toggle off — the
         // shape every Client export takes.
         client: new Uint8Array(clientImage),
+        server: new Uint8Array(serverImage),
       })).catch((error) => {
         templatePromise = null;
         throw error;
@@ -2382,13 +2429,13 @@
     );
   }
 
-  /* Server Control Template export — unchanged behaviour and file names. */
+  /* Asset Group export — source-image rectangular mask enabled by default. */
   async function exportGia(classic) {
     if (!R) return;
     try {
       const templates = await loadTemplates();
       const jsonData = currentGiaJson();
-      let bytes = GIA.convertJsonToGiaBytes(jsonData, templates.image, GIA.MODE_IMAGE);
+      let bytes = GIA.convertJsonToGiaBytes(GiaExport.withAssetGroupMask(jsonData), templates.image, GIA.MODE_IMAGE);
       let name = exportFileName("gia");
       if (classic) {
         bytes = GIA.toClassic(bytes);
@@ -2398,6 +2445,16 @@
     } catch (error) {
       alert(t("result.export.failed", { error: error && error.message ? error.message : error }));
     }
+  }
+
+  async function exportServerGia(classic) {
+    if (!R) return;
+    try {
+      const templates = await loadTemplates();
+      let bytes = GIA.convertJsonToGiaBytes(currentGiaJson(), templates.server, GIA.MODE_SERVER_IMAGE);
+      if (classic) bytes = GIA.toClassic(bytes);
+      downloadBlob(new Blob([bytes], { type: "application/octet-stream" }), `${currentExportBaseName()}_server${classic ? "_classic" : ""}.gia`);
+    } catch (error) { alert(t("result.export.failed", { error: error.message || error })); }
   }
 
   /* Client Control Template export. Every file is structurally validated
@@ -2526,7 +2583,7 @@
       const jsonData = currentGiaJson();
       return {
         json: jsonData,
-        server: GIA.convertJsonToGiaBytes(jsonData, templates.image, GIA.MODE_IMAGE),
+        server: GIA.convertJsonToGiaBytes(GiaExport.withAssetGroupMask(jsonData), templates.image, GIA.MODE_IMAGE),
         client: GIA.convertJsonToGiaBytes(jsonData, templates.client, GIA.MODE_CLIENT_IMAGE),
       };
     },
@@ -2729,6 +2786,8 @@
   });
   $("btnExportGIAOverlimit").addEventListener("click", () => exportGia(false));
   $("btnExportGIAClassic").addEventListener("click", () => exportGia(true));
+  $("btnExportServerGIAOverlimit").addEventListener("click", () => exportServerGia(false));
+  $("btnExportServerGIAClassic").addEventListener("click", () => exportServerGia(true));
   $("btnExportClientGIAOverlimit").addEventListener("click", () => exportClientGia(false));
   $("btnExportClientGIAClassic").addEventListener("click", () => exportClientGia(true));
   $("btnExportClientLua").addEventListener("click", exportClientLua);
@@ -2759,8 +2818,10 @@
         const data = job.result;
         const origin = { x: data.image_center.x, y: data.image_center.y };
         const jsonData = convertResultToGiaJson(data, job.config, job.baseName, origin.x, origin.y);
-        const giaBytes = GIA.convertJsonToGiaBytes(jsonData, templates.image, GIA.MODE_IMAGE);
+        const giaBytes = GIA.convertJsonToGiaBytes(GiaExport.withAssetGroupMask(jsonData), templates.image, GIA.MODE_IMAGE);
         files.push({ name: uniqueName(job.baseName, "gia"), data: giaBytes });
+        files.push({ name: uniqueName(`${job.baseName}_server`, "gia"),
+          data: GIA.convertJsonToGiaBytes(jsonData, templates.server, GIA.MODE_SERVER_IMAGE) });
         // Same image, same IDs, Client Control Template structure.
         files.push({
           name: uniqueName(`${job.baseName}_client`, "gia"),

@@ -2,6 +2,14 @@
 "use strict";
 window.LOCALES = window.LOCALES || {};
 window.LOCALES["ru"] = {
+  "shapes.blurredCircle": "Размытый круг",
+  "shapes.gaussianHint": "Только размытые круги. Приблизительный просмотр.",
+  "fillParams.gaussianIterations": "Шаги оптимизации",
+  "fillParams.gaussianResolution": "Детализация (пкс)",
+  "result.export.gia.assetGroupBadge": "Группа ресурсов",
+  "result.export.gia.assetGroupTitle": "Скачать группу",
+  "result.export.gia.assetGroupDesc": "Группа изображений для повторного использования.",
+  "result.export.gia.allFormatsNote": "Одно изображение, разные форматы.",
   /* ── app / topbar ── */
   "app.title": "Аппроксимация изображений примитивами",
   "app.pageTitle": "Miliastra Wonderland — аппроксимация изображений",
@@ -136,7 +144,7 @@ window.LOCALES["ru"] = {
   "result.export.png": "Экспорт PNG",
   "result.export.gia.serverBadge": "Сервер",
   "result.export.gia.serverTitle": "Скачать серверное изображение",
-  "result.export.gia.serverDesc": "Структура серверного шаблона элемента управления.",
+  "result.export.gia.serverDesc": "Шаблон серверного изображения.",
   "result.export.gia.clientBadge": "Клиент",
   "result.export.gia.clientTitle": "Скачать клиентское изображение",
   "result.export.gia.clientDesc": "Структура клиентского шаблона элемента управления.",

@@ -2,6 +2,14 @@
 "use strict";
 window.LOCALES = window.LOCALES || {};
 window.LOCALES["ko"] = {
+  "shapes.blurredCircle": "흐린 원",
+  "shapes.gaussianHint": "흐린 원만 사용합니다. 미리보기는 근사치입니다.",
+  "fillParams.gaussianIterations": "최적화 단계",
+  "fillParams.gaussianResolution": "세부 수준(px)",
+  "result.export.gia.assetGroupBadge": "에셋 그룹",
+  "result.export.gia.assetGroupTitle": "에셋 그룹 다운로드",
+  "result.export.gia.assetGroupDesc": "재사용 가능한 이미지 그룹입니다.",
+  "result.export.gia.allFormatsNote": "이미지는 같고 형식만 다릅니다.",
   /* ── app / topbar ── */
   "app.title": "이미지 도형 피팅",
   "app.pageTitle": "밀리아스트라 원더랜드 이미지 피팅 도구",
@@ -136,7 +144,7 @@ window.LOCALES["ko"] = {
   "result.export.png": "PNG 내보내기",
   "result.export.gia.serverBadge": "서버",
   "result.export.gia.serverTitle": "서버 이미지 다운로드",
-  "result.export.gia.serverDesc": "서버 컨트롤 템플릿 구조입니다.",
+  "result.export.gia.serverDesc": "서버 이미지 템플릿입니다.",
   "result.export.gia.clientBadge": "클라이언트",
   "result.export.gia.clientTitle": "클라이언트 이미지 다운로드",
   "result.export.gia.clientDesc": "클라이언트 컨트롤 템플릿 구조입니다.",

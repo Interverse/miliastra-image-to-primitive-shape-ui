@@ -2,6 +2,14 @@
 "use strict";
 window.LOCALES = window.LOCALES || {};
 window.LOCALES["zh-CN"] = {
+  "shapes.blurredCircle": "模糊圆形",
+  "shapes.gaussianHint": "仅使用模糊圆形，预览为近似效果。",
+  "fillParams.gaussianIterations": "拟合步数",
+  "fillParams.gaussianResolution": "细节（像素）",
+  "result.export.gia.assetGroupBadge": "素材组",
+  "result.export.gia.assetGroupTitle": "下载素材组",
+  "result.export.gia.assetGroupDesc": "可复用的图片素材组。",
+  "result.export.gia.allFormatsNote": "图像相同，格式不同。",
   "app.title": "图片图元拟合",
   "app.pageTitle": "千星奇域拼图工具",
   "app.resultPageTitle": "千星奇域拼图工具 - 结果",
@@ -128,7 +136,7 @@ window.LOCALES["zh-CN"] = {
   "result.export.png": "导出 PNG",
   "result.export.gia.serverBadge": "服务端",
   "result.export.gia.serverTitle": "下载服务端图片",
-  "result.export.gia.serverDesc": "服务端控件模板结构。",
+  "result.export.gia.serverDesc": "服务器图片模板。",
   "result.export.gia.clientBadge": "客户端",
   "result.export.gia.clientTitle": "下载客户端图片",
   "result.export.gia.clientDesc": "客户端控件模板结构。",

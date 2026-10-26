@@ -2,6 +2,14 @@
 "use strict";
 window.LOCALES = window.LOCALES || {};
 window.LOCALES["vi"] = {
+  "shapes.blurredCircle": "Hình tròn mờ",
+  "shapes.gaussianHint": "Chỉ dùng hình tròn mờ. Bản xem trước là gần đúng.",
+  "fillParams.gaussianIterations": "Số bước khớp ảnh",
+  "fillParams.gaussianResolution": "Chi tiết (px)",
+  "result.export.gia.assetGroupBadge": "Nhóm tài nguyên",
+  "result.export.gia.assetGroupTitle": "Tải nhóm tài nguyên",
+  "result.export.gia.assetGroupDesc": "Nhóm ảnh có thể tái sử dụng.",
+  "result.export.gia.allFormatsNote": "Cùng hình ảnh, khác định dạng.",
   /* ── app / topbar ── */
   "app.title": "Ghép ảnh bằng hình cơ bản",
   "app.pageTitle": "Công cụ ghép ảnh Miliastra Wonderland",
@@ -136,7 +144,7 @@ window.LOCALES["vi"] = {
   "result.export.png": "Xuất PNG",
   "result.export.gia.serverBadge": "Máy chủ",
   "result.export.gia.serverTitle": "Tải ảnh Máy chủ",
-  "result.export.gia.serverDesc": "Cấu trúc mẫu điều khiển phía máy chủ.",
+  "result.export.gia.serverDesc": "Mẫu ảnh máy chủ.",
   "result.export.gia.clientBadge": "Máy khách",
   "result.export.gia.clientTitle": "Tải ảnh Máy khách",
   "result.export.gia.clientDesc": "Cấu trúc mẫu điều khiển phía máy khách.",

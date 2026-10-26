@@ -503,7 +503,7 @@ return PrimitiveImage
       `    sourceHeight = ${formatNumber(sourceHeight)},`,
       `    originalWidth = ${formatNumber(originalWidth)},`,
       `    originalHeight = ${formatNumber(originalHeight)},`,
-      "    circleAsset = 100002,",
+      `    circleAsset = ${(data.elements || []).some((el) => el.primitive_type === "blurred_circle") ? 106057 : 100002},`,
       "    rectangleAsset = 100001,",
       "    triangleAsset = 100003,",
       `    primitiveCount = ${primitives.length},`,
@@ -576,7 +576,9 @@ return PrimitiveImage
       "",
       "-- ═══════════════ PrimitiveImage runtime library ═══════════════",
       "",
-      libraryBody().replace(/\n$/, ""),
+      ((data.elements || []).some((el) => el.primitive_type === "blurred_circle")
+        ? libraryBody().replace("control.imageType = Enum.ImageType.Stretch", "control.imageType = Enum.ImageType.Basic")
+        : libraryBody()).replace(/\n$/, ""),
       "",
       "-- ═══════════════ image data ═══════════════",
       "",

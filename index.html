@@ -12,7 +12,7 @@
   </script>
   <title data-i18n="app.pageTitle">Miliastra Wonderland Image Fitter</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='38' cy='42' r='26' fill='%234355B9'/%3E%3Crect x='48' y='44' width='36' height='36' rx='6' fill='%23E8A317' transform='rotate(12 66 62)'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="css/style.css?v=24">
+  <link rel="stylesheet" href="css/style.css?v=27">
 </head>
 <body>
   <header class="topbar">
@@ -74,6 +74,22 @@
               <span class="shape-icon">△</span>
               <span data-i18n="shapes.triangle">Triangle</span>
             </label>
+            <label class="shape-check">
+              <input type="checkbox" id="shapeBlurredCircle">
+              <span class="shape-icon">◉</span>
+              <span data-i18n="shapes.blurredCircle">Blurred circle</span>
+            </label>
+          </div>
+          <p class="hint" id="gaussianHint" hidden data-i18n="shapes.gaussianHint"></p>
+          <div id="gaussianSettings" class="form-stack" hidden>
+            <div class="form-field">
+              <label for="gaussianIterations" data-i18n="fillParams.gaussianIterations">Fitting steps</label>
+              <input type="number" id="gaussianIterations" value="600" min="100" max="3000" step="100" class="num-input">
+            </div>
+            <div class="form-field">
+              <label for="gaussianResolution" data-i18n="fillParams.gaussianResolution">Detail (px)</label>
+              <select id="gaussianResolution" class="form-input"><option value="128">128 px</option><option value="256">256 px</option><option value="512">512 px</option></select>
+            </div>
           </div>
           <p class="hint" id="shapeHint" data-i18n="shapes.hint.fill"></p>
         </div>
@@ -106,7 +122,7 @@
             </div>
             <p class="param-desc" data-i18n="fillParams.numPrimsDesc"></p>
             <input type="range" id="numPrims" min="40" max="1200" step="10" value="400">
-            <input type="number" id="numPrimsManual" min="40" max="3000" value="400" class="num-input" style="margin-top:8px;width:100%;">
+            <input type="number" id="numPrimsManual" min="40" max="3000" value="400" class="num-input">
           </div>
 
           <div class="param-item">
@@ -190,10 +206,10 @@
         <label class="radio-row"><input type="radio" name="originType" value="center" checked><span data-i18n="origin.center">Image center</span></label>
         <label class="radio-row"><input type="radio" name="originType" value="top_left"><span data-i18n="origin.topLeft">Top-left corner</span></label>
         <label class="radio-row"><input type="radio" name="originType" value="custom"><span data-i18n="origin.custom">Custom</span></label>
-        <div class="config-row" id="originCustomRow" hidden>
+        <div class="config-row config-row--paired" id="originCustomRow" hidden>
           <label>X</label>
           <input type="number" id="originCustomX" value="0" step="0.1" class="num-input">
-          <label style="margin-left:8px">Y</label>
+          <label>Y</label>
           <input type="number" id="originCustomY" value="0" step="0.1" class="num-input">
         </div>
         <p class="hint" data-i18n="origin.hint"></p>
@@ -287,10 +303,10 @@
              IDs, different control-template structure. -->
         <div class="gia-export-group gia-export-group--server">
           <div class="gia-export-group__head">
-            <span class="gia-export-group__badge" data-i18n="result.export.gia.serverBadge">Server</span>
-            <span class="gia-export-group__title" data-i18n="result.export.gia.serverTitle">Download Server Image</span>
+            <span class="gia-export-group__badge" data-i18n="result.export.gia.assetGroupBadge">Asset Group</span>
+            <span class="gia-export-group__title" data-i18n="result.export.gia.assetGroupTitle">Download Asset Group</span>
           </div>
-          <p class="gia-export-group__desc" data-i18n="result.export.gia.serverDesc"></p>
+          <p class="gia-export-group__desc" data-i18n="result.export.gia.assetGroupDesc"></p>
           <div class="export-action">
             <button id="btnExportGIAOverlimit" class="btn-sm" data-i18n="result.export.gia.modeOverlimit">Beyond</button>
             <button id="btnExportGIAClassic" class="btn-sm" data-i18n="result.export.gia.modeClassic">Classic</button>
@@ -317,16 +333,27 @@
             <p class="gia-export-group__desc gia-export-group__desc--field" data-i18n="result.export.gia.clientLuaTemplateHint"></p>
           </div>
         </div>
-        <p class="hint" data-i18n="result.export.gia.sharedNote"></p>
+        <div class="gia-export-group gia-export-group--server">
+          <div class="gia-export-group__head">
+            <span class="gia-export-group__badge" data-i18n="result.export.gia.serverBadge">Server</span>
+            <span class="gia-export-group__title" data-i18n="result.export.gia.serverTitle">Download Server Image</span>
+          </div>
+          <p class="gia-export-group__desc" data-i18n="result.export.gia.serverDesc"></p>
+          <div class="export-action">
+            <button id="btnExportServerGIAOverlimit" class="btn-sm" data-i18n="result.export.gia.modeOverlimit">Beyond</button>
+            <button id="btnExportServerGIAClassic" class="btn-sm" data-i18n="result.export.gia.modeClassic">Classic</button>
+          </div>
+        </div>
+        <p class="hint" data-i18n="result.export.gia.allFormatsNote"></p>
       </section>
 
       <section class="panel-section">
         <h3 data-i18n="result.origin.sectionTitle">Origin</h3>
         <p class="hint" data-i18n="result.origin.hint"></p>
-        <div class="config-row">
+        <div class="config-row config-row--paired">
           <label>X</label>
           <input type="number" id="originX" value="0" step="0.1" class="num-input">
-          <label style="margin-left:8px">Y</label>
+          <label>Y</label>
           <input type="number" id="originY" value="0" step="0.1" class="num-input">
         </div>
         <button id="btnPickOrigin" class="btn-sm" data-i18n="result.origin.pick">Pick on canvas</button>
@@ -337,6 +364,7 @@
         <h3 data-i18n="result.retry.sectionTitle">Re-process</h3>
         <p class="field-label" data-i18n="shapes.sectionTitle.fill">Primitive Types</p>
         <div class="shape-checks" id="retryShapeChecks">
+          <label class="shape-check"><input type="checkbox" id="retryShapeBlurredCircle"><span class="shape-icon">◉</span><span data-i18n="shapes.blurredCircle">Blurred radial circle</span></label>
           <label class="shape-check">
             <input type="checkbox" id="retryShapeCircle" checked>
             <span class="shape-icon">○</span>
@@ -353,6 +381,16 @@
             <span data-i18n="shapes.triangle">Triangle</span>
           </label>
         </div>
+        <div id="retryGaussianSettings" class="form-stack" hidden>
+          <div class="form-field">
+            <label for="retryGaussianIterations" data-i18n="fillParams.gaussianIterations">Fitting steps</label>
+            <input type="number" id="retryGaussianIterations" value="600" min="100" max="3000" step="100" class="num-input">
+          </div>
+          <div class="form-field">
+            <label for="retryGaussianResolution" data-i18n="fillParams.gaussianResolution">Detail (px)</label>
+            <select id="retryGaussianResolution" class="form-input"><option value="128">128 px</option><option value="256">256 px</option><option value="512">512 px</option></select>
+          </div>
+        </div>
         <div class="config-row">
           <label data-i18n="fillParams.numPrims">Primitive count</label>
           <input type="number" id="retryNumPrims" min="40" max="3000" class="num-input">
@@ -365,7 +403,7 @@
           <label data-i18n="fillParams.outputAlpha">Opacity</label>
           <input type="number" id="retryOutputAlpha" min="0" max="100" step="5" class="num-input">
         </div>
-        <button type="button" id="btnRetryFill" class="btn-primary" style="margin-top:8px" data-i18n="result.retry.submit">Re-process</button>
+        <button type="button" id="btnRetryFill" class="btn-primary" data-i18n="result.retry.submit">Re-process</button>
       </section>
 
       <section class="panel-section" id="retrySectionOutline" hidden>
@@ -382,7 +420,7 @@
           <label data-i18n="outlineParams.precision">Precision</label>
           <input type="number" id="retryPrecision" min="0.0" max="1.0" step="0.05" class="num-input">
         </div>
-        <button type="button" id="btnRetryOutline" class="btn-primary" style="margin-top:8px" data-i18n="result.retry.submit">Re-process</button>
+        <button type="button" id="btnRetryOutline" class="btn-primary" data-i18n="result.retry.submit">Re-process</button>
       </section>
 
       <section class="panel-section">
@@ -391,6 +429,7 @@
           <tr><td data-i18n="result.stats.mode">Mode</td><td id="statMode">—</td></tr>
           <tr><td data-i18n="result.stats.total">Total</td><td id="statTotal">—</td></tr>
           <tr><td data-i18n="result.stats.ellipse">Circles</td><td id="statEllipse">—</td></tr>
+          <tr><td data-i18n="shapes.blurredCircle">Blurred radial circle</td><td id="statGaussian">—</td></tr>
           <tr><td data-i18n="result.stats.rect">Rectangles</td><td id="statRect">—</td></tr>
           <tr><td data-i18n="result.stats.triangle">Triangles</td><td id="statTriangle">—</td></tr>
           <tr><td data-i18n="result.stats.imageSize">Image size</td><td id="statImgSize">—</td></tr>
@@ -439,7 +478,7 @@
 
     <aside class="panel panel-right">
       <section class="panel-section">
-        <button type="button" id="btnBackToJobs" class="btn-tonal" style="width:100%;text-align:center;margin-bottom:12px;" data-i18n="result.back">Back to jobs</button>
+        <button type="button" id="btnBackToJobs" class="btn-tonal button-block" data-i18n="result.back">Back to jobs</button>
         <h3 data-i18n="result.info.sectionTitle">Selected Primitive</h3>
         <p class="hint" data-i18n="result.info.hint"></p>
         <div id="infoEmpty" class="empty-panel">
@@ -456,16 +495,16 @@
         </table></div>
         <div id="editPanel" class="edit-panel" hidden>
           <h3 data-i18n="result.edit.panelTitle">Edit Primitive</h3>
-          <div class="config-row">
+          <div class="config-row config-row--paired">
             <label>X</label>
             <input type="number" id="editX" step="0.1" class="num-input">
-            <label style="margin-left:8px">Y</label>
+            <label>Y</label>
             <input type="number" id="editY" step="0.1" class="num-input">
           </div>
-          <div class="config-row">
+          <div class="config-row config-row--paired">
             <label id="editSizeALabel">rx</label>
             <input type="number" id="editSizeA" step="0.1" min="0.01" class="num-input">
-            <label id="editSizeBLabel" style="margin-left:8px">ry</label>
+            <label id="editSizeBLabel">ry</label>
             <input type="number" id="editSizeB" step="0.1" min="0.01" class="num-input">
           </div>
           <div class="config-row">
@@ -475,7 +514,7 @@
           <div class="config-row">
             <label data-i18n="result.edit.color">Color</label>
             <input type="color" id="editColor" class="color-input">
-            <label data-i18n="result.edit.alpha" style="margin-left:8px">Alpha %</label>
+            <label data-i18n="result.edit.alpha">Alpha %</label>
             <input type="number" id="editAlpha" min="0" max="100" step="1" class="num-input">
           </div>
           <p class="hint" data-i18n="result.edit.hint"></p>
@@ -484,7 +523,7 @@
       <section class="panel-section">
         <h3 data-i18n="result.cleanup.sectionTitle">Transparency Cleanup</h3>
         <p class="hint" data-i18n="result.cleanup.hint"></p>
-        <button type="button" id="btnCleanTransparency" class="btn-sm" style="margin-top:12px;margin-bottom:0px" data-i18n="result.cleanup.button">Remove ghost primitives</button>
+        <button type="button" id="btnCleanTransparency" class="btn-sm" data-i18n="result.cleanup.button">Remove ghost primitives</button>
         <p class="hint" id="cleanupStatus" aria-live="polite"></p>
       </section>
     </aside>
@@ -548,28 +587,29 @@
   </div>
 
   <!-- locales (order = Genshin official language list; en first as fallback) -->
-  <script src="js/locales/en.js?v=24"></script>
-  <script src="js/locales/zh-CN.js?v=24"></script>
-  <script src="js/locales/zh-TW.js?v=24"></script>
-  <script src="js/locales/ja.js?v=24"></script>
-  <script src="js/locales/ko.js?v=24"></script>
-  <script src="js/locales/fr.js?v=24"></script>
-  <script src="js/locales/de.js?v=24"></script>
-  <script src="js/locales/es.js?v=24"></script>
-  <script src="js/locales/pt.js?v=24"></script>
-  <script src="js/locales/ru.js?v=24"></script>
-  <script src="js/locales/th.js?v=24"></script>
-  <script src="js/locales/vi.js?v=24"></script>
-  <script src="js/locales/id.js?v=24"></script>
-  <script src="js/locales/tr.js?v=24"></script>
-  <script src="js/locales/it.js?v=24"></script>
+  <script src="js/locales/en.js?v=27"></script>
+  <script src="js/locales/zh-CN.js?v=27"></script>
+  <script src="js/locales/zh-TW.js?v=27"></script>
+  <script src="js/locales/ja.js?v=27"></script>
+  <script src="js/locales/ko.js?v=27"></script>
+  <script src="js/locales/fr.js?v=27"></script>
+  <script src="js/locales/de.js?v=27"></script>
+  <script src="js/locales/es.js?v=27"></script>
+  <script src="js/locales/pt.js?v=27"></script>
+  <script src="js/locales/ru.js?v=27"></script>
+  <script src="js/locales/th.js?v=27"></script>
+  <script src="js/locales/vi.js?v=27"></script>
+  <script src="js/locales/id.js?v=27"></script>
+  <script src="js/locales/tr.js?v=27"></script>
+  <script src="js/locales/it.js?v=27"></script>
 
   <script src="js/i18n.js?v=24"></script>
   <script src="js/zip.js?v=24"></script>
-  <script src="js/gia.js?v=24"></script>
-  <script src="js/gia-export.js?v=24"></script>
-  <script src="js/lua-export.js?v=24"></script>
+  <script src="js/gia.js?v=25"></script>
+  <script src="js/gia-export.js?v=26"></script>
+  <script src="js/lua-export.js?v=25"></script>
   <script src="js/png-decode.js?v=24"></script>
-  <script src="js/app.js?v=24"></script>
+  <script src="js/gaussian.js?v=25"></script>
+  <script src="js/app.js?v=26"></script>
 </body>
 </html>

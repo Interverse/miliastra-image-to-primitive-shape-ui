@@ -18,8 +18,9 @@ var GIA = (function () {
   "use strict";
 
   var MODE_DECORATION = "decoration";
-  var MODE_IMAGE = "image"; // Server Control Template image group
+  var MODE_IMAGE = "image"; // Asset Group (class 61); legacy API name
   var MODE_CLIENT_IMAGE = "client_image"; // Client Control Template image group
+  var MODE_SERVER_IMAGE = "server_image"; // Server Image Template (class 21)
 
   var DEFAULT_IMAGE_ASSET_REFS = {
     rectangle: 100001,
@@ -2131,6 +2132,14 @@ var GIA = (function () {
         out.push(_lenField(f.tag, _client_patch_image_payload(f.data, obj)));
         continue;
       }
+      if (type === 38 && f.tag === 31) {
+        // Server Image Template uses the same image settings payload as an
+        // Asset Group child. Keep every Basic-mode/default field from the
+        // supplied template; replace only tint and image resource.
+        out.push(_lenField(31, _msg_set_varint(_msg_set_varint(f.data, 2,
+          obj.image_asset_ref), 4, _asWireVarint(obj.packed_color))));
+        continue;
+      }
       if (
         type === COMPONENT_TYPE.CLIENT_IMAGE_EXTRA &&
         f.tag === CLIENT_IMAGE_EXTRA_FIELD
@@ -2975,6 +2984,8 @@ var GIA = (function () {
       cls === CLIENT_CONTAINER_CLASS
         ? "client"
         : cls === SERVER_CONTAINER_CLASS
+        ? "asset_group"
+        : cls === 21
         ? "server"
         : "unknown";
     out.containerClass = cls;
@@ -3395,6 +3406,9 @@ var GIA = (function () {
         parsed.tail
       );
     }
+    if (mode === MODE_SERVER_IMAGE) {
+      return _convert_server_image_mode(json_data, parsed.header, parsed.content_len, parsed.root_fields, parsed.tail);
+    }
     return _convert_decoration_mode(
       json_data,
       parsed.header,
@@ -3402,6 +3416,36 @@ var GIA = (function () {
       parsed.root_fields,
       parsed.tail
     );
+  }
+
+  // A Server Image is an image parent (class 21), not an Asset Group.
+  // Clone the supplied primary resource, retaining its control components,
+  // platform transforms and Basic image settings. Generated children use
+  // the same image payloads as the supplied Asset Group's image child.
+  function _convert_server_image_mode(json, header, content_len, root_fields, tail) {
+    var primary = _find_primary_resource(root_fields);
+    if (primary.resourceClass !== 21) throw new Error("Expected a Server Image Template (class 21)");
+    var scene = buildImageScene(json), parent = scene.clientContainer;
+    var removed = _collect_entry_guids_of_class(root_fields, UI_IMAGE_CLASS);
+    var allocator = _make_guid_allocator(root_fields, removed);
+    var entries = [], guids = [], refs = [];
+    // Asset Group / server controls store their topmost child first.
+    var objects = scene.clientObjects.slice().reverse();
+    for (var i = 0; i < objects.length; i++) {
+      var obj = objects[i], guid = allocator.next();
+      var payload = create_ui_image_payload({ guid: guid, parent_guid: primary.guid,
+        index: i + 2, name: obj.name, offset_x: obj.offset_x, offset_y: obj.offset_y,
+        size_x: obj.size_x, size_y: obj.size_y, rot_z: obj.rot_z,
+        image_asset_ref: obj.image_asset_ref, packed_color: obj.packed_color });
+      entries.push(create_ui_image_entry(guid, obj.name, payload));
+      guids.push(guid); refs.push(create_reference_locator(guid, 8));
+    }
+    var parentObj = { name: scene.group_name, offset_x: parent.offset_x, offset_y: parent.offset_y,
+      size_x: parent.size_x, size_y: parent.size_y, rot_z: 0,
+      image_asset_ref: 100001, packed_color: CLIENT_PARENT_HIDDEN_COLOR };
+    var patched = _client_patch_primary_resource(primary.fields, removed, refs, guids,
+      scene.group_name, primary.guid, parentObj);
+    return _rebuild_gia(header, content_len, root_fields, tail, entries, patched, UI_IMAGE_CLASS);
   }
 
   function _convert_decoration_mode(
@@ -3851,6 +3895,10 @@ var GIA = (function () {
     MODE_DECORATION: MODE_DECORATION,
     MODE_IMAGE: MODE_IMAGE,
     MODE_CLIENT_IMAGE: MODE_CLIENT_IMAGE,
+    MODE_SERVER_IMAGE: MODE_SERVER_IMAGE,
+    MODE_ASSET_GROUP: MODE_IMAGE,
+    ASSET_GROUP_CLASS: SERVER_CONTAINER_CLASS,
+    SERVER_IMAGE_CLASS: 21,
     SERVER_CONTAINER_CLASS: SERVER_CONTAINER_CLASS,
     CLIENT_CONTAINER_CLASS: CLIENT_CONTAINER_CLASS,
     UI_IMAGE_CLASS: UI_IMAGE_CLASS,

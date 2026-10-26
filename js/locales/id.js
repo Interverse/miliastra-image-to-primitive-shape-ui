@@ -2,6 +2,14 @@
 "use strict";
 window.LOCALES = window.LOCALES || {};
 window.LOCALES["id"] = {
+  "shapes.blurredCircle": "Lingkaran buram",
+  "shapes.gaussianHint": "Hanya lingkaran buram. Pratinjau berupa perkiraan.",
+  "fillParams.gaussianIterations": "Langkah pencocokan",
+  "fillParams.gaussianResolution": "Detail (px)",
+  "result.export.gia.assetGroupBadge": "Grup aset",
+  "result.export.gia.assetGroupTitle": "Unduh grup aset",
+  "result.export.gia.assetGroupDesc": "Grup gambar yang bisa dipakai ulang.",
+  "result.export.gia.allFormatsNote": "Gambar sama, format berbeda.",
   /* ── app / topbar ── */
   "app.title": "Penyusun Gambar dari Bentuk Dasar",
   "app.pageTitle": "Alat Penyusun Gambar Miliastra Wonderland",
@@ -136,7 +144,7 @@ window.LOCALES["id"] = {
   "result.export.png": "Ekspor PNG",
   "result.export.gia.serverBadge": "Server",
   "result.export.gia.serverTitle": "Unduh Gambar Server",
-  "result.export.gia.serverDesc": "Struktur templat kontrol Server.",
+  "result.export.gia.serverDesc": "Templat gambar server.",
   "result.export.gia.clientBadge": "Klien",
   "result.export.gia.clientTitle": "Unduh Gambar Klien",
   "result.export.gia.clientDesc": "Struktur templat kontrol Klien.",

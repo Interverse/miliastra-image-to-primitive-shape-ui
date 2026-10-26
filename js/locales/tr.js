@@ -2,6 +2,14 @@
 "use strict";
 window.LOCALES = window.LOCALES || {};
 window.LOCALES["tr"] = {
+  "shapes.blurredCircle": "Bulanık daire",
+  "shapes.gaussianHint": "Yalnızca bulanık daireler. Önizleme yaklaşık sonuçtur.",
+  "fillParams.gaussianIterations": "Uyarlama adımları",
+  "fillParams.gaussianResolution": "Ayrıntı (px)",
+  "result.export.gia.assetGroupBadge": "Varlık grubu",
+  "result.export.gia.assetGroupTitle": "Varlık grubunu indir",
+  "result.export.gia.assetGroupDesc": "Yeniden kullanılabilir görsel grubu.",
+  "result.export.gia.allFormatsNote": "Aynı görsel, farklı biçimler.",
   /* ── app / topbar ── */
   "app.title": "Temel Şekillerle Görsel Oluşturucu",
   "app.pageTitle": "Miliastra Wonderland Görsel Oluşturma Aracı",
@@ -136,7 +144,7 @@ window.LOCALES["tr"] = {
   "result.export.png": "PNG Dışa Aktar",
   "result.export.gia.serverBadge": "Sunucu",
   "result.export.gia.serverTitle": "Sunucu Görselini İndir",
-  "result.export.gia.serverDesc": "Sunucu denetim şablonu yapısı.",
+  "result.export.gia.serverDesc": "Sunucu görsel şablonu.",
   "result.export.gia.clientBadge": "İstemci",
   "result.export.gia.clientTitle": "İstemci Görselini İndir",
   "result.export.gia.clientDesc": "İstemci denetim şablonu yapısı.",

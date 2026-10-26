@@ -2,6 +2,14 @@
 "use strict";
 window.LOCALES = window.LOCALES || {};
 window.LOCALES["th"] = {
+  "shapes.blurredCircle": "วงกลมเบลอ",
+  "shapes.gaussianHint": "ใช้เฉพาะวงกลมเบลอ ภาพตัวอย่างเป็นค่าประมาณ",
+  "fillParams.gaussianIterations": "จำนวนรอบปรับภาพ",
+  "fillParams.gaussianResolution": "รายละเอียด (พิกเซล)",
+  "result.export.gia.assetGroupBadge": "กลุ่มทรัพยากร",
+  "result.export.gia.assetGroupTitle": "ดาวน์โหลดกลุ่ม",
+  "result.export.gia.assetGroupDesc": "กลุ่มภาพที่นำกลับมาใช้ได้",
+  "result.export.gia.allFormatsNote": "ภาพเดียวกัน ต่างรูปแบบ",
   /* ── app / topbar ── */
   "app.title": "ปรับภาพด้วยรูปทรงพื้นฐาน",
   "app.pageTitle": "เครื่องมือปรับภาพ Miliastra Wonderland",
@@ -136,7 +144,7 @@ window.LOCALES["th"] = {
   "result.export.png": "ส่งออก PNG",
   "result.export.gia.serverBadge": "เซิร์ฟเวอร์",
   "result.export.gia.serverTitle": "ดาวน์โหลดภาพฝั่งเซิร์ฟเวอร์",
-  "result.export.gia.serverDesc": "โครงสร้างเทมเพลตคอนโทรลฝั่งเซิร์ฟเวอร์",
+  "result.export.gia.serverDesc": "เทมเพลตภาพเซิร์ฟเวอร์",
   "result.export.gia.clientBadge": "ไคลเอนต์",
   "result.export.gia.clientTitle": "ดาวน์โหลดภาพฝั่งไคลเอนต์",
   "result.export.gia.clientDesc": "โครงสร้างเทมเพลตคอนโทรลฝั่งไคลเอนต์",

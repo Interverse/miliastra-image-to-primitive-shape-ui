@@ -460,7 +460,7 @@ function compareServerClient(label, json) {
   const s = GIA.describeGia(serverBytes);
 
   eq(`${label}: client flavour`, c.templateKind, "client");
-  eq(`${label}: server flavour`, s.templateKind, "server");
+  eq(`${label}: asset group flavour`, s.templateKind, "asset_group");
   eq(`${label}: same object count`, c.children.length, s.children.length);
 
   const expectedName = GIA.buildImageScene(json).group_name;

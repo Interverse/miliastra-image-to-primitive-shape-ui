@@ -2,6 +2,14 @@
 "use strict";
 window.LOCALES = window.LOCALES || {};
 window.LOCALES["ja"] = {
+  "shapes.blurredCircle": "ぼかし円",
+  "shapes.gaussianHint": "ぼかし円のみ。プレビューは近似表示です。",
+  "fillParams.gaussianIterations": "最適化ステップ",
+  "fillParams.gaussianResolution": "精細度（px）",
+  "result.export.gia.assetGroupBadge": "アセットグループ",
+  "result.export.gia.assetGroupTitle": "アセットグループを保存",
+  "result.export.gia.assetGroupDesc": "再利用できる画像グループ。",
+  "result.export.gia.allFormatsNote": "画像は同じ、形式のみ異なります。",
   /* ── app / topbar ── */
   "app.title": "画像プリミティブフィッティング",
   "app.pageTitle": "ミリアストラ・ワンダーランド画像フィッティングツール",
@@ -136,7 +144,7 @@ window.LOCALES["ja"] = {
   "result.export.png": "PNG をエクスポート",
   "result.export.gia.serverBadge": "サーバー",
   "result.export.gia.serverTitle": "サーバー画像をダウンロード",
-  "result.export.gia.serverDesc": "サーバー用コントロールテンプレートの構造です。",
+  "result.export.gia.serverDesc": "サーバー画像テンプレート。",
   "result.export.gia.clientBadge": "クライアント",
   "result.export.gia.clientTitle": "クライアント画像をダウンロード",
   "result.export.gia.clientDesc": "クライアント用コントロールテンプレートの構造です。",

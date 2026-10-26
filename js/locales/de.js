@@ -2,6 +2,14 @@
 "use strict";
 window.LOCALES = window.LOCALES || {};
 window.LOCALES["de"] = {
+  "shapes.blurredCircle": "Weicher Kreis",
+  "shapes.gaussianHint": "Nur weiche Kreise. Vorschau angenähert.",
+  "fillParams.gaussianIterations": "Optimierungsschritte",
+  "fillParams.gaussianResolution": "Detail (px)",
+  "result.export.gia.assetGroupBadge": "Asset-Gruppe",
+  "result.export.gia.assetGroupTitle": "Asset-Gruppe herunterladen",
+  "result.export.gia.assetGroupDesc": "Wiederverwendbare Bildgruppe.",
+  "result.export.gia.allFormatsNote": "Gleiches Bild, andere Formate.",
   /* ── app / topbar ── */
   "app.title": "Bild-Primitiv-Anpassung",
   "app.pageTitle": "Miliastra Wonderland Bild-Fitting-Tool",
@@ -136,7 +144,7 @@ window.LOCALES["de"] = {
   "result.export.png": "PNG exportieren",
   "result.export.gia.serverBadge": "Server",
   "result.export.gia.serverTitle": "Server-Bild herunterladen",
-  "result.export.gia.serverDesc": "Struktur der Server-Steuerelementvorlage.",
+  "result.export.gia.serverDesc": "Server-Bildvorlage.",
   "result.export.gia.clientBadge": "Client",
   "result.export.gia.clientTitle": "Client-Bild herunterladen",
   "result.export.gia.clientDesc": "Struktur der Client-Steuerelementvorlage.",

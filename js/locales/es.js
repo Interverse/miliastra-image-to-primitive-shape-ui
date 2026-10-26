@@ -2,6 +2,14 @@
 "use strict";
 window.LOCALES = window.LOCALES || {};
 window.LOCALES["es"] = {
+  "shapes.blurredCircle": "Círculo difuminado",
+  "shapes.gaussianHint": "Solo círculos difuminados. Vista previa aproximada.",
+  "fillParams.gaussianIterations": "Pasos de ajuste",
+  "fillParams.gaussianResolution": "Detalle (px)",
+  "result.export.gia.assetGroupBadge": "Grupo de recursos",
+  "result.export.gia.assetGroupTitle": "Descargar grupo",
+  "result.export.gia.assetGroupDesc": "Grupo de imágenes reutilizable.",
+  "result.export.gia.allFormatsNote": "Misma imagen, distintos formatos.",
   /* ── app / topbar ── */
   "app.title": "Ajustador de primitivas de imagen",
   "app.pageTitle": "Ajustador de imágenes de Miliastra Wonderland",
@@ -136,7 +144,7 @@ window.LOCALES["es"] = {
   "result.export.png": "Exportar PNG",
   "result.export.gia.serverBadge": "Servidor",
   "result.export.gia.serverTitle": "Descargar imagen de servidor",
-  "result.export.gia.serverDesc": "Estructura de la plantilla de control de servidor.",
+  "result.export.gia.serverDesc": "Plantilla de imagen del servidor.",
   "result.export.gia.clientBadge": "Cliente",
   "result.export.gia.clientTitle": "Descargar imagen de cliente",
   "result.export.gia.clientDesc": "Estructura de la plantilla de control de cliente.",

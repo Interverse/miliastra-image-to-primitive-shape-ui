@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Gaussian browser smoke test</title>
+<style>body{font:15px system-ui;background:#10131a;color:#e3f0ee;margin:20px}pre{white-space:pre-wrap}iframe{width:100%;height:850px;border:1px solid #596}h1{font-size:22px}</style>
+<h1 id="status">Gaussian browser smoke test</h1><details open id="details"><summary>Test report</summary><pre id="report">Running…</pre></details>
+<iframe id="app" src="../../index.html"></iframe>
+<script>
+const report=document.querySelector('#report'),frame=document.querySelector('#app');
+// Optional visual-review viewport; layout/media queries use the real iframe
+// width while scaling the preview to fit a narrow browser side panel.
+const params=new URLSearchParams(location.search);
+if(params.has('width')){
+  const width=Math.max(320,Math.min(1920,Number(params.get('width'))||1440));
+  const height=width<=520?800:900,scale=Math.min(1,(document.documentElement.clientWidth-40)/width);
+  const preview=document.createElement('div');preview.style.cssText=`overflow:hidden;height:${height*scale+4}px`;
+  frame.before(preview);preview.append(frame);
+  frame.style.cssText=`display:block;width:${width}px;height:${height}px;transform:scale(${scale});transform-origin:top left`;
+}
+const messages=[];
+function check(ok,message){if(!ok)throw new Error(message);messages.push('PASS '+message);report.textContent=messages.join('\n');}
+const wait=async(test)=>{const end=Date.now()+45000;while(!test()){if(Date.now()>end)throw Error('Timeout waiting for UI');await new Promise(r=>setTimeout(r,50));}};
+frame.addEventListener('load',async()=>{
+  try{
+    const w=frame.contentWindow,d=w.document,$=id=>d.getElementById(id);
+    if(params.has('lang')){$('langSelect').value=params.get('lang');$('langSelect').dispatchEvent(new w.Event('change'));}
+    const errors=[];w.addEventListener('error',e=>errors.push(e.message));w.alert=m=>errors.push(m);
+    $('shapeBlurredCircle').click();
+    check(['shapeCircle','shapeRect','shapeTriangle'].every(id=>$(id).disabled&&!$(id).checked),'exclusive blurred primitive selection');
+    check($('enhancedMode').disabled&&!$('gaussianSettings').hidden,'Gaussian controls replace enhanced fitter');
+    $('numPrimsManual').value='40';$('gaussianIterations').value='100';
+    const canvas=d.createElement('canvas');canvas.width=64;canvas.height=64;
+    const ctx=canvas.getContext('2d');
+    const g=ctx.createRadialGradient(30,32,0,30,32,25);g.addColorStop(0,'rgba(40,120,240,1)');g.addColorStop(1,'rgba(40,120,240,0)');
+    ctx.fillStyle=g;ctx.fillRect(0,0,64,64);
+    const blob=await new Promise(r=>canvas.toBlob(r,'image/png'));
+    const files=new w.DataTransfer();files.items.add(new w.File([blob],'gaussian-smoke.png',{type:'image/png'}));
+    $('fileInput').files=files.files;$('fileInput').dispatchEvent(new w.Event('change'));
+    $('btnSubmit').click();
+    await wait(()=>d.querySelector('.job-status.done')||errors.length||d.querySelector('.job-error'));
+    check(!errors.length&&!d.querySelector('.job-error'),'real Web Worker completes without errors');
+    d.querySelector('.job-actions button').click();
+    check($('statGaussian').textContent==='40'&&$('statEllipse').textContent==='0','result identifies 40 blurred blobs separately');
+    check($('retryShapeBlurredCircle').checked&&$('retryShapeCircle').disabled,'retry preserves exclusive primitive');
+    const urls=new Map(),downloads=[];
+    const originalCreate=w.URL.createObjectURL.bind(w.URL);
+    w.URL.createObjectURL=b=>{const url=originalCreate(b);urls.set(url,b);return url;};
+    w.HTMLAnchorElement.prototype.click=function(){if(this.download)downloads.push({name:this.download,blob:urls.get(this.href)});};
+    async function download(id){const n=downloads.length;$(id).click();await wait(()=>downloads.length>n||errors.length);check(!errors.length,id+' completes');return downloads[downloads.length-1];}
+    const json=JSON.parse(await (await download('btnExportJSON')).blob.text());
+    check(json.elements.every(e=>e.primitive_type==='blurred_circle'&&e.image_asset_ref===106057),'JSON retains blurred identity and resource');
+    const svg=await (await download('btnExportSVG')).blob.text();
+    check(svg.includes('<radialGradient')&&svg.includes('stop-opacity'),'SVG exports soft radial falloff');
+    const css=await (await download('btnExportCSS')).blob.text();
+    check(css.includes('radial-gradient(ellipse closest-side'),'CSS exports soft radial falloff');
+    const png=await download('btnExportPNG');check(png.blob.size>200,'PNG render is nonempty');
+    for(const [id,cls,classic] of [['btnExportGIAOverlimit',61,false],['btnExportClientGIAOverlimit',70,false],['btnExportServerGIAOverlimit',21,false],
+      ['btnExportGIAClassic',61,true],['btnExportClientGIAClassic',70,true],['btnExportServerGIAClassic',21,true]]){
+      const exported=await download(id),model=w.GIA.describeGia(new Uint8Array(await exported.blob.arrayBuffer()));
+      check(model.containerClass===cls&&model.children.length===40&&model.isClassic===classic,id+' has correct format and blob count');
+      if(cls===61)check(model.container.mask.enabled&&model.container.mask.size.x===64&&model.container.mask.size.y===64,id+' enables full-image mask');
+    }
+    $('clientLuaTemplateIndex').value='123';$('clientLuaTemplateIndex').dispatchEvent(new w.Event('input'));
+    const lua=await (await download('btnExportClientLua')).blob.text();
+    check(lua.includes('Enum.ImageType.Basic')&&lua.includes('circleAsset = 106057'),'Lua resource and Basic mode');
+    $('retryGaussianIterations').value='100';$('retryNumPrims').value='50';$('btnRetryFill').click();
+    await wait(()=>d.querySelectorAll('.job-status.done').length===2||errors.length||d.querySelector('.job-error'));
+    check(!errors.length&&!d.querySelector('.job-error'),'Gaussian retry completes in browser');
+    const zip=await download('btnDownloadAll');check(zip.blob.size>1000,'batch ZIP includes new results');
+    $('shapeBlurredCircle').click();
+    check(!$('shapeCircle').disabled&&$('shapeCircle').checked&&!$('enhancedMode').disabled,'deselecting blurred mode restores normal fitter');
+    check(!errors.length,'no runtime errors throughout workflow');
+    // Cancellation must reach the worker between optimizer chunks; then a
+    // pooled worker must be reusable with cancellation state reset.
+    const worker=new w.Worker('/js/worker-gaussian.js');
+    const image=ctx.getImageData(0,0,64,64).data;
+    let phase='training',workerDone=false;
+    worker.onmessage=({data})=>{
+      if(data.type==='error'){errors.push(data.message);workerDone=true;}
+      if(data.type==='progress'&&phase==='training'){phase='cancelling';worker.postMessage({cmd:'cancel'});}
+      if(data.type==='cancelled'){
+        phase='reused';worker.postMessage({cmd:'process',jobId:2,rgba:image.slice().buffer,width:64,height:64,
+          config:{num_primitives:4,gaussian_iterations:20,enable_png_mode:true}});
+      }
+      if(data.type==='done'&&phase==='reused')workerDone=true;
+    };
+    worker.postMessage({cmd:'process',jobId:1,rgba:image.slice().buffer,width:64,height:64,
+      config:{num_primitives:40,gaussian_iterations:3000,enable_png_mode:true}});
+    await wait(()=>workerDone);worker.terminate();
+    check(!errors.length&&phase==='reused','real worker cancellation and reuse');
+    // Leave the final Gaussian result visible for visual inspection.
+    d.querySelector('.job-card:last-child .job-actions button').click();
+    report.textContent=`ALL PASS (${messages.length} browser checks)\n`+messages.join('\n');
+    document.querySelector('#status').textContent=`ALL PASS (${messages.length} browser checks)`;
+    document.querySelector('#details').open=false;
+    if(params.get('view')==='upload'||params.get('view')==='outline'){
+      $('btnBackToJobs').click();
+      if(params.get('view')==='upload')$('shapeBlurredCircle').click();
+      else{$('outlineLink').dispatchEvent(new w.MouseEvent('click',{bubbles:true,cancelable:true}));$('addCirclePrimitiveBtn').click();}
+    }else if(params.get('view')==='convert')$('classicToolTab').click();
+  }catch(error){report.textContent+='\nFAIL '+error.stack;}
+});
+</script></html>

@@ -52,6 +52,8 @@ const GiaExport = (() => {
         color: element.color !== undefined ? element.color : null,
         alpha: element.alpha !== undefined ? element.alpha : null,
         packed_color: element.packed_color !== undefined ? element.packed_color : null,
+        primitive_type: element.primitive_type,
+        image_type: element.image_type,
         image_asset_ref: element.image_asset_ref !== undefined
           ? element.image_asset_ref
           : (DEFAULT_IMAGE_ASSET_REFS[shapeType] !== undefined ? DEFAULT_IMAGE_ASSET_REFS[shapeType] : 100002),
@@ -111,7 +113,20 @@ const GiaExport = (() => {
     };
   }
 
-  return { convertResultToGiaJson, exportBasename, DEFAULT_IMAGE_ASSET_REFS };
+  // Asset Groups clip to the source image by default. Apply this only at
+  // the Asset Group export boundary: Client/Server exports share the source
+  // JSON and have separate masking semantics.
+  function withAssetGroupMask(json) {
+    const bounds = json.image_bounds;
+    if (!bounds || !(bounds.width > 0 && bounds.height > 0)) {
+      throw new Error("Asset Group mask requires valid source image bounds");
+    }
+    return { ...json, mask: { enabled: true, shape_type: "rectangle",
+      center: { x: bounds.x, y: bounds.y },
+      size: { width: bounds.width, height: bounds.height } } };
+  }
+
+  return { convertResultToGiaJson, withAssetGroupMask, exportBasename, DEFAULT_IMAGE_ASSET_REFS };
 })();
 
 if (typeof module !== "undefined") module.exports = GiaExport;
