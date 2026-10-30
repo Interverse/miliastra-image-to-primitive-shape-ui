@@ -2,6 +2,8 @@
 "use strict";
 window.LOCALES = window.LOCALES || {};
 window.LOCALES["id"] = {
+  "fillParams.gaussianAlgorithm": "Algoritma",
+  "batch.phase.model": "Menyiapkan model",
   "shapes.blurredCircle": "Lingkaran buram",
   "shapes.gaussianHint": "Hanya lingkaran buram. Pratinjau berupa perkiraan.",
   "fillParams.gaussianIterations": "Langkah pencocokan",

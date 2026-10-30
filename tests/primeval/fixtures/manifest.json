@@ -1,0 +1,41 @@
+[
+  {
+    "name": "circle",
+    "render": {
+      "shape": "rotated-ellipse",
+      "count": 40,
+      "alpha": "auto",
+      "seed": 42,
+      "resizeInput": 64,
+      "outputSize": 64
+    },
+    "reference": "official 0.2.2",
+    "commit": "41e3196b41f8a03b2e1d4bea726a9c5bd71db530"
+  },
+  {
+    "name": "triangle",
+    "render": {
+      "shape": "triangle",
+      "count": 40,
+      "alpha": "auto",
+      "seed": 42,
+      "resizeInput": 64,
+      "outputSize": 64
+    },
+    "reference": "measured constrained fork",
+    "commit": "41e3196b41f8a03b2e1d4bea726a9c5bd71db530"
+  },
+  {
+    "name": "rect",
+    "render": {
+      "shape": "rotated-rectangle",
+      "count": 40,
+      "alpha": "auto",
+      "seed": 42,
+      "resizeInput": 64,
+      "outputSize": 64
+    },
+    "reference": "official 0.2.2",
+    "commit": "41e3196b41f8a03b2e1d4bea726a9c5bd71db530"
+  }
+]

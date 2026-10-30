@@ -1,0 +1,14 @@
+[package]
+name = "primeval-js"
+version.workspace = true
+edition = "2024"
+repository.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+primeval-render = { path = "../primeval-render" }

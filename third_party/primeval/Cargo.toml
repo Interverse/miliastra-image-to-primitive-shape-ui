@@ -1,0 +1,56 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/primeval-core",
+    "crates/primeval-render",
+    "crates/primeval-js",
+    "binding",
+    "binding-wasm",
+]
+
+[workspace.package]
+# Always equal to the npm package version; `npm run bump:version` updates both.
+version = "0.2.2"
+repository = "https://github.com/domoarigatomrburato/primeval"
+license = "MIT"
+rust-version = "1.99"
+# The npm package is the product; the crates are not published to crates.io
+# while their API is expected to change.
+publish = false
+
+[workspace.lints.rust]
+unreachable_pub = "deny"
+dead_code = "deny"
+
+# Every warn-by-default rustdoc lint (rustdoc -W help, Rust 1.99), denied so
+# `cargo doc` fails the Rust gate on any of them.
+[workspace.lints.rustdoc]
+bare_urls = "deny"
+broken_footnote = "deny"
+broken_intra_doc_links = "deny"
+invalid_codeblock_attributes = "deny"
+invalid_html_tags = "deny"
+invalid_rust_codeblocks = "deny"
+private_intra_doc_links = "deny"
+redundant_explicit_links = "deny"
+unused_footnote_definition = "deny"
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+# Unwind so the Node binding can turn a panic into a rejected promise instead
+# of ending the host process.
+panic = "unwind"
+
+# Same as release but with line-level debug info for samply / flamegraph.
+# Never use this in production — binary will be ~2x larger.
+[profile.profiling]
+inherits = "release"
+debug = 1
+
+# The wasm builds (scripts/build-wasm.mjs). Unlike release, which unwinds for
+# the napi binding, a panic aborts: the instance that panicked is never reused
+# (its Web Worker is terminated), so unwinding would only add code size.
+[profile.wasm-release]
+inherits = "release"
+panic = "abort"

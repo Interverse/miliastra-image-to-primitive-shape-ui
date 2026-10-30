@@ -23,8 +23,8 @@ frame.addEventListener('load',async()=>{
     const w=frame.contentWindow,d=w.document,$=id=>d.getElementById(id);
     if(params.has('lang')){$('langSelect').value=params.get('lang');$('langSelect').dispatchEvent(new w.Event('change'));}
     const errors=[];w.addEventListener('error',e=>errors.push(e.message));w.alert=m=>errors.push(m);
-    $('shapeBlurredCircle').click();
-    check(['shapeCircle','shapeRect','shapeTriangle'].every(id=>$(id).disabled&&!$(id).checked),'exclusive blurred primitive selection');
+    $('fitMethod').value='gaussian';$('fitMethod').dispatchEvent(new w.Event('change'));
+    check($('legacyShapeChecks').hidden,'exclusive blurred primitive selection');
     check($('enhancedMode').disabled&&!$('gaussianSettings').hidden,'Gaussian controls replace enhanced fitter');
     check($('gaussianResolution').value==='512','Gaussian detail defaults to 512 px');
     check($('gaussianResolution').type==='number'&&!$('gaussianResolution').hasAttribute('max'),'detail accepts resolutions above 512 px');
@@ -42,7 +42,7 @@ frame.addEventListener('load',async()=>{
     check(!errors.length&&!d.querySelector('.job-error'),'real Web Worker completes without errors');
     d.querySelector('.job-actions button').click();
     check($('statGaussian').textContent==='40'&&$('statEllipse').textContent==='0','result identifies 40 blurred blobs separately');
-    check($('retryShapeBlurredCircle').checked&&$('retryShapeCircle').disabled,'retry preserves exclusive primitive');
+    check($('retryFitMethod').value==='gaussian'&&$('retryShapeChecks').hidden,'retry preserves exclusive primitive');
     check($('retryGaussianResolution').value==='768'&&!$('retryGaussianResolution').hasAttribute('max'),'retry preserves higher fitting resolution');
     const urls=new Map(),downloads=[];
     const originalCreate=w.URL.createObjectURL.bind(w.URL);
@@ -69,7 +69,7 @@ frame.addEventListener('load',async()=>{
     await wait(()=>d.querySelectorAll('.job-status.done').length===2||errors.length||d.querySelector('.job-error'));
     check(!errors.length&&!d.querySelector('.job-error'),'Gaussian retry completes in browser');
     const zip=await download('btnDownloadAll');check(zip.blob.size>1000,'batch ZIP includes new results');
-    $('shapeBlurredCircle').click();
+    $('fitMethod').value='legacy';$('fitMethod').dispatchEvent(new w.Event('change'));$('shapeCircle').click();
     check(!$('shapeCircle').disabled&&$('shapeCircle').checked&&!$('enhancedMode').disabled,'deselecting blurred mode restores normal fitter');
     check(!errors.length,'no runtime errors throughout workflow');
     // Cancellation must reach the worker between optimizer chunks; then a
@@ -119,7 +119,7 @@ frame.addEventListener('load',async()=>{
     document.querySelector('#details').open=false;
     if(params.get('view')==='upload'||params.get('view')==='outline'){
       $('btnBackToJobs').click();
-      if(params.get('view')==='upload')$('shapeBlurredCircle').click();
+      if(params.get('view')==='upload'){$('fitMethod').value='legacy';$('fitMethod').dispatchEvent(new w.Event('change'));$('shapeCircle').click();}
       else{$('outlineLink').dispatchEvent(new w.MouseEvent('click',{bubbles:true,cancelable:true}));$('addCirclePrimitiveBtn').click();}
     }else if(params.get('view')==='convert')$('classicToolTab').click();
   }catch(error){report.textContent+='\nFAIL '+error.stack;}

@@ -1,0 +1,37 @@
+# cargo-deny configuration (schema of cargo-deny 0.20), run by CI's hygiene job.
+# https://embarkstudios.github.io/cargo-deny/
+
+[advisories]
+# Vulnerability advisories are always errors in cargo-deny 0.20.
+# Also fail on unsound advisories in any crate, not only workspace members.
+unsound = "all"
+# Fail on crate versions that were yanked from crates.io.
+yanked = "deny"
+
+[licenses]
+# Every license currently used in the dependency graph; all are permissive
+# and OSI-approved. Adding one needs a deliberate review.
+allow = [
+  "0BSD",
+  "Apache-2.0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "MIT",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+]
+
+[bans]
+# Fail on duplicate crate versions; known upstream duplicates are skipped below.
+multiple-versions = "deny"
+skip = [
+  { crate = "miniz_oxide@0.8.9", reason = "png 0.18 depends on it directly while its flate2 dependency already uses miniz_oxide 0.9" },
+  { crate = "syn@2.0.119", reason = "napi-derive, napi-derive-backend and divan-macros (benchmarks only) still use syn 2 while futures-macro moved to syn 3" },
+]
+
+[sources]
+# crates.io only: no other registries and no git dependencies.
+unknown-registry = "deny"
+unknown-git = "deny"

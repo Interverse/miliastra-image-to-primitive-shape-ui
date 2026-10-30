@@ -1,0 +1,45 @@
+[package]
+name = "primeval-render"
+version.workspace = true
+edition = "2024"
+repository.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+divan = { version = "0.1.21", optional = true }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }
+primeval-core = { path = "../primeval-core" }
+tiny-skia = { version = "0.12.0", default-features = false, features = ["std", "simd"] }
+
+[dev-dependencies]
+rand = { version = "0.10.3", default-features = false }
+rand_chacha = "0.10.0"
+rayon = "1.12.0"
+
+[features]
+asset-triangle = ["primeval-core/asset-triangle"]
+# Compiles the in-crate Divan benchmarks (`src/benches.rs`) so they can reach
+# crate-private items. Never enabled by dependents; see CONTRIBUTING.md.
+bench = ["dep:divan"]
+# Exposes the hidden `lab` module (`src/lab.rs`) for the engine evaluation
+# runner (`examples/engine.rs`). Never enabled by dependents; see
+# CONTRIBUTING.md.
+lab = ["primeval-core/lab"]
+
+[lib]
+# The library has no libtest benchmarks; `cargo bench` runs only `benches/`.
+bench = false
+
+[[bench]]
+name = "render"
+harness = false
+required-features = ["bench"]
+
+[[example]]
+name = "engine"
+required-features = ["lab"]

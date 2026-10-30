@@ -20,7 +20,7 @@ third_party/primitive/bot/
 third_party/primitive/examples/
 third_party/primitive/scripts/
 
-# Reference files
+# Local references, non-runtime archive, research reports and benchmarks
 reference/
 
 # Parity-test generated artifacts (regenerate: gen_goldens.py / go build)
@@ -37,4 +37,7 @@ tests/parity/shapely/goldens.json
 tests/parity/shapely/simplify.json
 tests/parity/shapely/_unit_circles.json
 
-docs/
+# Local dependencies and test output
+node_modules/
+test-results/
+playwright-report/

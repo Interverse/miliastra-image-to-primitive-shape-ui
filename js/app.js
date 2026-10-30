@@ -92,7 +92,7 @@
   function updateSubtitle() {
     const subtitle = $("topbarSubtitle");
     if (activeView === "classic") subtitle.textContent = t("topbar.subtitle.classic");
-    else subtitle.textContent = t(currentMode === "fill" ? "topbar.subtitle.fill" : "topbar.subtitle.outline");
+    else subtitle.textContent = t(currentMode === "fill" ? "fitting.subtitle" : "topbar.subtitle.outline");
   }
 
   function setMode(mode) {
@@ -103,7 +103,7 @@
     $("primitiveListSection").hidden = mode !== "outline";
     $("shapeSectionTitle").textContent = t(mode === "fill" ? "shapes.sectionTitle.fill" : "shapes.sectionTitle.outline");
     $("outlineLink").textContent = t(mode === "fill" ? "topbar.link.outline" : "topbar.link.fill");
-    $("shapeHint").textContent = mode === "fill" ? t("shapes.hint.fill") : "";
+    $("shapeHint").textContent = mode === "fill" ? t("fitting.shapeHint") : "";
     if (mode === "outline") ensureOutlineDefault();
     updateSubtitle();
     updatePrimitiveEmptyState();
@@ -122,8 +122,9 @@
     updateSubtitle();
     $("shapeSectionTitle").textContent = t(currentMode === "fill" ? "shapes.sectionTitle.fill" : "shapes.sectionTitle.outline");
     $("outlineLink").textContent = t(currentMode === "fill" ? "topbar.link.outline" : "topbar.link.fill");
-    $("shapeHint").textContent = currentMode === "fill" ? t("shapes.hint.fill") : "";
+    $("shapeHint").textContent = currentMode === "fill" ? t("fitting.shapeHint") : "";
     refreshPrimitiveCardsI18n();
+    syncShapeLabels();
     updatePrimitiveEmptyState();
     renderJobs();
     updateUploadReady();
@@ -160,13 +161,21 @@
 
   const numPrimsSlider = $("numPrims");
   const numPrimsManual = $("numPrimsManual");
+  function validControlCount(input) {
+    input.setCustomValidity("");
+    const value=Number(input.value);
+    if(input.value!==""&&(!Number.isSafeInteger(value)||value<Number(input.min)))input.setCustomValidity(t("compression.invalidBudget",{min:input.min}));
+    return input.reportValidity();
+  }
   numPrimsSlider.addEventListener("input", () => {
     numPrimsManual.value = numPrimsSlider.value;
     $("numPrimsVal").textContent = numPrimsSlider.value;
   });
   numPrimsManual.addEventListener("input", () => {
-    const value = Number.parseInt(numPrimsManual.value, 10);
-    if (!Number.isNaN(value) && value >= 40 && value <= 1200) {
+    numPrimsManual.setCustomValidity("");
+    const value = Number(numPrimsManual.value);
+    if (Number.isSafeInteger(value) && value >= Number(numPrimsManual.min)) {
+      numPrimsSlider.max=String(Math.max(Number(numPrimsSlider.max),value));
       numPrimsSlider.value = String(value);
       updateSliderFill(numPrimsSlider);
     }
@@ -182,29 +191,28 @@
 
   /* ════════════════════ shape checkboxes ════════════════════ */
 
-  const fillShapeInputs = Array.from(document.querySelectorAll("#fillShapeSection .shape-check input"));
-  function syncShapeLabels() {
-    const gaussian = $("shapeBlurredCircle").checked;
-    fillShapeInputs.forEach((checkbox) => {
-      if (checkbox.id !== "shapeBlurredCircle") {
-        checkbox.disabled = gaussian;
-        if (gaussian) checkbox.checked = false;
-      }
-      checkbox.closest(".shape-check").classList.toggle("active", checkbox.checked);
-    });
-    $("gaussianHint").hidden = !gaussian;
-    $("shapeHint").hidden = gaussian;
-    $("gaussianSettings").hidden = !gaussian;
-    $("enhancedMode").disabled = gaussian;
+  const shapePairs = [["Circle","circle"],["Rect","rect"],["Triangle","triangle"]];
+  function selectedFitShape(prefix="") {
+    return shapePairs.find(([id])=>$(prefix ? "retryShape"+id : "shape"+id).checked)?.[1] || "triangle";
   }
-  fillShapeInputs.forEach((input) => {
-    input.addEventListener("change", () => {
-      if (!fillShapeInputs.some((node) => node.checked)) $("shapeCircle").checked = true;
-      syncShapeLabels();
-    });
-  });
+  const fillShapeInputs = Array.from(document.querySelectorAll("#legacyShapeChecks input"));
+  function syncShapeLabels() {
+    const method=$("fitMethod").value, gaussian=method==="gaussian", primeval=method==="primeval";
+    fillShapeInputs.forEach(input=>input.closest(".shape-check").classList.toggle("active",input.checked));
+    $("legacyShapeChecks").hidden=gaussian;
+    $("primevalSettings").hidden=!primeval;
+    $("gaussianHint").hidden=!gaussian;
+    $("shapeHint").hidden=method!=="legacy";
+    $("gaussianSettings").hidden=!gaussian;
+    $("enhancedMode").disabled=method!=="legacy";
+    $("enhancedSettings").hidden=method!=="legacy";
+    $("pngModeSettings").hidden=primeval;
+    $("numPrimsTitle").textContent=t("fillParams.numPrims");
+    numPrimsManual.removeAttribute("max");numPrimsManual.min="1";numPrimsSlider.min="1";
+  }
+  $("fitMethod").addEventListener("change",()=>{syncShapeLabels();updateSubtitle();});
+  fillShapeInputs.forEach(input=>input.addEventListener("change",syncShapeLabels));
   syncShapeLabels();
-
   /* ════════════════════ outline primitive cards ════════════════════ */
 
   const primitiveList = $("primitiveList");
@@ -538,34 +546,28 @@
       origin: readOriginConfig(),
     };
     if (currentMode === "fill") {
-      const manual = Number.parseInt(numPrimsManual.value, 10);
-      cfg.num_primitives = Math.max(40, Math.min(3000, Number.isNaN(manual) ? Number(numPrimsSlider.value) : manual));
-      cfg.mask_threshold = 127;
-      cfg.detail_scale = 1.0;
-      cfg.image_scale = Number($("imageScale").value);
-      cfg.output_alpha = Number($("outputAlpha").value) / 100;
-      cfg.enable_png_mode = $("enablePngMode").checked;
-      if ($("enhancedMode").checked) {
-        // Enhanced mode: error-guided candidate placement with a reduced
-        // search budget (~9x faster per primitive, deterministic; see
-        // the algorithm-redesign investigation). Off = bit-exact original.
-        cfg.guided_sampling = true;
-        cfg.search_n = 150;
-        cfg.search_age = 100;
-        cfg.search_m = 4;
+      const method=$("fitMethod").value;
+      const shape=selectedFitShape();
+      cfg.num_primitives=Number(numPrimsManual.value);
+      cfg.fit_method=method;
+      cfg.mask_threshold=127;cfg.detail_scale=1;
+      cfg.image_scale=Number($("imageScale").value);
+      cfg.output_alpha=Number($("outputAlpha").value)/100;
+      cfg.enable_png_mode=method!=="primeval" && $("enablePngMode").checked;
+      if(method==="legacy" && $("enhancedMode").checked){
+        cfg.guided_sampling=true;cfg.search_n=150;cfg.search_age=100;cfg.search_m=4;
       }
-      const allowed = [];
-      if ($("shapeCircle").checked) allowed.push("circle");
-      if ($("shapeRect").checked) allowed.push("rect");
-      if ($("shapeTriangle").checked) allowed.push("triangle");
-      if ($("shapeBlurredCircle").checked) {
-        allowed.splice(0, allowed.length, "blurred_circle");
-        cfg.gaussian_iterations = Math.max(1, Math.round(Number($("gaussianIterations").value) || 600));
-        cfg.gaussian_resolution = Number($("gaussianResolution").value) || 512;
+      cfg.allowed_shapes=method==="gaussian"?["blurred_circle"]:[shape];
+      if(method==="primeval"){
+        cfg.primeval_resolution=Number($("primevalResolution").value)||512;
+        cfg.primeval_seed=42;
       }
-      cfg.allowed_shapes = allowed.length ? allowed : ["circle"];
-      const primitives = allowed.map((shape) => ({ shape, color: "#ffffff" }));
-      if (primitives.length) cfg.primitives = primitives;
+      if(method==="gaussian"){
+        cfg.gaussian_algorithm=$("gaussianAlgorithm").value;
+        cfg.gaussian_iterations=Math.max(1,Math.round(Number($("gaussianIterations").value)||600));
+        cfg.gaussian_resolution=Number($("gaussianResolution").value)||512;
+      }
+      cfg.primitives=cfg.allowed_shapes.map(shape=>({shape,color:"#ffffff"}));
     } else {
       cfg.primitive_size = Number($("olPrimSize").value);
       cfg.spacing = Number($("olSpacing").value);
@@ -715,7 +717,8 @@
 
   function pumpQueue() {
     while (runningCount() < MAX_CONCURRENT) {
-      const next = jobs.find((job) => job.status === "queued");
+      const primevalRunning=jobs.some(job=>job.status==="processing"&&job.config.fit_method==="primeval");
+      const next = jobs.find((job) => job.status === "queued" && !(primevalRunning&&job.config.fit_method==="primeval"));
       if (!next) break;
       startJob(next);
     }
@@ -737,6 +740,8 @@
   function releaseWorker(workerFile, worker) {
     worker.onmessage = null;
     worker.onerror = null;
+    // Release the model's WASM heap after each neural job.
+
     let pool = workerPool.get(workerFile);
     if (!pool) { pool = []; workerPool.set(workerFile, pool); }
     pool.push(worker);
@@ -757,7 +762,10 @@
     if (job.status !== "processing") return; // cancelled during decode
 
     const workerFile = job.config.mode === "outline" ? "js/worker-outline.js" :
-      (job.config.allowed_shapes || []).includes("blurred_circle") ? "js/worker-gaussian.js?v=30" : "js/worker-fill.js";
+      job.config.fit_method === "primeval" ? "js/worker-primeval.js?v=1" :
+      job.config.fit_method === "compression" ? "js/worker-compress.js?v=3" :
+      (job.config.allowed_shapes || []).includes("blurred_circle") ?
+        "js/worker-gaussian.js?v=34" : "js/worker-fill.js?v=2";
     const worker = acquireWorker(workerFile);
     job.worker = worker;
 
@@ -767,9 +775,12 @@
       if (msg.type === "progress") {
         job.progress = msg.step;
         job.progressTotal = msg.total;
+        const phase=msg.phase || "";
+        if(job.phase!==phase){job.phase=phase;renderJobs();}
         scheduleProgressFlush();
       } else if (msg.type === "done") {
         job.result = msg.result;
+        if(msg.result.primeval_png){job.primevalOriginalElements=JSON.stringify(msg.result.elements);job.primevalEdited=false;}
         job.status = "done";
         job.progress = job.progressTotal;
         releaseWorker(workerFile, worker);
@@ -777,7 +788,7 @@
         pumpQueue();
       } else if (msg.type === "error") {
         job.status = "error";
-        job.error = msg.message;
+        job.error = msg.message==="COMPRESSION_EXACT_BUDGET" ? t("compression.exactBudget") : msg.message;
         worker.terminate(); // unknown worker state — do not pool
         job.worker = null;
         pumpQueue();
@@ -817,6 +828,8 @@
       alert(t("submit.noFiles"));
       return;
     }
+    if(currentMode==="fill"&&!validControlCount(numPrimsManual))return;
+    if(currentMode==="fill"&&$("fitMethod").value==="primeval"&&!$("primevalResolution").reportValidity())return;
     for (const entry of pendingFiles) {
       jobs.push(createJob(entry.file, entry.url, captureConfig(entry.file)));
     }
@@ -877,8 +890,10 @@
     $("overallProgress").hidden = !jobs.length;
     $("btnCancelAll").hidden = !hasWork;
     $("btnClearDone").hidden = !jobs.some((job) => ["done", "error", "cancelled"].includes(job.status));
-    $("btnDownloadAll").hidden = doneCount === 0;
-    $("batchLuaTemplateField").hidden = doneCount === 0;
+    const hasFinished=jobs.some(job=>job.status==="done"&&job.result);
+    $("btnDownloadAll").hidden = !hasFinished;
+    $("batchLuaTemplateField").hidden = !hasFinished;
+    $("batchLuaBudgetNote").hidden = !jobs.some(job=>job.status==="done"&&job.result&&!compressionLuaFits(job.result));
     if (!jobs.length) return;
     let totalProgress = 0;
     let denom = 0;
@@ -920,7 +935,10 @@
       statusRow.className = "job-status-row";
       const status = document.createElement("span");
       status.className = "job-status " + job.status;
-      status.textContent = statusLabel(job.status);
+      status.classList.toggle("quality-failed",job.result?.config?.quality?.classification === "quality-regression");
+      status.textContent = job.status === "done" && job.result?.config?.quality?.classification === "quality-regression" ? t("compression.failed") :
+        job.status === "processing" && ["native","lossless","partition","fit","refine"].includes(job.phase) ? t("compression.phase."+job.phase) :
+        job.status==="processing"&&job.phase==="model" ? t("batch.phase.model") : statusLabel(job.status);
       statusRow.appendChild(status);
       if (job.status === "done" && job.result) {
         const info = document.createElement("span");
@@ -1018,6 +1036,8 @@
       base: rgbaToCanvas(job.result.image_rgba, width, height),
       mask: grayToCanvas(job.result.mask_gray, width, height),
       preview: job.result.preview_rgba ? rgbaToCanvas(job.result.preview_rgba, width, height) : null,
+      native: job.result.native_rgba ? rgbaToCanvas(job.result.native_rgba, width, height) : null,
+      difference: job.result.difference_rgba ? rgbaToCanvas(job.result.difference_rgba, width, height) : null,
     };
     return job.assets;
   }
@@ -1197,9 +1217,10 @@
     if (type === "triangle") {
       const width = (element.size.width || 0) * R.ppu;
       const triHeight = (element.size.height || 0) * R.ppu || (width * Math.sqrt(3) / 2);
-      ctx.moveTo(0, -2 * triHeight / 3);
-      ctx.lineTo(-width / 2, triHeight / 3);
-      ctx.lineTo(width / 2, triHeight / 3);
+      const shift=element.triangle_pivot==="box"?triHeight/6:0;
+      ctx.moveTo(0, -2 * triHeight / 3+shift);
+      ctx.lineTo(-width / 2, triHeight / 3+shift);
+      ctx.lineTo(width / 2, triHeight / 3+shift);
       ctx.closePath();
       return;
     }
@@ -1208,7 +1229,7 @@
     ctx.rect(-width / 2, -height / 2, width, height);
   }
 
-  function drawElement(element, index) {
+  function drawElement(element, index, reference=false) {
     const center = imagePointToElementCenter(element);
     const selected = !isBackgroundElement(element) && (R.selectedSet.has(index) || index === R.selected);
     const highlighted = !isBackgroundElement(element) && !selected && index === R.hovered;
@@ -1221,7 +1242,7 @@
     ctx.beginPath();
     drawElementPath(element);
 
-    if ($("showFill").checked) {
+    if ($("showFill").checked && (!reference || selected || highlighted)) {
       if (selected) ctx.fillStyle = "rgba(37, 99, 235, 0.42)";
       else if (highlighted) ctx.fillStyle = "rgba(59, 130, 246, 0.28)";
       else ctx.fillStyle = cssColor(element.color, fillAlpha);
@@ -1315,8 +1336,12 @@
       }
       ctx.clip();
     }
+    const reference=primevalCurrent() && $("showFill").checked;
+    if(reference&&assets.preview)ctx.drawImage(assets.preview,0,0,imageWidth,imageHeight);
+    const elementIndices = new Map();
+    data.elements.forEach((element,index)=>{if(!elementIndices.has(element))elementIndices.set(element,index);});
     renderOrderedElements(data).forEach((element) => {
-      drawElement(element, data.elements.indexOf(element));
+      drawElement(element, elementIndices.get(element),reference);
     });
     if (clientMask) {
       ctx.restore();
@@ -1408,9 +1433,9 @@
       const width = (element.size.width || 0) * R.ppu;
       const triHeight = (element.size.height || 0) * R.ppu || (width * Math.sqrt(3) / 2);
       const vertices = [
-        { x: 0, y: -2 * triHeight / 3 },
-        { x: -width / 2, y: triHeight / 3 },
-        { x: width / 2, y: triHeight / 3 },
+        { x: 0, y: element.triangle_pivot==="box"?-triHeight/2:-2*triHeight/3 },
+        { x: -width / 2, y: element.triangle_pivot==="box"?triHeight/2:triHeight/3 },
+        { x: width / 2, y: element.triangle_pivot==="box"?triHeight/2:triHeight/3 },
       ];
       const crosses = [];
       for (let i = 0; i < 3; i++) {
@@ -1468,6 +1493,45 @@
     $("infoRotation").textContent = `${elementRotationZ(element).toFixed(1)}°`;
   }
 
+  function compressionCurrent(data = R?.data, job = R?.job) {
+    return !data?.config?.quality || JSON.stringify(data.elements) === JSON.stringify(job.result.elements);
+  }
+  function primevalCurrent(){
+    return Boolean(R?.job?.result?.primeval_png&&R.data.config?.primeval_reference&&!R.job.primevalEdited);
+  }
+  function compressionPassed(data = R?.data, job = R?.job) {
+    return !data?.config?.quality || (data.config.quality.classification !== "quality-regression" && compressionCurrent(data, job));
+  }
+  function compressionLuaFits(data = R?.data) {
+    return !data?.config?.quality || data.elements.length + 2 <= data.config.num_primitives;
+  }
+  function updateCompressionReport() {
+    const quality = R.data.config?.quality;
+    $("compressionReport").hidden = !quality;
+    const passed = compressionPassed();
+    const current = compressionCurrent();
+    $("topbarStatus").classList.toggle("quality-failed",!!quality&&!passed);
+    if(quality) {
+      $("compressionReport").dataset.valid = String(passed);
+      $("compressionStatus").textContent = t(!current ? "compression.edited" : quality.classification === "pixel-perfect" ? "compression.perfect" : passed ? "compression.near" : "compression.failed");
+      const cfg=R.data.config;
+      $("compressionCounts").textContent=t("compression.counts",{native:cfg.native_controls+1,count:R.data.elements.length+1,budget:cfg.num_primitives});
+      $("compressionMetrics").replaceChildren();
+      const names={mae:"MAE",max_error:t("compression.maxError").replace(" ≤",""),ssim:"SSIM",differing_percent:t("compression.changed"),edge_mae:t("compression.edgeError").replace(" ≤",""),alpha_max:t("compression.alphaError").replace(" ≤",""),local_mae:t("compression.localError").replace(" ≤","")};
+      for(const [key,label] of Object.entries(names)) {
+        const tr=document.createElement("tr"),name=document.createElement("td"),value=document.createElement("td");
+        name.textContent=label;value.textContent=Number(quality.metrics[key]).toFixed(key==="ssim"?4:2)+(key==="differing_percent"?"%":"");
+        tr.append(name,value);$("compressionMetrics").appendChild(tr);
+      }
+      if(!passed)$("topbarStatus").textContent=$("compressionStatus").textContent;
+    }
+    for(const id of ["btnExportGIAOverlimit","btnExportGIAClassic","btnExportServerGIAOverlimit","btnExportServerGIAClassic","btnExportClientGIAOverlimit","btnExportClientGIAClassic"])$(id).disabled=false;
+    refreshTemplateIndexState();
+  }
+  $("btnCompressionReport").addEventListener("click",()=>{
+    if(!R?.data.config?.quality)return;
+    downloadBlob(new Blob([JSON.stringify({image:R.job.name,controls:R.data.elements.length,...R.data.config,validation_current:compressionCurrent()},null,2)],{type:"application/json"}),`${currentExportBaseName()}_quality.json`);
+  });
   function updateStats() {
     const data = R.data;
     const elements = visibleElements(data);
@@ -1481,7 +1545,7 @@
       ? t(fillVariant === "png" ? "result.mode.fillPng" : "result.mode.fill")
       : t("result.mode.outline");
 
-    $("statMode").textContent = gaussianCount ? "GaussianImage" : modeText;
+    $("statMode").textContent = data.config?.engine === "primeval-browser" ? "Primeval" : data.config?.engine === "compression-browser" ? t("compression.name") : gaussianCount ? "GaussianImage" : modeText;
     $("statTotal").textContent = String(elements.length);
     $("statEllipse").textContent = String(ellipseCount);
     $("statGaussian").textContent = String(gaussianCount);
@@ -1490,6 +1554,7 @@
     $("statImgSize").textContent = `${data.image_size.width}×${data.image_size.height}`;
     $("elemCountDisplay").textContent = t("result.canvas.elements", { n: elements.length });
     $("topbarStatus").textContent = t("result.done", { count: data.elements_count, elapsed: data.elapsed_seconds });
+    updateCompressionReport();
 
     const hasMask = Boolean(R.job.result.mask_gray);
     if (!hasMask) $("showMask").checked = false;
@@ -1502,6 +1567,10 @@
       const assets = ensureJobAssets(R.job);
       if (assets.preview) $("previewImg").src = assets.preview.toDataURL("image/png");
       if (assets.base) $("originalThumb").src = assets.base.toDataURL("image/png");
+      $("nativePreview").hidden = !assets.native;
+      $("differencePreview").hidden = !assets.difference;
+      if(assets.native)$("nativeThumb").src = assets.native.toDataURL("image/png");
+      if(assets.difference)$("differenceThumb").src = assets.difference.toDataURL("image/png");
     }
   }
 
@@ -1511,17 +1580,17 @@
     $("retrySectionFill").hidden = !isFill;
     $("retrySectionOutline").hidden = isFill;
     if (isFill) {
-      $("retryNumPrims").value = cfg.num_primitives != null ? cfg.num_primitives : 400;
-      $("retryImageScale").value = cfg.image_scale != null ? cfg.image_scale : 1.0;
-      $("retryOutputAlpha").value = Math.round((cfg.output_alpha != null ? cfg.output_alpha : 1.0) * 100);
-      // primitive types prefilled from the job's config
-      const allowed = Array.isArray(cfg.allowed_shapes) && cfg.allowed_shapes.length ? cfg.allowed_shapes : ["circle"];
-      $("retryShapeCircle").checked = allowed.includes("circle");
-      $("retryShapeRect").checked = allowed.includes("rect");
-      $("retryShapeTriangle").checked = allowed.includes("triangle");
-      $("retryShapeBlurredCircle").checked = allowed.includes("blurred_circle");
-      $("retryGaussianIterations").value = cfg.gaussian_iterations || 600;
-      $("retryGaussianResolution").value = cfg.gaussian_resolution || 512;
+      const allowed=cfg.allowed_shapes || ["triangle"];
+      $("retryFitMethod").value=allowed.includes("blurred_circle")?"gaussian":cfg.fit_method==="primeval"||cfg.fit_method==="compression"?"primeval":"legacy";
+      $("retryNumPrims").removeAttribute("max");$("retryNumPrims").min="1";
+      $("retryNumPrims").value=cfg.num_primitives ?? 2000;
+      $("retryImageScale").value=cfg.image_scale ?? 1;
+      $("retryOutputAlpha").value=Math.round((cfg.output_alpha ?? 1)*100);
+      for(const [id,shape] of shapePairs)$("retryShape"+id).checked=shape===(allowed.find(s=>["circle","rect","triangle"].includes(s)) || "triangle");
+      $("retryPrimevalResolution").value=cfg.primeval_resolution || 512;
+      $("retryGaussianAlgorithm").value=cfg.gaussian_algorithm || "gaussianimage";
+      $("retryGaussianIterations").value=cfg.gaussian_iterations || 600;
+      $("retryGaussianResolution").value=cfg.gaussian_resolution || 512;
       syncRetryShapeLabels();
     } else {
       $("retryPrimSize").value = cfg.primitive_size != null ? cfg.primitive_size : 30;
@@ -1541,37 +1610,28 @@
 
   const retryShapeInputs = Array.from(document.querySelectorAll("#retryShapeChecks .shape-check input"));
   function syncRetryShapeLabels() {
-    const gaussian = $("retryShapeBlurredCircle").checked;
-    $("retryGaussianSettings").hidden = !gaussian;
-    retryShapeInputs.forEach((checkbox) => {
-      if (checkbox.id !== "retryShapeBlurredCircle") {
-        checkbox.disabled = gaussian;
-        if (gaussian) checkbox.checked = false;
-      }
-      checkbox.closest(".shape-check").classList.toggle("active", checkbox.checked);
-    });
+    const method=$("retryFitMethod").value;
+    $("retryShapeChecks").hidden=method==="gaussian";
+    $("retryGaussianSettings").hidden=method!=="gaussian";
+    $("retryPrimevalSettings").hidden=method!=="primeval";
+    retryShapeInputs.forEach(input=>input.closest(".shape-check").classList.toggle("active",input.checked));
   }
-  retryShapeInputs.forEach((input) => input.addEventListener("change", () => {
-    if (!retryShapeInputs.some((node) => node.checked)) $("retryShapeCircle").checked = true;
-    syncRetryShapeLabels();
-  }));
-
-  $("btnRetryFill").addEventListener("click", () => {
-    if (!R) return;
-    const allowed = [];
-    if ($("retryShapeCircle").checked) allowed.push("circle");
-    if ($("retryShapeRect").checked) allowed.push("rect");
-    if ($("retryShapeTriangle").checked) allowed.push("triangle");
-    if ($("retryShapeBlurredCircle").checked) allowed.splice(0, allowed.length, "blurred_circle");
-    const shapes = allowed.length ? allowed : ["circle"]; // same fallback as the upload page
-    retryJob(R.job, {
-      num_primitives: Math.max(40, Math.min(3000, Number($("retryNumPrims").value) || 400)),
-      image_scale: Number($("retryImageScale").value) || 1.0,
-      output_alpha: Math.max(0, Math.min(100, Number($("retryOutputAlpha").value))) / 100,
-      allowed_shapes: shapes,
-      gaussian_iterations: Math.max(1, Math.round(Number($("retryGaussianIterations").value) || 600)),
-      gaussian_resolution: Number($("retryGaussianResolution").value) || 512,
-      primitives: shapes.map((shape) => ({ shape, color: "#ffffff" })),
+  $("retryFitMethod").addEventListener("change",syncRetryShapeLabels);
+  retryShapeInputs.forEach(input=>input.addEventListener("change",syncRetryShapeLabels));
+  $("btnRetryFill").addEventListener("click",()=>{
+    if(!R||!validControlCount($("retryNumPrims")))return;
+    const method=$("retryFitMethod").value;
+    if(method==="primeval"&&!$("retryPrimevalResolution").reportValidity())return;
+    const shapes=method==="gaussian"?["blurred_circle"]:[selectedFitShape("retry")];
+    retryJob(R.job,{
+      fit_method:method,num_primitives:Number($("retryNumPrims").value),allowed_shapes:shapes,
+      image_scale:Number($("retryImageScale").value)||1,
+      output_alpha:Math.max(0,Math.min(100,Number($("retryOutputAlpha").value)))/100,
+      primeval_resolution:Number($("retryPrimevalResolution").value)||512,primeval_seed:42,
+      gaussian_algorithm:$("retryGaussianAlgorithm").value,
+      gaussian_iterations:Math.max(1,Math.round(Number($("retryGaussianIterations").value)||600)),
+      gaussian_resolution:Number($("retryGaussianResolution").value)||512,
+      primitives:shapes.map(shape=>({shape,color:"#ffffff"})),
     });
   });
   $("btnRetryOutline").addEventListener("click", () => {
@@ -1853,6 +1913,7 @@
    * objects; a 400-primitive job snapshots at ~100 KB, stack capped at 30). */
   function pushUndoSnapshot(json) {
     const job = R.job;
+    if(job.result.primeval_png)job.primevalEdited=true;
     if (!job.editUndo) { job.editUndo = []; job.editRedo = []; }
     job.editUndo.push(json !== undefined ? json : JSON.stringify(R.data.elements));
     if (job.editUndo.length > 30) job.editUndo.shift();
@@ -1861,6 +1922,7 @@
   }
 
   function restoreElements(json) {
+    if(R.job.result.primeval_png)R.job.primevalEdited=json!==R.job.primevalOriginalElements;
     R.data.elements = JSON.parse(json);
     R.data.elements_count = R.data.elements.length;
     R.selectedSet.clear();
@@ -2074,7 +2136,8 @@
           inside = rx > 0 && ry > 0 && (dx * dx) / (rx * rx) + (dy * dy) / (ry * ry) <= 1;
         } else if (type === "triangle") {
           const th = ry * 2;
-          const vs = [[0, -2 * th / 3], [-rx, th / 3], [rx, th / 3]];
+          const shift=element.triangle_pivot==="box"?th/6:0;
+          const vs = [[0, -2 * th / 3+shift], [-rx, th / 3+shift], [rx, th / 3+shift]];
           const cr = [];
           for (let i = 0; i < 3; i++) {
             const a = vs[i], b = vs[(i + 1) % 3];
@@ -2221,16 +2284,17 @@
       group_name: exportBaseName || null,
       origin: originUnits,
       image_size: data.image_size,
-      config: R.job.config || data.config,
+      config: data.config?.engine==="primeval-browser"?{...R.job.config,...data.config}:R.job.config || data.config,
       mask: data.mask || null,
       elements: renderOrderedElements(data).map((element, index) => ({
         id: element.id != null ? element.id : index,
         type: normalizeType(element.type),
         shape: element.shape,
+        triangle_pivot: element.triangle_pivot,
         center: element.center,
         relative: {
-          x: +(element.center.x - originUnits.x).toFixed(4),
-          y: +(element.center.y - originUnits.y).toFixed(4),
+          x: data.config?.engine==="primeval-browser"?element.center.x-originUnits.x:+(element.center.x - originUnits.x).toFixed(4),
+          y: data.config?.engine==="primeval-browser"?element.center.y-originUnits.y:+(element.center.y - originUnits.y).toFixed(4),
         },
         size: element.size,
         rotation: element.rotation,
@@ -2299,12 +2363,12 @@
         width = (element.size.width || 0) * R.ppu;
         height = (element.size.height || 0) * R.ppu || (width * Math.sqrt(3) / 2);
         extraStyle = "  clip-path: polygon(50% 0%, 0% 100%, 100% 100%);";
-        transformOrigin = "50% 66.6667%";
+        transformOrigin = element.triangle_pivot==="box"?"50% 50%":"50% 66.6667%";
       } else {
         width = (element.size.width || 0) * R.ppu;
         height = (element.size.height || 0) * R.ppu;
       }
-      const txPercent = type === "triangle" ? "-50%, -66.6667%" : "-50%, -50%";
+      const txPercent = type === "triangle"&&element.triangle_pivot!=="box" ? "-50%, -66.6667%" : "-50%, -50%";
 
       lines.push(`.shaper-element.shaper-e${index} {`);
       lines.push(`  left: ${center.x.toFixed(2)}px;`);
@@ -2328,6 +2392,7 @@
   }
 
   function buildSvgExportText() {
+    if(primevalCurrent())return R.job.result.primeval_svg;
     const data = R.data;
     const elements = renderOrderedElements(data);
     const lines = [];
@@ -2366,8 +2431,9 @@
       if (type === "triangle") {
         const width = (element.size.width || 0) * R.ppu;
         const height = (element.size.height || 0) * R.ppu || (width * Math.sqrt(3) / 2);
-        const x1 = center.x, y1 = center.y - (2 * height / 3);
-        const x2 = center.x - width / 2, y2 = center.y + height / 3;
+        const shift=element.triangle_pivot==="box"?height/6:0;
+        const x1 = center.x, y1 = center.y - (2 * height / 3)+shift;
+        const x2 = center.x - width / 2, y2 = center.y + height / 3+shift;
         const x3 = center.x + width / 2, y3 = y2;
         lines.push(`  <polygon points="${x1.toFixed(2)},${y1.toFixed(2)} ${x2.toFixed(2)},${y2.toFixed(2)} ${x3.toFixed(2)},${y3.toFixed(2)}" fill="${color}" fill-opacity="${alpha.toFixed(4)}" transform="rotate(${angle.toFixed(2)} ${center.x.toFixed(2)} ${center.y.toFixed(2)})" />`);
         return;
@@ -2505,6 +2571,7 @@
       field.classList.toggle("is-invalid", text !== "" && LuaExport.parseTemplateIndex(text) === null);
     }
     $("btnExportClientLua").disabled = LuaExport.parseTemplateIndex($("clientLuaTemplateIndex").value) === null;
+    $("clientLuaBudgetNote").hidden = compressionLuaFits();
   }
 
   function syncTemplateIndex(source) {
@@ -2753,6 +2820,9 @@
   });
   $("btnExportPNG").addEventListener("click", () => {
     if (!R) return;
+    if(primevalCurrent()){
+      downloadBlob(new Blob([R.job.result.primeval_png],{type:"image/png"}),exportFileName("png"));return;
+    }
     // Export the full fitted render (original behavior), independent of the
     // current zoom/pan viewport.
     const fit = computeFit();

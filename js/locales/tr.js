@@ -2,6 +2,8 @@
 "use strict";
 window.LOCALES = window.LOCALES || {};
 window.LOCALES["tr"] = {
+  "fillParams.gaussianAlgorithm": "Algoritma",
+  "batch.phase.model": "Model hazırlanıyor",
   "shapes.blurredCircle": "Bulanık daire",
   "shapes.gaussianHint": "Yalnızca bulanık daireler. Önizleme yaklaşık sonuçtur.",
   "fillParams.gaussianIterations": "Uyarlama adımları",

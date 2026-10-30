@@ -1,0 +1,6 @@
+[toolchain]
+channel = "1.99.0"
+components = ["rustfmt", "clippy"]
+# The single-threaded wasm build (scripts/build-wasm.mjs) uses this toolchain.
+targets = ["wasm32-unknown-unknown"]
+profile = "minimal"

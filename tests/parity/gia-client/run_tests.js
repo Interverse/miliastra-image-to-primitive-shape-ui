@@ -27,9 +27,9 @@ const ROOT = path.join(__dirname, "..", "..", "..");
 const GIA = require(path.join(ROOT, "js", "gia.js"));
 const GiaExport = require(path.join(ROOT, "js", "gia-export.js"));
 
-const CLIENT_TEMPLATE_PATH = path.join(ROOT, "assets", "client_image_template.gia");
+const CLIENT_TEMPLATE_PATH = path.join(ROOT, "tests", "fixtures", "gia", "client_image_template.gia");
 const CLIENT_MASK_OFF_TEMPLATE_PATH = path.join(ROOT, "assets", "client_mask_off_template.gia");
-const CLIENT_MASK_TEMPLATE_PATH = path.join(ROOT, "assets", "client_mask_template.gia");
+const CLIENT_MASK_TEMPLATE_PATH = path.join(ROOT, "tests", "fixtures", "gia", "client_mask_template.gia");
 const SERVER_TEMPLATE_PATH = path.join(ROOT, "assets", "image_template.gia");
 
 /* The reference .gia files exactly as supplied. If either ever fails, the

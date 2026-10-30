@@ -1,0 +1,47 @@
+[package]
+name = "primeval-core"
+version.workspace = true
+edition = "2024"
+repository.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+divan = { version = "0.1.21", optional = true }
+getrandom = "0.4.3"
+libm = "0.2.16"
+rand = { version = "0.10.3", default-features = false }
+rand_chacha = "0.10.0"
+rayon = "1.12.0"
+
+# Browsers have no OS entropy source: an unset seed comes from
+# `crypto.getRandomValues` there (also with a shared, threaded memory).
+[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
+getrandom = { version = "0.4.3", features = ["wasm_js"] }
+
+[dev-dependencies]
+tiny-skia = { version = "0.12.0", default-features = false, features = ["std", "simd"] }
+
+[features]
+asset-triangle = []
+# Compiles the in-crate Divan benchmarks (`src/benches.rs`) so they can reach
+# crate-private items. Never enabled by dependents; see CONTRIBUTING.md.
+bench = ["dep:divan"]
+# Exposes lab-only hooks (`Model::set_search_effort`, `Model::set_refine_effort`,
+# `Model::set_search`, `Model::set_quadratic_width`, `Model::set_quadratic_cap`)
+# and the `Search` re-export for the engine evaluation runner of
+# `primeval-render`. Never enabled by dependents.
+lab = []
+
+[lib]
+# The library has no libtest benchmarks; `cargo bench` runs only `benches/`.
+bench = false
+
+[[bench]]
+name = "core"
+harness = false
+required-features = ["bench"]

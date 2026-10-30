@@ -1235,7 +1235,8 @@ function normalizeAllowedShapes(allowed) {
 
 function buildShapeConfigs(allowedShapes, numPrimitives) {
   const normalized = normalizeAllowedShapes(allowedShapes);
-  const total = Math.max(1, numPrimitives | 0);
+  const total = Number(numPrimitives);
+  if(!Number.isSafeInteger(total)||total<1)throw new Error("Primitive count must be a positive integer");
   const base = Math.floor(total / normalized.length);
   const rem = total % normalized.length;
   const configs = [];
@@ -1457,7 +1458,8 @@ function processFill(jobId, rgba, width, height, config) {
   }
 
   /* --- work image scaling (fit_image_with_primitive) --- */
-  const numPrimitives = Math.max(1, Number(config.num_primitives || 400) | 0);
+  const numPrimitives = Number(config.num_primitives ?? 400);
+  if(!Number.isSafeInteger(numPrimitives)||numPrimitives<1)throw new Error("Primitive count must be a positive integer");
   const detailScale = Math.max(0.25, Number(config.detail_scale || 1.0));
   const fullMaxDim = Math.max(width, height);
   // Python round() is banker's rounding — matters when a dimension lands

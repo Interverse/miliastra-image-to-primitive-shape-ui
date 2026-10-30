@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="dark light">
+  <script src="js/primeval-isolation.js?v=1"></script>
   <script>
     // theme before first paint (default dark); persisted in localStorage
     document.documentElement.dataset.theme = (function () {
@@ -12,13 +13,13 @@
   </script>
   <title data-i18n="app.pageTitle">Miliastra Wonderland Image Fitter</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='38' cy='42' r='26' fill='%234355B9'/%3E%3Crect x='48' y='44' width='36' height='36' rx='6' fill='%23E8A317' transform='rotate(12 66 62)'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="css/style.css?v=27">
+  <link rel="stylesheet" href="css/style.css?v=29">
 </head>
 <body>
   <header class="topbar">
     <div class="topbar-left">
       <a href="#" id="homeLink" style="text-decoration:none;"><h1 data-i18n="app.title">Image Primitive Fitter</h1></a>
-      <span class="topbar-subtitle" id="topbarSubtitle" data-i18n="topbar.subtitle.fill"></span>
+      <span class="topbar-subtitle" id="topbarSubtitle" data-i18n="fitting.subtitle"></span>
       <nav class="tool-tabs" aria-label="Tool tabs">
         <button type="button" id="imageToolTab" class="tool-tab active" data-i18n="topbar.tab.image">Image Fitting</button>
         <button type="button" id="classicToolTab" class="tool-tab" data-i18n="topbar.tab.classic">GIA Mode Convert</button>
@@ -50,7 +51,7 @@
           <div id="uploadReady" class="upload-ready" hidden aria-live="polite"></div>
           <div id="uploadWarning" class="upload-warning" hidden aria-live="polite" data-i18n="upload.largeWarning"></div>
         </div>
-        <p class="hint" data-i18n="upload.formats"></p>
+        <p class="hint" data-i18n="fitting.formats"></p>
         <p class="hint" data-i18n="upload.multiHint"></p>
       </section>
 
@@ -58,30 +59,41 @@
         <h3 id="shapeSectionTitle" data-i18n="shapes.sectionTitle.fill">Primitive Types</h3>
 
         <div id="fillShapeSection">
-          <div class="shape-checks">
-            <label class="shape-check active">
-              <input type="checkbox" id="shapeCircle" checked>
+          <div class="form-field">
+            <label for="fitMethod" data-i18n="compression.method">Method</label>
+            <select id="fitMethod" class="num-input">
+              <option value="primeval">Primeval</option>
+              <option value="gaussian">Gaussian</option>
+              <option value="legacy" data-i18n="fitting.legacy">Legacy</option>
+            </select>
+          </div>
+          <div id="primevalSettings" class="form-stack">
+            <div class="form-field">
+              <label for="primevalResolution" data-i18n="fillParams.gaussianResolution">Detail (px)</label>
+              <input id="primevalResolution" type="number" min="32" max="2048" step="1" value="512" class="num-input">
+            </div>
+          </div>
+          <div class="shape-checks" id="legacyShapeChecks">
+            <label class="shape-check">
+              <input type="radio" name="fitShape" id="shapeCircle">
               <span class="shape-icon">○</span>
               <span data-i18n="shapes.circle">Circle</span>
             </label>
-            <label class="shape-check">
-              <input type="checkbox" id="shapeRect">
+            <label class="shape-check active">
+              <input type="radio" name="fitShape" id="shapeRect" checked>
               <span class="shape-icon">□</span>
               <span data-i18n="shapes.rect">Rectangle</span>
             </label>
             <label class="shape-check">
-              <input type="checkbox" id="shapeTriangle">
+              <input type="radio" name="fitShape" id="shapeTriangle">
               <span class="shape-icon">△</span>
               <span data-i18n="shapes.triangle">Triangle</span>
             </label>
-            <label class="shape-check">
-              <input type="checkbox" id="shapeBlurredCircle">
-              <span class="shape-icon">◉</span>
-              <span data-i18n="shapes.blurredCircle">Blurred circle</span>
-            </label>
+
           </div>
           <p class="hint" id="gaussianHint" hidden data-i18n="shapes.gaussianHint"></p>
           <div id="gaussianSettings" class="form-stack" hidden>
+            <input type="hidden" id="gaussianAlgorithm" value="gaussianimage">
             <div class="form-field">
               <label for="gaussianIterations" data-i18n="fillParams.gaussianIterations">Fitting steps</label>
               <input type="number" id="gaussianIterations" value="600" min="1" step="1" class="num-input">
@@ -91,7 +103,7 @@
               <input type="number" id="gaussianResolution" value="512" min="32" step="1" class="num-input">
             </div>
           </div>
-          <p class="hint" id="shapeHint" data-i18n="shapes.hint.fill"></p>
+          <p class="hint" id="shapeHint" data-i18n="fitting.shapeHint"></p>
         </div>
 
         <div id="primitiveListSection" hidden>
@@ -117,12 +129,12 @@
           <h3 data-i18n="fillParams.sectionTitle">Fitting Parameters</h3>
           <div class="param-item">
             <div class="param-head">
-              <span class="param-title" data-i18n="fillParams.numPrims">Primitive count</span>
+              <span id="numPrimsTitle" class="param-title" data-i18n="fillParams.numPrims">Primitive count</span>
               <span id="numPrimsVal" class="val-tag">400</span>
             </div>
             <p class="param-desc" data-i18n="fillParams.numPrimsDesc"></p>
-            <input type="range" id="numPrims" min="40" max="1200" step="10" value="400">
-            <input type="number" id="numPrimsManual" min="40" max="3000" value="400" class="num-input">
+            <input type="range" id="numPrims" min="2" max="10000" step="1" value="2000">
+            <input type="number" id="numPrimsManual" min="2" step="1" value="2000" required class="num-input">
           </div>
 
           <div class="param-item">
@@ -143,7 +155,7 @@
             <input type="range" id="outputAlpha" min="0" max="100" step="5" value="100">
           </div>
 
-          <div class="param-item">
+          <div class="param-item" id="enhancedSettings">
             <div class="param-head">
               <span class="param-title" data-i18n="fillParams.enhanced">Enhanced mode</span>
               <span class="val-tag" data-i18n="fillParams.enhancedTag">~9× faster</span>
@@ -155,7 +167,7 @@
             </label>
           </div>
 
-          <div class="param-item">
+          <div class="param-item" id="pngModeSettings">
             <div class="param-head">
               <span class="param-title" data-i18n="fillParams.pngMode">PNG mode</span>
               <span class="val-tag" data-i18n="fillParams.pngModeTag">Optional</span>
@@ -234,6 +246,7 @@
           <input type="text" id="batchLuaTemplateIndex" inputmode="numeric" autocomplete="off" spellcheck="false" data-i18n-placeholder="batch.luaTemplateOptional" placeholder="optional">
         </label>
         <button type="button" id="btnDownloadAll" class="btn-tonal" data-i18n="batch.downloadAll" hidden>Download all (ZIP)</button>
+        <p id="batchLuaBudgetNote" class="hint" hidden data-i18n="compression.luaBudget"></p>
       </div>
 
       <div class="overall-progress" id="overallProgress" hidden>
@@ -271,8 +284,7 @@
         <ul class="tips">
           <li><strong data-i18n="tips.rule1"></strong></li>
           <li><strong data-i18n="tips.rule2"></strong></li>
-          <li data-i18n="tips.multiShape"></li>
-          <li data-i18n="tips.batch"></li>
+          <li data-i18n="fitting.batch"></li>
           <li><span data-i18n="tips.tutorial"></span> <a href="https://www.bilibili.com/video/BV1kKDyB9EvY" target="_blank" rel="noopener noreferrer">BV1kKDyB9EvY</a></li>
         </ul>
       </section>
@@ -282,6 +294,14 @@
   <!-- ═══════════════ View: result ═══════════════ -->
   <div class="app-layout view" id="viewResult">
     <aside class="panel panel-left">
+      <section id="compressionReport" class="panel-section" hidden>
+        <h3 data-i18n="compression.validation">Quality validation</h3>
+        <p id="compressionStatus" role="status"></p>
+        <p id="compressionCounts" class="hint"></p>
+        <p class="hint" data-i18n="compression.renderHint">Axis-aligned rectangles only. Compared with the native render.</p>
+        <div class="elem-info"><table><tbody id="compressionMetrics"></tbody></table></div>
+        <button type="button" id="btnCompressionReport" class="btn-sm" data-i18n="compression.downloadReport">Download quality report</button>
+      </section>
       <section class="panel-section">
         <h3 data-i18n="result.export.sectionTitle">Export</h3>
         <div class="export-name-field">
@@ -330,6 +350,7 @@
           <div class="gia-export-group__field">
             <label for="clientLuaTemplateIndex" data-i18n="result.export.gia.clientLuaTemplate">Image Control Template index</label>
             <input type="text" id="clientLuaTemplateIndex" class="form-input" inputmode="numeric" autocomplete="off" spellcheck="false">
+            <p id="clientLuaBudgetNote" class="hint" hidden data-i18n="compression.luaBudget"></p>
             <p class="gia-export-group__desc gia-export-group__desc--field" data-i18n="result.export.gia.clientLuaTemplateHint"></p>
           </div>
         </div>
@@ -362,26 +383,23 @@
 
       <section class="panel-section" id="retrySectionFill">
         <h3 data-i18n="result.retry.sectionTitle">Re-process</h3>
-        <p class="field-label" data-i18n="shapes.sectionTitle.fill">Primitive Types</p>
+        <div class="form-field">
+          <label for="retryFitMethod" data-i18n="compression.method">Method</label>
+          <select id="retryFitMethod" class="num-input">
+            <option value="primeval">Primeval</option><option value="gaussian">Gaussian</option><option value="legacy" data-i18n="fitting.legacy">Legacy</option>
+          </select>
+        </div>
         <div class="shape-checks" id="retryShapeChecks">
-          <label class="shape-check"><input type="checkbox" id="retryShapeBlurredCircle"><span class="shape-icon">◉</span><span data-i18n="shapes.blurredCircle">Blurred radial circle</span></label>
-          <label class="shape-check">
-            <input type="checkbox" id="retryShapeCircle" checked>
-            <span class="shape-icon">○</span>
-            <span data-i18n="shapes.circle">Circle</span>
-          </label>
-          <label class="shape-check">
-            <input type="checkbox" id="retryShapeRect">
-            <span class="shape-icon">□</span>
-            <span data-i18n="shapes.rect">Rectangle</span>
-          </label>
-          <label class="shape-check">
-            <input type="checkbox" id="retryShapeTriangle">
-            <span class="shape-icon">△</span>
-            <span data-i18n="shapes.triangle">Triangle</span>
-          </label>
+          <label class="shape-check"><input type="radio" name="retryFitShape" id="retryShapeCircle"><span class="shape-icon">○</span><span data-i18n="shapes.circle">Circle</span></label>
+          <label class="shape-check"><input type="radio" name="retryFitShape" id="retryShapeRect" checked><span class="shape-icon">□</span><span data-i18n="shapes.rect">Rectangle</span></label>
+          <label class="shape-check"><input type="radio" name="retryFitShape" id="retryShapeTriangle"><span class="shape-icon">△</span><span data-i18n="shapes.triangle">Triangle</span></label>
+        </div>
+        <div id="retryPrimevalSettings" class="form-field">
+          <label for="retryPrimevalResolution" data-i18n="fillParams.gaussianResolution">Detail (px)</label>
+          <input id="retryPrimevalResolution" type="number" min="32" max="2048" step="1" value="512" class="num-input">
         </div>
         <div id="retryGaussianSettings" class="form-stack" hidden>
+            <input type="hidden" id="retryGaussianAlgorithm" value="gaussianimage">
           <div class="form-field">
             <label for="retryGaussianIterations" data-i18n="fillParams.gaussianIterations">Fitting steps</label>
             <input type="number" id="retryGaussianIterations" value="600" min="1" step="1" class="num-input">
@@ -393,7 +411,7 @@
         </div>
         <div class="config-row">
           <label data-i18n="fillParams.numPrims">Primitive count</label>
-          <input type="number" id="retryNumPrims" min="40" max="3000" class="num-input">
+          <input type="number" id="retryNumPrims" min="1" step="1" required class="num-input">
         </div>
         <div class="config-row">
           <label data-i18n="fillParams.imageScale">Image scale</label>
@@ -452,6 +470,8 @@
           <span class="preview-label" data-i18n="result.preview.original">Original</span>
           <img id="originalThumb" class="preview-thumb" alt="">
         </div>
+        <div class="preview-item" id="nativePreview" hidden><span class="preview-label" data-i18n="compression.native">Native reference</span><img id="nativeThumb" class="preview-thumb" alt=""></div>
+        <div class="preview-item" id="differencePreview" hidden><span class="preview-label" data-i18n="compression.difference">Difference ×8</span><img id="differenceThumb" class="preview-thumb" alt=""></div>
       </div>
 
       <div class="canvas-bar">
@@ -587,29 +607,33 @@
   </div>
 
   <!-- locales (order = Genshin official language list; en first as fallback) -->
-  <script src="js/locales/en.js?v=27"></script>
-  <script src="js/locales/zh-CN.js?v=27"></script>
-  <script src="js/locales/zh-TW.js?v=27"></script>
-  <script src="js/locales/ja.js?v=27"></script>
-  <script src="js/locales/ko.js?v=27"></script>
-  <script src="js/locales/fr.js?v=27"></script>
-  <script src="js/locales/de.js?v=27"></script>
-  <script src="js/locales/es.js?v=27"></script>
-  <script src="js/locales/pt.js?v=27"></script>
-  <script src="js/locales/ru.js?v=27"></script>
-  <script src="js/locales/th.js?v=27"></script>
-  <script src="js/locales/vi.js?v=27"></script>
-  <script src="js/locales/id.js?v=27"></script>
-  <script src="js/locales/tr.js?v=27"></script>
-  <script src="js/locales/it.js?v=27"></script>
+  <script src="js/locales/en.js?v=32"></script>
+  <script src="js/locales/zh-CN.js?v=32"></script>
+  <script src="js/locales/zh-TW.js?v=32"></script>
+  <script src="js/locales/ja.js?v=32"></script>
+  <script src="js/locales/ko.js?v=32"></script>
+  <script src="js/locales/fr.js?v=32"></script>
+  <script src="js/locales/de.js?v=32"></script>
+  <script src="js/locales/es.js?v=32"></script>
+  <script src="js/locales/pt.js?v=32"></script>
+  <script src="js/locales/ru.js?v=32"></script>
+  <script src="js/locales/th.js?v=32"></script>
+  <script src="js/locales/vi.js?v=32"></script>
+  <script src="js/locales/id.js?v=32"></script>
+  <script src="js/locales/tr.js?v=32"></script>
+  <script src="js/locales/it.js?v=32"></script>
 
-  <script src="js/i18n.js?v=24"></script>
+  <script src="js/locales/compression.js?v=3"></script>
+  <script src="js/locales/fitting.js?v=1"></script>
+  <script src="js/i18n.js?v=25"></script>
   <script src="js/zip.js?v=24"></script>
-  <script src="js/gia.js?v=25"></script>
+  <script src="js/gia.js?v=26"></script>
   <script src="js/gia-export.js?v=26"></script>
   <script src="js/lua-export.js?v=25"></script>
   <script src="js/png-decode.js?v=24"></script>
   <script src="js/gaussian.js?v=25"></script>
-  <script src="js/app.js?v=30"></script>
+  <script src="js/compression-quality.js?v=1"></script>
+  <script src="js/primeval-result.js?v=1"></script>
+  <script src="js/app.js?v=primeval1-36"></script>
 </body>
 </html>

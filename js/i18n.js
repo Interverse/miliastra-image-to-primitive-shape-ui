@@ -117,6 +117,9 @@ const I18N = (() => {
     scope.querySelectorAll("[data-i18n-title]").forEach((node) => {
       node.title = t(node.getAttribute("data-i18n-title"));
     });
+    scope.querySelectorAll("[data-i18n-label]").forEach((node) => {
+      node.label = t(node.getAttribute("data-i18n-label"));
+    });
     scope.querySelectorAll("[data-i18n-aria-label]").forEach((node) => {
       node.setAttribute("aria-label", t(node.getAttribute("data-i18n-aria-label")));
     });

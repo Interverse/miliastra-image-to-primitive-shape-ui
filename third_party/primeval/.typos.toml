@@ -1,0 +1,21 @@
+[default]
+extend-ignore-identifiers-re = [
+  "iy(_[a-z]+)?",
+]
+
+[files]
+extend-exclude = [
+  "Cargo.lock",
+  "dist",
+  "node_modules",
+  "output",
+  "package-lock.json",
+  "target",
+  "docs/images",
+]
+
+[default.extend-identifiers]
+ba = "ba"
+# The `flate2` crate (deny.toml).
+flate2 = "flate2"
+iy = "iy"

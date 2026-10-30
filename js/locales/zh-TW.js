@@ -2,6 +2,8 @@
 "use strict";
 window.LOCALES = window.LOCALES || {};
 window.LOCALES["zh-TW"] = {
+  "fillParams.gaussianAlgorithm": "演算法",
+  "batch.phase.model": "準備模型中",
   "shapes.blurredCircle": "模糊圓形",
   "shapes.gaussianHint": "僅使用模糊圓形，預覽為近似效果。",
   "fillParams.gaussianIterations": "擬合步數",

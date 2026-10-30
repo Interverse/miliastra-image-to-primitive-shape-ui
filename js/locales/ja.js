@@ -2,6 +2,8 @@
 "use strict";
 window.LOCALES = window.LOCALES || {};
 window.LOCALES["ja"] = {
+  "fillParams.gaussianAlgorithm": "アルゴリズム",
+  "batch.phase.model": "モデルを準備中",
   "shapes.blurredCircle": "ぼかし円",
   "shapes.gaussianHint": "ぼかし円のみ。プレビューは近似表示です。",
   "fillParams.gaussianIterations": "最適化ステップ",

@@ -151,8 +151,8 @@ function initialize(count, width, height, target, transparent, seed = 1) {
 
 async function optimize(params, width, height, target, transparent, options = {}) {
   const iterations = Math.max(1, Math.round(Number(options.iterations) || 600));
-  const weights=options.weights || null;
-  const first = evaluate(params, width, height, target, transparent, 1, 0, false, weights).loss;
+  const weights=options.weights || null,render=options.evaluate || evaluate,objective=options.objective || null;
+  const first = render(params, width, height, target, transparent, 1, 0, false, weights, false, objective).loss;
   const m = new Float64Array(params.length), v = new Float64Array(params.length);
   let bestLoss = first, best = params.slice();
   // Upstream trains on every pixel. A fixed 4,096-pixel browser batch often
@@ -162,23 +162,27 @@ async function optimize(params, width, height, target, transparent, options = {}
   const checkEvery=Math.max(20,Math.min(200,Math.ceil(width*height/2048)));
   for (let t = 1; t <= iterations; t++) {
     if (options.cancelled && options.cancelled()) return null;
-    const { grad } = evaluate(params, width, height, target, transparent, step, t, true, weights);
+    const { grad } = render(params, width, height, target, transparent, step, t, true, weights, false, objective);
     const decay = 0.15 + 0.85 * (1 - t / iterations);
     const momentScale = 1 / (1 - 0.9 ** t), varianceScale = 1 / (1 - 0.999 ** t);
     for (let i = 0; i < params.length; i++) {
-      m[i] = 0.9 * m[i] + 0.1 * grad[i]; v[i] = 0.999 * v[i] + 0.001 * grad[i] * grad[i];
       const p = i % STRIDE;
+      const inverse=options.inverseScale && (p===2||p===3);
+      const coordinate=inverse?Math.exp(-params[i]):params[i];
+      const derivative=inverse?-grad[i]/coordinate:grad[i];
+      m[i] = 0.9 * m[i] + 0.1 * derivative; v[i] = 0.999 * v[i] + 0.001 * derivative * derivative;
       const base=i-p;
       const positionRate=Math.min(0.6,0.12+0.03*Math.exp(Math.min(params[base+2],params[base+3])));
       const lr = (p < 2 ? positionRate : p === 4 ? 0.025 : 0.035) * decay;
-      params[i] -= lr * m[i] * momentScale / (Math.sqrt(v[i] * varianceScale) + 1e-8);
+      const update=(inverse ? 0.002 : lr)*m[i]*momentScale/(Math.sqrt(v[i]*varianceScale)+1e-8);
+      params[i]=inverse?-Math.log(Math.max(1/Math.max(width,height),coordinate-update)):params[i]-update;
       if (p === 0) params[i] = clamp(params[i], -width * 0.25, width * 1.25);
       else if (p === 1) params[i] = clamp(params[i], -height * 0.25, height * 1.25);
       else if (p === 2 || p === 3) params[i] = clamp(params[i], Math.log(0.2), Math.log(Math.max(width, height)));
       else if (p >= 5) params[i] = clamp(params[i], 0, p === 8 ? 0.999 : 1);
     }
     if (t % checkEvery === 0 || t === iterations) {
-      const loss = evaluate(params, width, height, target, transparent, 1, 0, false, weights).loss;
+      const loss = render(params, width, height, target, transparent, 1, 0, false, weights, false, objective).loss;
       if (loss < bestLoss) { bestLoss = loss; best = params.slice(); }
     }
     if (t % 20 === 0 || t === iterations) {
@@ -288,12 +292,14 @@ function toElements(params, fitWidth, fitHeight, width, height, config) {
 async function processGaussian(rgba, width, height, config = {}, hooks = {}) {
   if (!(width > 0 && height > 0) || rgba.length !== width * height * 4) throw new Error("Invalid Gaussian image dimensions");
   const started = Date.now();
-  const count = clamp(Math.round(Number(config.num_primitives) || 400), 1, 3000);
+  const count = Number(config.num_primitives ?? 400);
+  if(!Number.isSafeInteger(count)||count<1)throw new Error("Primitive count must be a positive integer");
   let hasAlpha = false;
   for (let i = 3; i < rgba.length; i += 4) if (rgba[i] < 255) { hasAlpha = true; break; }
   const transparent = !!config.enable_png_mode && hasAlpha;
   const resolution = Math.max(32, Math.round(Number(config.gaussian_resolution) || 512));
-  const fitted = await fitPyramid(rgba,width,height,count,resolution,transparent,config,hooks);
+  const algorithm="gaussianimage";
+  const fitted=await fitPyramid(rgba,width,height,count,resolution,transparent,config,hooks);
   if (!fitted) return null;
   const fw=fitted.width,fh=fitted.height;
   const elements = toElements(fitted.params, fw, fh, width, height, config);
@@ -323,7 +329,7 @@ async function processGaussian(rgba, width, height, config = {}, hooks = {}) {
     if (!transparent) image[p + 3] = 255;
   }
   return { mode: "fill", image_center: center, image_size: { width, height }, elements_count: elements.length, elements,
-    config: { mode: "fill", engine: "gaussianimage-browser", gaussian_profile: "normalized-3sigma-approximation", blending: "source-over",
+    config: { mode: "fill", engine: algorithm+"-browser", gaussian_algorithm:algorithm, algorithm_details:fitted.method || null, gaussian_profile: "normalized-3sigma-approximation", blending: "source-over",
       allowed_shapes: ["blurred_circle"], pixel_per_unit: 1 / scale, unit_scale: scale, image_scale: scale,
       num_primitives: count, enable_png_mode: !!config.enable_png_mode, output_has_transparency: transparent,
       fill_variant: transparent ? "png" : "mask", gaussian_resolution: resolution,
@@ -341,13 +347,13 @@ if (typeof self !== "undefined" && typeof importScripts === "function") {
     if (msg.cmd !== "process") return;
     cancelled = false;
     try {
-      const result = await processGaussian(new Uint8ClampedArray(msg.rgba), msg.width, msg.height, msg.config, {
+      const result = await processGaussian(new Uint8ClampedArray(msg.rgba), msg.width, msg.height, {...msg.config,gaussian_algorithm:"gaussianimage"}, {
         cancelled: () => cancelled,
-        progress: (step, total) => postMessage({ type: "progress", jobId: msg.jobId, step, total }),
+        progress: (step, total, phase) => postMessage({ type: "progress", jobId: msg.jobId, step, total, phase }),
       });
       if (!result) postMessage({ type: "cancelled", jobId: msg.jobId });
       else postMessage({ type: "done", jobId: msg.jobId, result }, [result.image_rgba, result.preview_rgba]);
-    } catch (error) { postMessage({ type: "error", jobId: msg.jobId, message: String(error.message || error) }); }
+    } catch (error) { postMessage({ type: "error", jobId: msg.jobId, message: String(error.message || error), detail:String(error.cause?.stack || error.stack || "") }); }
   };
 }
 if (typeof module !== "undefined") module.exports = { evaluate, initialize, optimize, downsample, toElements, resizeParams, fitPyramid, processGaussian };

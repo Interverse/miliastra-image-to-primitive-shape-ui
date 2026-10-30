@@ -1,0 +1,96 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Primeval integration checks</title>
+<style>body{font:14px system-ui;background:#15171d;color:#e2e6ed;margin:16px}pre{white-space:pre-wrap}iframe{width:100%;height:900px;border:1px solid #678}summary{cursor:pointer}</style>
+<h1 id="status">Running fitting checks…</h1><details open><summary>Report</summary><pre id="report"></pre></details><iframe id="app" src="../../index.html"></iframe>
+<script>
+const frame=document.querySelector('#app'),report=document.querySelector('#report'),messages=[];
+const check=(ok,text)=>{if(!ok)throw Error(text);messages.push('PASS '+text);report.textContent=messages.join('\n');};
+const wait=async test=>{const end=Date.now()+90000;while(!test()){if(Date.now()>end)throw Error('UI timeout');await new Promise(r=>setTimeout(r,40));}};
+frame.addEventListener('load',async()=>{
+ try{
+  const w=frame.contentWindow,d=w.document,$=id=>d.getElementById(id),errors=[];
+  w.addEventListener('error',e=>errors.push(e.message));w.alert=m=>errors.push(m);w.confirm=()=>true;
+  const change=(id,value)=>{$(id).value=value;$(id).dispatchEvent(new w.Event('change'));};
+  check(Array.from($('fitMethod').options,o=>o.value).join(',')==='primeval,gaussian,legacy','three fitting methods, Primeval default');
+  check($('fitMethod').value==='primeval','Primeval is the default');
+  check($('shapeRect').checked,'Rectangle preserves the previous default shape');
+  for(const lang of Object.keys(w.LOCALES)){
+   change('langSelect',lang);check($('fitMethod').options[2].textContent===w.LOCALES[lang]['fitting.legacy'],'localized selector '+lang);
+  }
+  change('langSelect','en');
+  for(const method of ['primeval','legacy']){
+   change('fitMethod',method);
+   for(const id of ['shapeCircle','shapeTriangle','shapeRect']){
+    $(id).click();check(['shapeCircle','shapeRect','shapeTriangle'].filter(i=>$(i).checked).length===1,method+' single selection '+id);
+   }
+  }
+  change('fitMethod','gaussian');
+  check($('legacyShapeChecks').hidden&&!$('gaussianSettings').hidden&&$('primevalSettings').hidden,'Gaussian hides all solid shape choices');
+  change('fitMethod','legacy');check(!$('enhancedSettings').hidden&&$('gaussianSettings').hidden&&$('primevalSettings').hidden,'Legacy shows its existing settings');
+  change('fitMethod','primeval');$('numPrimsManual').value='150000';$('numPrimsManual').dispatchEvent(new w.Event('input'));
+  check(!$('numPrimsManual').hasAttribute('max')&&$('numPrimsManual').checkValidity()&&Number($('numPrims').max)>=150000,'large counts are accepted without truncation');
+  const blobs=new Map(),downloads=[],originalCreate=w.URL.createObjectURL.bind(w.URL);
+  w.URL.createObjectURL=blob=>{const url=originalCreate(blob);blobs.set(url,blob);return url;};
+  const originalClick=w.HTMLAnchorElement.prototype.click;
+  w.HTMLAnchorElement.prototype.click=function(){if(this.download)downloads.push({name:this.download,blob:blobs.get(this.href)});else originalClick.call(this);};
+  async function download(id){const n=downloads.length;$(id).click();await wait(()=>downloads.length>n||errors.length);check(!errors.length,id+' succeeds');return downloads.at(-1).blob;}
+  async function upload(){
+   const blob=await(await fetch('fixtures/input.png')).blob(),transfer=new w.DataTransfer();transfer.items.add(new w.File([blob],'golden.png',{type:'image/png'}));
+   $('fileInput').files=transfer.files;$('fileInput').dispatchEvent(new w.Event('change'));
+  }
+  let done=0;
+  for(const [shape,id] of [['circle','shapeCircle'],['triangle','shapeTriangle'],['rect','shapeRect']]){
+   $('homeLink').click();change('fitMethod','primeval');$(id).click();$('numPrimsManual').value='40';$('primevalResolution').value='512';
+   await upload();$('btnSubmit').click();await wait(()=>d.querySelectorAll('.job-status.done').length===done+1||errors.length||d.querySelector('.job-error'));
+   check(!errors.length&&!d.querySelector('.job-error'),'real Primeval worker '+shape);done++;
+   d.querySelectorAll('.job-card')[done-1].querySelector('.job-actions button').click();
+   const json=JSON.parse(await(await download('btnExportJSON')).text());
+   check(json.elements.length===41&&json.config.fit_method==='primeval','requested shape count plus one background '+shape);
+   const type={circle:'ellipse',triangle:'triangle',rect:'rectangle'}[shape];
+   check(json.elements.slice(1).every(e=>e.type===type),'exclusive exported geometry '+shape);
+   if(shape==='triangle')check(json.elements.slice(1).every(e=>e.triangle_pivot==='box'&&e.image_asset_ref===100003),'one centered triangle asset per shape');
+   const png=new Uint8Array(await(await download('btnExportPNG')).arrayBuffer()),golden=new Uint8Array(await(await fetch('fixtures/'+shape+'.png')).arrayBuffer());
+   check(png.length===golden.length&&png.every((v,i)=>v===golden[i]),'byte-identical native PNG '+shape);
+   const svg=await(await download('btnExportSVG')).text();check(svg.includes('<svg')&&!svg.includes('<mask')&&!svg.includes('<clipPath'),'final SVG without per-shape masks '+shape);
+   check(svg===await(await fetch('fixtures/'+shape+'.svg')).text(),'byte-identical final native SVG '+shape);
+   if(shape==='triangle'){
+    const element=json.elements.findLast(e=>e.center.x>8&&e.center.x<56&&-e.center.y>8&&-e.center.y<56),canvas=$('mainCanvas'),wrap=$('canvasWrap'),rect=canvas.getBoundingClientRect();
+    canvas.dispatchEvent(new w.MouseEvent('click',{bubbles:true,clientX:rect.left+(wrap.clientWidth-64)/2+element.center.x,clientY:rect.top+(wrap.clientHeight-64)/2-element.center.y}));
+    check(!$('btnDeleteSel').disabled,'fitted triangle can be selected');
+    $('btnDeleteSel').click();
+    check(JSON.parse(await(await download('btnExportJSON')).text()).elements.length===40,'editing changes the exported drawing');
+    check((await(await download('btnExportSVG')).text())!==svg,'edited output does not return stale native SVG');
+    $('btnUndo').click();
+    const restored=new Uint8Array(await(await download('btnExportPNG')).arrayBuffer());
+    check(restored.length===golden.length&&restored.every((v,i)=>v===golden[i]),'undo restores exact native PNG');
+   }
+   for(const [button,cls,classic] of [['btnExportGIAOverlimit',61,false],['btnExportClientGIAOverlimit',70,false],['btnExportServerGIAOverlimit',21,false],['btnExportGIAClassic',61,true],['btnExportClientGIAClassic',70,true],['btnExportServerGIAClassic',21,true]]){
+    const bytes=new Uint8Array(await(await download(button)).arrayBuffer()),info=w.GIA.describeGia(bytes);
+    check(info.containerClass===cls&&info.children.length===41&&info.isClassic===classic,button+' correct controls '+shape);
+   }
+   $('clientLuaTemplateIndex').value='123';$('clientLuaTemplateIndex').dispatchEvent(new w.Event('input'));
+   check((await(await download('btnExportClientLua')).text()).includes('sourceWidth = 64'),'Lua export '+shape);
+   check($('retryFitMethod').value==='primeval'&&$('retryShape'+{circle:'Circle',triangle:'Triangle',rect:'Rect'}[shape]).checked,'retry preserves shape '+shape);
+  }
+  change('retryFitMethod','gaussian');check($('retryShapeChecks').hidden&&!$('retryGaussianSettings').hidden,'retry Gaussian has no solid-shape options');
+  $('retryNumPrims').value='12';$('retryGaussianIterations').value='2';$('retryGaussianResolution').value='64';$('btnRetryFill').click();
+  done++;await wait(()=>d.querySelectorAll('.job-status.done').length===done||errors.length||d.querySelector('.job-error'));
+  check(!errors.length&&!d.querySelector('.job-error'),'Gaussian retry completes');
+  $('homeLink').click();change('fitMethod','primeval');$('numPrimsManual').value='1000000';await upload();$('btnSubmit').click();
+  await wait(()=>d.querySelector('.job-status.processing'));const processing=d.querySelector('.job-status.processing').closest('.job-card');
+  processing.querySelector('.job-actions button').click();await wait(()=>d.querySelector('.job-status.cancelled'));
+  check(true,'large Primeval job can be cancelled');
+  $('numPrimsManual').value='10';await upload();$('btnSubmit').click();await wait(()=>d.querySelectorAll('.job-status.done').length===done+1||errors.length||d.querySelector('.job-error'));
+  check(!errors.length&&!d.querySelector('.job-error'),'generation resumes after cancellation');
+  const largeInput=await w.PNGDecode.decode(new Uint8Array(await(await fetch('fixtures/input.png')).arrayBuffer()));
+  const nativeCount=await new Promise((resolve,reject)=>{
+    const worker=new w.Worker('/js/worker-primeval.js?v=1');
+    worker.onmessage=({data})=>{if(data.type==='error'){worker.terminate();reject(Error(data.message));}if(data.type==='progress'&&data.step===1){worker.terminate();resolve(data.total);}};
+    worker.postMessage({cmd:'process',jobId:'large-count',rgba:largeInput.rgba.buffer,width:64,height:64,config:{allowed_shapes:['triangle'],num_primitives:150000}},[largeInput.rgba.buffer]);
+  });
+  check(nativeCount===150000,'native engine starts all requested shapes above its old 100K cap, then cancels');
+  $('outlineLink').click();check(!$('primitiveListSection').hidden&&$('fillShapeSection').hidden,'decoration layout remains available');
+  $('classicToolTab').click();check(d.querySelector('#viewClassic.active'),'GIA conversion page remains available');
+  check(!errors.length,'no runtime errors');document.querySelector('#status').textContent='PASS · '+messages.length+' fitting checks';document.body.dataset.result='pass';
+ }catch(error){report.textContent+='\nFAIL '+error.stack;document.querySelector('#status').textContent='FAIL';document.body.dataset.result='fail';}
+});
+</script></html>

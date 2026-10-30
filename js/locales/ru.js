@@ -2,6 +2,8 @@
 "use strict";
 window.LOCALES = window.LOCALES || {};
 window.LOCALES["ru"] = {
+  "fillParams.gaussianAlgorithm": "Алгоритм",
+  "batch.phase.model": "Подготовка модели",
   "shapes.blurredCircle": "Размытый круг",
   "shapes.gaussianHint": "Только размытые круги. Приблизительный просмотр.",
   "fillParams.gaussianIterations": "Шаги оптимизации",

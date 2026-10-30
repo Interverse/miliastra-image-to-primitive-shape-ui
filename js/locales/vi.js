@@ -2,6 +2,8 @@
 "use strict";
 window.LOCALES = window.LOCALES || {};
 window.LOCALES["vi"] = {
+  "fillParams.gaussianAlgorithm": "Thuật toán",
+  "batch.phase.model": "Đang chuẩn bị mô hình",
   "shapes.blurredCircle": "Hình tròn mờ",
   "shapes.gaussianHint": "Chỉ dùng hình tròn mờ. Bản xem trước là gần đúng.",
   "fillParams.gaussianIterations": "Số bước khớp ảnh",

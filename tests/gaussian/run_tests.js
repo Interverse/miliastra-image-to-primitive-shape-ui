@@ -7,7 +7,7 @@ const Seeds = require(path.join(root, "js/gaussian-seed.js"));
 const G = require(path.join(root, "js/gia.js"));
 const Export = require(path.join(root, "js/gia-export.js"));
 const Lua = require(path.join(root, "js/lua-export.js"));
-const template = (name) => new Uint8Array(fs.readFileSync(path.join(root, "assets", name)));
+const template = (name) => new Uint8Array(fs.readFileSync(fs.existsSync(path.join(root,"assets",name))?path.join(root,"assets",name):path.join(root,"tests/fixtures/gia",name)));
 let checks = 0;
 function check(value, message) { assert.ok(value, message); checks++; }
 const near = (a, b, tol = 1e-5) => Math.abs(a - b) < tol;

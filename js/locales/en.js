@@ -2,6 +2,8 @@
 "use strict";
 window.LOCALES = window.LOCALES || {};
 window.LOCALES["en"] = {
+  "fillParams.gaussianAlgorithm": "Algorithm",
+  "batch.phase.model": "Preparing model",
   /* ── app / topbar ── */
   "app.title": "Image Primitive Fitter",
   "app.pageTitle": "Miliastra Wonderland Image Fitter",

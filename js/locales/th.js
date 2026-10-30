@@ -2,6 +2,8 @@
 "use strict";
 window.LOCALES = window.LOCALES || {};
 window.LOCALES["th"] = {
+  "fillParams.gaussianAlgorithm": "อัลกอริทึม",
+  "batch.phase.model": "กำลังเตรียมโมเดล",
   "shapes.blurredCircle": "วงกลมเบลอ",
   "shapes.gaussianHint": "ใช้เฉพาะวงกลมเบลอ ภาพตัวอย่างเป็นค่าประมาณ",
   "fillParams.gaussianIterations": "จำนวนรอบปรับภาพ",

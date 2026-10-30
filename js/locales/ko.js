@@ -2,6 +2,8 @@
 "use strict";
 window.LOCALES = window.LOCALES || {};
 window.LOCALES["ko"] = {
+  "fillParams.gaussianAlgorithm": "알고리즘",
+  "batch.phase.model": "모델 준비 중",
   "shapes.blurredCircle": "흐린 원",
   "shapes.gaussianHint": "흐린 원만 사용합니다. 미리보기는 근사치입니다.",
   "fillParams.gaussianIterations": "최적화 단계",

@@ -2,6 +2,8 @@
 "use strict";
 window.LOCALES = window.LOCALES || {};
 window.LOCALES["pt"] = {
+  "fillParams.gaussianAlgorithm": "Algoritmo",
+  "batch.phase.model": "Preparando modelo",
   "shapes.blurredCircle": "Círculo desfocado",
   "shapes.gaussianHint": "Apenas círculos desfocados. Prévia aproximada.",
   "fillParams.gaussianIterations": "Etapas de ajuste",

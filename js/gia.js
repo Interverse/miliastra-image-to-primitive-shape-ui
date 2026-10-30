@@ -3183,6 +3183,8 @@ var GIA = (function () {
     }
 
     // Child list / entry list / reference list must agree exactly.
+    var entryGuidSet = new Set(entryGuids);
+    var childGuidSet = new Set(childGuids);
     if (childGuids.length !== entryGuids.length) {
       errors.push(
         "Container lists " +
@@ -3193,18 +3195,19 @@ var GIA = (function () {
       );
     }
     for (var g = 0; g < childGuids.length; g++) {
-      if (entryGuids.indexOf(childGuids[g]) < 0) {
+      if (!entryGuidSet.has(childGuids[g])) {
         errors.push("Dangling child reference: GUID " + childGuids[g] + " has no entry");
       }
     }
     for (var e = 0; e < entryGuids.length; e++) {
-      if (childGuids.indexOf(entryGuids[e]) < 0) {
+      if (!childGuidSet.has(entryGuids[e])) {
         errors.push("Image entry " + entryGuids[e] + " is not listed as a container child");
       }
     }
     var refs = container.referenceGuids || [];
+    var referenceGuidSet = new Set(refs);
     for (var r = 0; r < entryGuids.length; r++) {
-      if (refs.indexOf(entryGuids[r]) < 0) {
+      if (!referenceGuidSet.has(entryGuids[r])) {
         errors.push("Image entry " + entryGuids[r] + " has no container reference locator");
       }
     }
@@ -3676,10 +3679,14 @@ var GIA = (function () {
     // Pair by index (ordered vs serialized). Both orderings are identical,
     // so element-by-reference lookup yields items[i]. Mirrors Python's
     // id(element) map keyed association.
+    var orderedIndex = new Map();
+    for (i = 0; i < ordered_elements.length; i++) {
+      if (!orderedIndex.has(ordered_elements[i])) orderedIndex.set(ordered_elements[i], i);
+    }
     for (i = 0; i < serialized_elements.length; i++) {
       var el = serialized_elements[i];
-      var idx = ordered_elements.indexOf(el);
-      if (idx < 0) continue;
+      var idx = orderedIndex.get(el);
+      if (idx === undefined) continue;
       var item = indexed_items[idx];
       new_image_entries.push(item.entry);
       new_child_guids.push(item.guid);
