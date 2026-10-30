@@ -38,13 +38,13 @@ pub(crate) fn write_svg(drawing: &Drawing, width: u32, height: u32) -> String {
         drawing.height,
         linecap(root_cap, LineCap::Butt)
     );
-    let _ = writeln!(
+    if drawing.background.a>0 { let _ = writeln!(
         svg,
         "<rect width=\"{}\" height=\"{}\" fill=\"{}\"/>",
         drawing.width,
         drawing.height,
         hex(drawing.background)
-    );
+    ); }
     for shape in &drawing.shapes {
         write_shape(&mut svg, &shape.geometry, shape.color, root_cap);
         svg.push('\n');

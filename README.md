@@ -5,6 +5,7 @@ PNG, SVG, CSS, JSON, Lua and GIA. Images are processed locally.
 
 - **Primeval:** one selected shape family: benchmark ellipses (Circle),
   single-asset isosceles triangles, or rotated rectangles. Rectangle is default.
+  PNG mode fits source alpha and exports independent transparent shapes.
 - **Gaussian:** blurred circles using the existing Gaussian fitters.
 - **Legacy:** the original browser fitter, with one selected solid shape family.
 
@@ -39,6 +40,7 @@ npm install
 npm run test:browser
 npm run test:hosting
 npm run test:deployment
+npm run test:alpha
 ```
 
 Unit tests need Node and Python; browser checks additionally need Playwright and

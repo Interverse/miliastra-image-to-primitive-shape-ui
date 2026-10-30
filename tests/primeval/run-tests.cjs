@@ -20,11 +20,15 @@ for(const scale of [.2,1,4]){
  check(result.elements[3].type==='rectangle'&&result.elements[3].size.width===40*scale,'rectangle geometry preserved');
 }
 assert.throws(()=>P.triangle([0,0,20,0,4,17]),/GEOMETRY/);checks++;
+const transparent=P.drawingToElements({...sample,background:[0,0,0,0]},160,128).elements;
+check(transparent.length===3&&!transparent.some(e=>e.is_background),'transparent canvas adds no background control');
+check(transparent[0].alpha===128/255,'fitted alpha survives conversion');
 const matte=P.matteRGB(Uint8Array.from([100,50,200,0,100,50,200,128,100,50,200,255]));
 check(Array.from(matte).join(',')==='240,240,245,170,145,222,100,50,200','reference matte without source alpha restoration');
+check(Array.from(P.matteRGB(Uint8Array.from([100,50,200,0,100,50,200,255]),[18,52,86])).join(',')==='18,52,86,100,50,200','custom matte fills transparency and preserves opaque source pixels');
 const world={LOCALES:{}};for(const lang of ['en','zh-CN','zh-TW','ja','ko','fr','de','es','pt','ru','th','vi','id','tr','it'])world.LOCALES[lang]={};
 vm.runInNewContext(fs.readFileSync(path.join(root,'js/locales/fitting.js'),'utf8'),{window:world});
-for(const [lang,table] of Object.entries(world.LOCALES))check(Boolean(table['fitting.legacy']&&table['fitting.shapeHint']),'localized controls '+lang);
+for(const [lang,table] of Object.entries(world.LOCALES))check(Boolean(table['fitting.legacy']&&table['fitting.shapeHint']&&table['fillParams.pngModeDesc']&&table['fitting.customBackground']&&table['fitting.backgroundColor']),'localized controls '+lang);
 const Gia=require(path.join(root,'js/gia-export.js')),exported=Gia.convertResultToGiaJson({image_size:{width:160,height:128},elements:P.drawingToElements(sample,160,128).elements},'shapes.png',1,{x:80,y:64});
 check(exported.elements.length===4,'GIA keeps one image per shape');
 check(exported.elements[1].image_asset_ref===100003,'GIA triangle asset retained');

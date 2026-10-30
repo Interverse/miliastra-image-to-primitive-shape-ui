@@ -206,12 +206,22 @@
     $("gaussianSettings").hidden=!gaussian;
     $("enhancedMode").disabled=method!=="legacy";
     $("enhancedSettings").hidden=method!=="legacy";
-    $("pngModeSettings").hidden=primeval;
+    $("pngModeSettings").hidden=false;
+    syncBackgroundColor();
     $("numPrimsTitle").textContent=t("fillParams.numPrims");
     numPrimsManual.removeAttribute("max");numPrimsManual.min="1";numPrimsSlider.min="1";
   }
   $("fitMethod").addEventListener("change",()=>{syncShapeLabels();updateSubtitle();});
   fillShapeInputs.forEach(input=>input.addEventListener("change",syncShapeLabels));
+  function syncBackgroundColor(){
+    const active=$("fitMethod").value==="primeval"&&!$("enablePngMode").checked;
+    $("backgroundColorSettings").hidden=!active;
+    $("backgroundColorRow").hidden=!active||!$("useBackgroundColor").checked;
+    $("backgroundColorValue").textContent=$("backgroundColor").value.toUpperCase();
+  }
+  $("enablePngMode").addEventListener("change",syncBackgroundColor);
+  $("useBackgroundColor").addEventListener("change",syncBackgroundColor);
+  $("backgroundColor").addEventListener("input",syncBackgroundColor);
   syncShapeLabels();
   /* ════════════════════ outline primitive cards ════════════════════ */
 
@@ -553,7 +563,8 @@
       cfg.mask_threshold=127;cfg.detail_scale=1;
       cfg.image_scale=Number($("imageScale").value);
       cfg.output_alpha=Number($("outputAlpha").value)/100;
-      cfg.enable_png_mode=method!=="primeval" && $("enablePngMode").checked;
+      cfg.enable_png_mode=$("enablePngMode").checked;
+      if(method==="primeval"&&!cfg.enable_png_mode&&$("useBackgroundColor").checked){cfg.background_color=$("backgroundColor").value;}
       if(method==="legacy" && $("enhancedMode").checked){
         cfg.guided_sampling=true;cfg.search_n=150;cfg.search_age=100;cfg.search_m=4;
       }
@@ -762,7 +773,7 @@
     if (job.status !== "processing") return; // cancelled during decode
 
     const workerFile = job.config.mode === "outline" ? "js/worker-outline.js" :
-      job.config.fit_method === "primeval" ? "js/worker-primeval.js?v=1" :
+      job.config.fit_method === "primeval" ? "js/worker-primeval.js?v=4" :
       job.config.fit_method === "compression" ? "js/worker-compress.js?v=3" :
       (job.config.allowed_shapes || []).includes("blurred_circle") ?
         "js/worker-gaussian.js?v=34" : "js/worker-fill.js?v=2";

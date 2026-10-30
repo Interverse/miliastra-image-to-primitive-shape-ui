@@ -1,4 +1,3 @@
-/* @ts-self-types="./primeval.d.ts" */
 import { broadcast } from './snippets/primeval-wasm-7cebd9fb8a7a84be/inline0.js';
 
 

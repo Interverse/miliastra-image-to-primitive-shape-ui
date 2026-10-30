@@ -21,6 +21,7 @@
 #![cfg_attr(test, allow(clippy::disallowed_methods))]
 
 mod alpha;
+pub mod rgba;
 #[cfg(feature = "bench")]
 #[allow(clippy::disallowed_methods)] // benches may use the banned methods as references
 mod benches;

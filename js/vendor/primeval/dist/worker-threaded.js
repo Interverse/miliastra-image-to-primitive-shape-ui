@@ -48,7 +48,8 @@ function spawnPoolWorker(init) {
  * is told that this call's workers have started.
  */
 async function startPool(module) {
-    builder = new glue.PoolBuilder(navigator.hardwareConcurrency);
+    const requested=Number(new URL(import.meta.url).searchParams.get("threads"));
+    builder = new glue.PoolBuilder(requested>0?Math.min(navigator.hardwareConcurrency,Math.floor(requested)):navigator.hardwareConcurrency);
     const init = {
         type: "pool",
         module,

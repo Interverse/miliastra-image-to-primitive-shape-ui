@@ -75,6 +75,13 @@ const server=http.createServer((req,res)=>{
    const layout=await app.evaluate(()=>({scroll:document.documentElement.scrollWidth,width:document.documentElement.clientWidth}));
    if(layout.scroll>layout.width+1)throw Error('Horizontal overflow '+method+' '+JSON.stringify(layout));
    await page.locator('#app').screenshot({path:path.join(output,`site-${method}-${process.argv[2]||1440}.png`)});
+   if(method==='primeval'){
+    await app.locator('#enablePngMode').uncheck();await app.locator('#useBackgroundColor').check();await app.locator('#backgroundColorRow').scrollIntoViewIfNeeded();
+    const customLayout=await app.evaluate(()=>({scroll:document.documentElement.scrollWidth,width:document.documentElement.clientWidth}));
+    if(customLayout.scroll>customLayout.width+1)throw Error('Horizontal overflow custom background');
+    await page.locator('#app').screenshot({path:path.join(output,`site-background-${process.argv[2]||1440}.png`)});
+    await app.locator('#useBackgroundColor').uncheck();await app.locator('#enablePngMode').check();
+   }
   }
   await app.locator('#outlineLink').click();await app.locator('#primitiveListSection').scrollIntoViewIfNeeded();await page.locator('#app').screenshot({path:path.join(output,`site-decoration-${process.argv[2]||1440}.png`)});
   await app.locator('#classicToolTab').click();await page.locator('#app').screenshot({path:path.join(output,`site-conversion-${process.argv[2]||1440}.png`)});

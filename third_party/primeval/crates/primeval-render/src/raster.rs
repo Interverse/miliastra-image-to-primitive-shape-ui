@@ -6,6 +6,16 @@ use image::ImageEncoder;
 use primeval_core::{Buffer, Color, Drawing, Geometry};
 use tiny_skia::{FillRule, LineCap, Paint, Path, PathBuilder, Pixmap, Rect, Stroke, Transform};
 
+/// Straight RGBA export from the same independently rendered shapes.
+pub(crate) fn render_rgba(drawing:&Drawing,width:u32,height:u32)->Option<Vec<u8>> {
+    let pixmap=render(drawing,width,height)?;
+    Some(pixmap.pixels().iter().flat_map(|p| {
+        let a=p.alpha();
+        let straight=|c:u8|if a==0{0}else{((u32::from(c)*255+u32::from(a)/2)/u32::from(a)).min(255) as u8};
+        [straight(p.red()),straight(p.green()),straight(p.blue()),a]
+    }).collect())
+}
+
 /// Render `drawing` onto `width` × `height` output pixels as opaque RGB8.
 ///
 /// The canvas is stretched onto the output with `scale(width / canvas width,

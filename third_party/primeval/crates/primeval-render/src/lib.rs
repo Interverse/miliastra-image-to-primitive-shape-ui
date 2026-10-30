@@ -103,6 +103,10 @@ pub enum BackgroundOption {
     /// Derive the background color from the input image.
     #[default]
     Auto,
+    /// Fit premultiplied RGBA on a transparent canvas (site extension).
+    Transparent,
+    /// RGBA extension initialized by the full opaque pipeline.
+    TransparentReference,
     /// Use an explicit opaque color (alpha 255).
     Color(Color),
 }
@@ -116,6 +120,8 @@ impl FromStr for BackgroundOption {
         if value == "auto" {
             return Ok(Self::Auto);
         }
+        if value == "transparent" { return Ok(Self::Transparent); }
+        if value == "transparent-reference" { return Ok(Self::TransparentReference); }
 
         Color::from_hex(value).map(Self::Color).ok_or_else(|| {
             ParseError::new(format!(
@@ -518,6 +524,65 @@ pub fn approximate_drawing(
         output: _,
         render,
     } = request;
+    if matches!(render.background,BackgroundOption::Transparent|BackgroundOption::TransparentReference) {
+        validate_options(&render)?;
+        execution.check_cancelled()?;
+        let image=decode_input(&input)?.into_rgba8();
+        drop(input);
+        execution.check_cancelled()?;
+        let reference=if render.background==BackgroundOption::TransparentReference {
+            let mut flat=image.clone();flatten_onto(&mut flat,Color::new(240,240,245,255));
+            let rgb=DynamicImage::ImageRgba8(flat).into_rgb8();
+            let bytes=raster::encode_png(rgb.width(),rgb.height(),rgb.as_raw()).map_err(|_|ApproximateError::internal("reference PNG encoding failed"))?;
+            let mut options=render;options.background=BackgroundOption::Auto;
+            Some(approximate_drawing(ApproximateRequest{input:bytes,output:OutputFormat::Png,render:options},Execution{progress:execution.progress.take(),cancel:execution.cancel})?)
+        }else{None};
+        // Resample premultiplied channels: invisible RGB cannot bleed into edges.
+        let mut premult=image::Rgba32FImage::new(image.width(),image.height());
+        for (out,p) in premult.pixels_mut().zip(image.pixels()) {
+            let a=f32::from(p[3])/255.0;
+            *out=image::Rgba([f32::from(p[0])/255.0*a,f32::from(p[1])/255.0*a,f32::from(p[2])/255.0*a,a]);
+        }
+        let longest=image.width().max(image.height());
+        let size=render.resize_input.min(longest);
+        let w=((u64::from(image.width())*u64::from(size)/u64::from(longest)) as u32).max(2);
+        let h=((u64::from(image.height())*u64::from(size)/u64::from(longest)) as u32).max(2);
+        drop(image);
+        let resized=image::imageops::resize(&premult,w,h,image::imageops::FilterType::CatmullRom);
+        drop(premult);
+        let reference_pixels=reference.as_ref().map(|drawing|raster::render_rgb(drawing,w,h).ok_or_else(||ApproximateError::internal("reference raster allocation failed"))).transpose()?;
+        let target:Vec<[f64;4]>=resized.pixels().enumerate().map(|(i,p)|{
+            let a=f64::from(p[3]).clamp(0.0,1.0);
+            if a>=254.0/255.0 {if let Some(rgb)=&reference_pixels {return [f64::from(rgb[i*3])/255.0*a,f64::from(rgb[i*3+1])/255.0*a,f64::from(rgb[i*3+2])/255.0*a,a];}}
+            [f64::from(p[0]).clamp(0.0,a),f64::from(p[1]).clamp(0.0,a),f64::from(p[2]).clamp(0.0,a),a]
+        }).collect();
+        let mut model=primeval_core::rgba::RgbaModel::new(w,h,target.clone(),render.seed);
+        if let Some(mut drawing)=reference {
+            // Reconstruct only the coarse foundation with source alpha, then
+            // retain the original later detail layers. Total count is unchanged.
+            let base_count=(drawing.shapes.len()/4).clamp(1,16);
+            let foundation=Drawing{width:w,height:h,background:drawing.background,shapes:drawing.shapes[..base_count].to_vec()};
+            let rgb=raster::render_rgb(&foundation,w,h).ok_or_else(||ApproximateError::internal("foundation raster allocation failed"))?;
+            let base_target=target.iter().enumerate().map(|(i,p)|{let a=p[3];[f64::from(rgb[i*3])/255.0*a,f64::from(rgb[i*3+1])/255.0*a,f64::from(rgb[i*3+2])/255.0*a,a]}).collect();
+            let mut base=primeval_core::rgba::RgbaModel::new(w,h,base_target,render.seed);
+            for _ in 0..base_count {execution.check_cancelled()?;base.step(render.shape);}
+            if !base.refine(||execution.is_cancelled()){return Err(ApproximateError::Aborted);}
+            let mut replacement=base.drawing().shapes;replacement.extend_from_slice(&drawing.shapes[base_count..]);drawing.shapes=replacement;
+            if !model.seed_with_base(&drawing,render.shape,base_count){
+                // A reference candidate that cannot be represented must not
+                // block export. Retain a complete independent RGBA fit instead.
+                for _ in 0..render.count {execution.check_cancelled()?;model.step(render.shape);}
+            }
+        }else {for step in 0..render.count {
+            execution.check_cancelled()?;
+            let shape=model.step(render.shape).clone();
+            if let Some(progress)=execution.progress.as_mut(){progress(ProgressInfo{step:step+1,total:render.count,score:model.score(),shape:svg::shape_element(&shape.geometry,shape.color)});}
+        }}
+        execution.check_cancelled()?;
+        if !model.refine(||execution.is_cancelled()){return Err(ApproximateError::Aborted);}
+        if render.background==BackgroundOption::TransparentReference && !model.recycle_empty(render.shape,||execution.is_cancelled()){return Err(ApproximateError::Aborted);}
+        return Ok(model.drawing());
+    }
     let (target, background) = working_target(input, &render, || execution.check_cancelled())?;
     let mut options = ModelOptions::default();
     options.seed = render.seed;
@@ -625,6 +690,13 @@ fn encode_output(
             height,
         }),
         OutputFormat::Png => {
+            if drawing.background.a<255 {
+                let rgba=raster::render_rgba(drawing,width,height).ok_or_else(||ApproximateError::internal("could not allocate the RGBA output raster"))?;
+                let mut data=Vec::new();
+                use image::ImageEncoder;
+                image::codecs::png::PngEncoder::new(&mut data).write_image(&rgba,width,height,image::ExtendedColorType::Rgba8).map_err(|err|ApproximateError::Internal{reason:"RGBA PNG encoding failed".into(),source:Some(Box::new(err))})?;
+                return Ok(ApproximateResult::Png{data,width,height});
+            }
             let rgb = raster::render_rgb(drawing, width, height).ok_or_else(|| {
                 ApproximateError::internal("could not allocate the output raster")
             })?;
@@ -706,6 +778,7 @@ fn prepare_target(
 ) -> (RgbImage, Color) {
     let background = match background {
         BackgroundOption::Auto => average_background(&image),
+        BackgroundOption::Transparent|BackgroundOption::TransparentReference => Color::new(0,0,0,0),
         BackgroundOption::Color(color) => color,
     };
     let image = if image.color().has_alpha() {

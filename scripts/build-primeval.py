@@ -18,7 +18,7 @@ if variant=='single':
 env['RUSTFLAGS']=flags;target=work/f'target-site-{variant}'
 subprocess.run([str(work/'cargo-home/bin/cargo.exe'),toolchain,'build','--locked','--profile','wasm-release','-p','primeval-wasm','--features',features,'--target','wasm32-unknown-unknown','--target-dir',str(target),*args],cwd=source,env=env,check=True)
 output=vendor/'wasm'/variant;output.mkdir(parents=True,exist_ok=True)
-subprocess.run([str(bindgen),'--target','web','--remove-name-section','--out-dir',str(output),'--out-name','primeval',str(target/'wasm32-unknown-unknown/wasm-release/primeval_wasm.wasm')],check=True)
+subprocess.run([str(bindgen),'--target','web','--no-typescript','--remove-name-section','--out-dir',str(output),'--out-name','primeval',str(target/'wasm32-unknown-unknown/wasm-release/primeval_wasm.wasm')],check=True)
 optimizers=list((work/'binaryen').rglob('wasm-opt.exe'))
 if optimizers:
  wasm=output/'primeval_bg.wasm';optimized=work/f'site-optimized-{variant}.wasm'

@@ -28,7 +28,7 @@
       const a=(color[3]/255)*(background?1:alpha),cx=x*unit,cy=-y*unit;
       return {type,shape:type==="rectangle"?"rect":type==="ellipse"?"circle":"triangle",center:{x:cx,y:cy},relative:{x:cx-origin.x*unit,y:cy+origin.y*unit},size:type==="ellipse"?{rx:w*unit/2,ry:h*unit/2}:{width:w*unit,height:h*unit},rotation:{x:0,y:0,z:-angle},color:hex(color),alpha:a,packed_color:packed(color,a),primitive_type:type==="rectangle"?"rect":type==="ellipse"?"circle":"triangle",image_asset_ref:ASSETS[type],...(background?{is_background:true}:{})};
     };
-    const elements=[make("rectangle",width/2,height/2,width,height,0,drawing.background,true)];
+    const elements=drawing.background[3]>0?[make("rectangle",width/2,height/2,width,height,0,drawing.background,true)]:[];
     for(const shape of drawing.shapes){
       const g=shape.geometry;let type,x,y,w,h,angle=0;
       if(shape.kind==="ellipse"){
@@ -49,8 +49,8 @@
     }
     return {elements,origin,scale,offset:[ox,oy]};
   }
-  function matteRGB(rgba){
-    const out=new Uint8Array(rgba.length/4*3),matte=[240,240,245];
+  function matteRGB(rgba,matte=[240,240,245]){
+    const out=new Uint8Array(rgba.length/4*3);
     for(let i=0,j=0;i<rgba.length;i+=4,j+=3){const a=rgba[i+3];for(let c=0;c<3;c++)out[j+c]=Math.floor((rgba[i+c]*a+matte[c]*(255-a)+127)/255);}
     return out;
   }
@@ -61,9 +61,9 @@
     let crc=0xffffffff;for(let i=4;i<out.length-4;i++)crc=crcTable[(crc^out[i])&255]^(crc>>>8);
     v.setUint32(out.length-4,(crc^0xffffffff)>>>0);return out;
   }
-  async function encodeRGB(rgb,width,height){
-    const header=new Uint8Array(13),view=new DataView(header.buffer);view.setUint32(0,width);view.setUint32(4,height);header[8]=8;header[9]=2;
-    const rows=new Uint8Array(height*(width*3+1));for(let y=0;y<height;y++)rows.set(rgb.subarray(y*width*3,(y+1)*width*3),y*(width*3+1)+1);
+  async function encodeRGB(rgb,width,height,channels=3){
+    const header=new Uint8Array(13),view=new DataView(header.buffer);view.setUint32(0,width);view.setUint32(4,height);header[8]=8;header[9]=channels===4?6:2;
+    const rows=new Uint8Array(height*(width*channels+1));for(let y=0;y<height;y++)rows.set(rgb.subarray(y*width*channels,(y+1)*width*channels),y*(width*channels+1)+1);
     const stream=new Blob([rows]).stream().pipeThrough(new CompressionStream("deflate"));
     const compressed=new Uint8Array(await new Response(stream).arrayBuffer());
     return new Uint8Array(await new Blob([new Uint8Array([137,80,78,71,13,10,26,10]),chunk("IHDR",header),chunk("IDAT",compressed),chunk("IEND",new Uint8Array())]).arrayBuffer());
@@ -79,6 +79,7 @@
       ctx.fill();ctx.restore();
     }
   }
-  const api={triangle,drawingToElements,matteRGB,encodeRGB,drawElements};root.PrimevalResult=api;
+  const encodeRGBA=(rgba,width,height)=>encodeRGB(rgba,width,height,4);
+  const api={triangle,drawingToElements,matteRGB,encodeRGB,encodeRGBA,drawElements};root.PrimevalResult=api;
   if(typeof module!=="undefined")module.exports=api;
 })(typeof self!=="undefined"?self:globalThis);

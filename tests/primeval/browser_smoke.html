@@ -17,6 +17,13 @@ frame.addEventListener('load',async()=>{
    change('langSelect',lang);check($('fitMethod').options[2].textContent===w.LOCALES[lang]['fitting.legacy'],'localized selector '+lang);
   }
   change('langSelect','en');
+  check($('backgroundColorSettings').hidden,'custom background hidden in PNG mode');
+  $('enablePngMode').checked=false;$('enablePngMode').dispatchEvent(new w.Event('change'));
+  check(!$('backgroundColorSettings').hidden&&$('backgroundColorRow').hidden,'non-PNG custom background is opt-in');
+  $('useBackgroundColor').click();
+  check(!$('backgroundColorRow').hidden,'custom color picker opens');
+  change('fitMethod','gaussian');check($('backgroundColorSettings').hidden,'Primeval background setting hidden for Gaussian');
+  change('fitMethod','primeval');$('useBackgroundColor').click();$('enablePngMode').checked=true;$('enablePngMode').dispatchEvent(new w.Event('change'));
   for(const method of ['primeval','legacy']){
    change('fitMethod',method);
    for(const id of ['shapeCircle','shapeTriangle','shapeRect']){
@@ -79,7 +86,16 @@ frame.addEventListener('load',async()=>{
   await wait(()=>d.querySelector('.job-status.processing'));const processing=d.querySelector('.job-status.processing').closest('.job-card');
   processing.querySelector('.job-actions button').click();await wait(()=>d.querySelector('.job-status.cancelled'));
   check(true,'large Primeval job can be cancelled');
+  let capturedConfig;const originalPost=w.Worker.prototype.postMessage;
+  w.Worker.prototype.postMessage=function(message,...args){if(message.cmd==='process')capturedConfig=message.config;return originalPost.call(this,message,...args);};
+  $('enablePngMode').checked=false;$('enablePngMode').dispatchEvent(new w.Event('change'));
+  $('useBackgroundColor').checked=true;$('useBackgroundColor').dispatchEvent(new w.Event('change'));
+  $('backgroundColor').value='#2257c9';$('backgroundColor').dispatchEvent(new w.Event('input'));
   $('numPrimsManual').value='10';await upload();$('btnSubmit').click();await wait(()=>d.querySelectorAll('.job-status.done').length===done+1||errors.length||d.querySelector('.job-error'));
+  check(capturedConfig.background_color==='#2257c9'&&!capturedConfig.enable_png_mode,'form submits chosen background with PNG mode off');
+  w.Worker.prototype.postMessage=originalPost;
+  $('enablePngMode').checked=true;$('enablePngMode').dispatchEvent(new w.Event('change'));
+  $('useBackgroundColor').checked=false;$('useBackgroundColor').dispatchEvent(new w.Event('change'));
   check(!errors.length&&!d.querySelector('.job-error'),'generation resumes after cancellation');
   const largeInput=await w.PNGDecode.decode(new Uint8Array(await(await fetch('fixtures/input.png')).arrayBuffer()));
   const nativeCount=await new Promise((resolve,reject)=>{
@@ -89,6 +105,18 @@ frame.addEventListener('load',async()=>{
   });
   check(nativeCount===150000,'native engine starts all requested shapes above its old 100K cap, then cancels');
   $('outlineLink').click();check(!$('primitiveListSection').hidden&&$('fillShapeSection').hidden,'decoration layout remains available');
+  for(const shape of ['circle','triangle','rect']){
+    const result=await new Promise((resolve,reject)=>{
+      const worker=new w.Worker('/js/worker-primeval.js');
+      worker.onerror=e=>{worker.terminate();reject(Error(e.message));};
+      worker.onmessage=({data})=>{if(data.type==='error'){worker.terminate();reject(Error(data.message));}if(data.type==='done'){worker.terminate();resolve(data.result);}};
+      worker.postMessage({cmd:'process',jobId:'background',rgba:new Uint8Array(16*16*4).buffer,width:16,height:16,config:{num_primitives:1,allowed_shapes:[shape],enable_png_mode:false,background_color:'#2257c9',primeval_resolution:32}});
+    });
+    const png=await w.PNGDecode.decode(new Uint8Array(result.primeval_png));
+    check(png.rgba.every((v,i)=>v===[34,87,201,255][i%4]),'chosen background in native PNG '+shape);
+    check(result.elements[0].is_background&&result.elements[0].color==='#2257c9'&&result.elements[0].alpha===1,'chosen background in exported controls '+shape);
+    check(result.primeval_svg.includes('#2257c9')&&result.config.background_color==='#2257c9','chosen background in SVG and saved config '+shape);
+  }
   $('classicToolTab').click();check(d.querySelector('#viewClassic.active'),'GIA conversion page remains available');
   check(!errors.length,'no runtime errors');document.querySelector('#status').textContent='PASS · '+messages.length+' fitting checks';document.body.dataset.result='pass';
  }catch(error){report.textContent+='\nFAIL '+error.stack;document.querySelector('#status').textContent='FAIL';document.body.dataset.result='fail';}

@@ -17,12 +17,28 @@ retained in `LICENSE`. Rust sources and lockfile are included for rebuilding.
 4. The count range covers `u32`; no time/step cutoff or quality gate was added.
 5. Projection helpers are inlined to avoid copying intermediate vertex arrays.
 
-The original RNG, seed handling, search effort, scoring, opacity/color solves,
+For opaque fitting, the original RNG, seed handling, search effort, scoring, opacity/color solves,
 periodic refits and final refinement schedules are unchanged. The static-site
 adapter rejects mixed or unsupported shapes before calling this binding.
 
+6. `background: "transparent"` selects a separate premultiplied RGBA engine
+   (`primeval-core/src/rgba.rs`). Shape generation, mutations and rasterizers
+   are reused; a convex constrained source-over color/opacity solve replaces
+   RGB-only scoring. It retains 16 independent rounds and per-kind search effort,
+   followed by three RGBA color/opacity refit passes over the full stack;
+   these replace RGB-only refit/joint stages. PNG becomes RGBA and SVG omits
+   the background. Opaque rendering and its golden fixtures are unchanged.
+
 The bundled JS runtime is copied from the same release. A small optional worker
 thread-count override supports benchmarking, without changing numerical output.
+The WASM URL revision prevents an older cached RGB-only binary loading after
+the RGBA adapter update.
 Both deployed WASM variants enable SIMD; the threaded one uses the upstream
 shared-memory flags and pinned nightly. Binaryen optimization does not enable
 fast-math. See `docs/development/primeval.md` for parity evidence and measured runtimes.
+
+7. Source-alpha quality refinement seeds from the complete opaque pipeline and
+   replaces only a small coarse foundation. Safe opaque detail layers are frozen
+   to original geometry/color/opacity. Boundary/foundation refinement uses export
+   antialiasing, byte-rounded repaint guards and subpixel moves. This requires
+   tiny-skia in core at runtime; RGB-only engine behavior remains unchanged.

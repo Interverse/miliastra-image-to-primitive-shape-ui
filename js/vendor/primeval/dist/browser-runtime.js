@@ -20,13 +20,15 @@ function selectVariant() {
 // Literal URLs, one per variant, so bundlers can see both.
 function wasmUrl(variant) {
     return variant === "threaded"
-        ? new URL("../wasm/threaded/primeval_bg.wasm", import.meta.url)
-        : new URL("../wasm/single/primeval_bg.wasm", import.meta.url);
+        ? new URL("../wasm/threaded/primeval_bg.wasm?v=rgba-quality2", import.meta.url)
+        : new URL("../wasm/single/primeval_bg.wasm?v=rgba-quality2", import.meta.url);
 }
 // Literal URLs, one per variant, so bundlers can see both workers.
 function startWorker(variant) {
+    const threadedUrl = new URL("./worker-threaded.js", import.meta.url);
+    if (globalThis.PRIMEVAL_THREADS) threadedUrl.searchParams.set("threads", String(globalThis.PRIMEVAL_THREADS));
     const worker = variant === "threaded"
-        ? new Worker(new URL("./worker-threaded.js", import.meta.url), { type: "module" })
+        ? new Worker(threadedUrl, { type: "module" })
         : new Worker(new URL("./worker-single.js", import.meta.url), { type: "module" });
     workersStarted += 1;
     return worker;
