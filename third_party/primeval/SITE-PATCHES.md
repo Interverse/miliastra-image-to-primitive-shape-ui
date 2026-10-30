@@ -17,7 +17,7 @@ retained in `LICENSE`. Rust sources and lockfile are included for rebuilding.
 4. The count range covers `u32`; no time/step cutoff or quality gate was added.
 5. Projection helpers are inlined to avoid copying intermediate vertex arrays.
 
-For opaque fitting, the original RNG, seed handling, search effort, scoring, opacity/color solves,
+For Maximum detail opaque fitting, the original RNG, seed handling, search effort, scoring, opacity/color solves,
 periodic refits and final refinement schedules are unchanged. The static-site
 adapter rejects mixed or unsupported shapes before calling this binding.
 
@@ -42,3 +42,16 @@ fast-math. See `docs/development/primeval.md` for parity evidence and measured r
    to original geometry/color/opacity. Boundary/foundation refinement uses export
    antialiasing, byte-rounded repaint guards and subpixel moves. This requires
    tiny-skia in core at runtime; RGB-only engine behavior remains unchanged.
+
+8. Optional `render.fast` selects the site's latency-oriented search profile.
+   The website exposes Fast (default) and Maximum detail. Fast changes search
+   effort, refinement and placements, retaining every requested control.
+   `transparent-fast` fits source RGBA directly after seeding RGB detail; interior
+   geometry stays fixed while its color/opacity may improve. No source mask is
+   applied. See `docs/development/primeval.md` for the exact profile settings.
+9. RGBA scoring caches row moments, solves constrained alpha analytically and
+   prunes with a conservative error bound. Exact coverage uses tiny-skia Mask;
+   WASM compositing and ellipse/triangle projections use SIMD without fast-math.
+   Tests compare masks, moments and solves to scalar/reference implementations.
+   Phase timings are returned for profiling. Thread count defaults to at most 16;
+   the scalar-hosting fallback runs the same profile and remains available.

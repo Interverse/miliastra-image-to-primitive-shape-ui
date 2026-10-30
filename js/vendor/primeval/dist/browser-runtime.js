@@ -9,7 +9,7 @@
 // one at a time (see `queueStart`); reused workers bypass that gate and retain
 // their instance, pool and panic channel, receiving only the next task.
 import { InternalError, mapNativeError, messageOf } from "./errors.js";
-import { abortError, normalizeRequest } from "./request.js";
+import { abortError, normalizeRequest } from "./request.js?v=fast-1";
 const IDLE_MS = 10_000;
 let idleMs = IDLE_MS;
 let workersStarted = 0;
@@ -20,16 +20,16 @@ function selectVariant() {
 // Literal URLs, one per variant, so bundlers can see both.
 function wasmUrl(variant) {
     return variant === "threaded"
-        ? new URL("../wasm/threaded/primeval_bg.wasm?v=rgba-quality2", import.meta.url)
-        : new URL("../wasm/single/primeval_bg.wasm?v=rgba-quality2", import.meta.url);
+        ? new URL("../wasm/threaded/primeval_bg.wasm?v=fast-1", import.meta.url)
+        : new URL("../wasm/single/primeval_bg.wasm?v=fast-1", import.meta.url);
 }
 // Literal URLs, one per variant, so bundlers can see both workers.
 function startWorker(variant) {
-    const threadedUrl = new URL("./worker-threaded.js", import.meta.url);
+    const threadedUrl = new URL("./worker-threaded.js?v=fast-1", import.meta.url);
     if (globalThis.PRIMEVAL_THREADS) threadedUrl.searchParams.set("threads", String(globalThis.PRIMEVAL_THREADS));
     const worker = variant === "threaded"
         ? new Worker(threadedUrl, { type: "module" })
-        : new Worker(new URL("./worker-single.js", import.meta.url), { type: "module" });
+        : new Worker(new URL("./worker-single.js?v=fast-1", import.meta.url), { type: "module" });
     workersStarted += 1;
     return worker;
 }

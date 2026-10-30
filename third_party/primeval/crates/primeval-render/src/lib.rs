@@ -107,6 +107,8 @@ pub enum BackgroundOption {
     Transparent,
     /// RGBA extension initialized by the full opaque pipeline.
     TransparentReference,
+    /// Low-latency source-alpha fitting with the full opaque reference.
+    TransparentFast,
     /// Use an explicit opaque color (alpha 255).
     Color(Color),
 }
@@ -122,6 +124,7 @@ impl FromStr for BackgroundOption {
         }
         if value == "transparent" { return Ok(Self::Transparent); }
         if value == "transparent-reference" { return Ok(Self::TransparentReference); }
+        if value == "transparent-fast" {return Ok(Self::TransparentFast);}
 
         Color::from_hex(value).map(Self::Color).ok_or_else(|| {
             ParseError::new(format!(
@@ -359,9 +362,16 @@ impl CancellationToken {
 pub struct Execution<'a> {
     progress: Option<&'a mut dyn FnMut(ProgressInfo)>,
     cancel: Option<&'a CancellationToken>,
+    phase: Option<&'a mut dyn FnMut(&'static str)>,
+    fast: bool,
 }
 
 impl<'a> Execution<'a> {
+    /// Select the latency-oriented search without changing the shape count.
+    pub fn fast(mut self,enabled:bool)->Self{self.fast=enabled;self}
+    /// Observe stage boundaries for performance diagnostics.
+    pub fn phases(mut self, observer:&'a mut dyn FnMut(&'static str))->Self {self.phase=Some(observer);self}
+    fn mark(&mut self,name:&'static str){if let Some(observer)=self.phase.as_mut(){observer(name);}}
     /// No progress reporting and no cancellation.
     #[must_use]
     pub fn new() -> Self {
@@ -524,18 +534,28 @@ pub fn approximate_drawing(
         output: _,
         render,
     } = request;
-    if matches!(render.background,BackgroundOption::Transparent|BackgroundOption::TransparentReference) {
+    if matches!(render.background,BackgroundOption::Transparent|BackgroundOption::TransparentReference|BackgroundOption::TransparentFast) {
         validate_options(&render)?;
         execution.check_cancelled()?;
         let image=decode_input(&input)?.into_rgba8();
         drop(input);
         execution.check_cancelled()?;
-        let reference=if render.background==BackgroundOption::TransparentReference {
+        let reference=if matches!(render.background,BackgroundOption::TransparentReference|BackgroundOption::TransparentFast) {
+            execution.mark("reference-start");
             let mut flat=image.clone();flatten_onto(&mut flat,Color::new(240,240,245,255));
             let rgb=DynamicImage::ImageRgba8(flat).into_rgb8();
             let bytes=raster::encode_png(rgb.width(),rgb.height(),rgb.as_raw()).map_err(|_|ApproximateError::internal("reference PNG encoding failed"))?;
             let mut options=render;options.background=BackgroundOption::Auto;
-            Some(approximate_drawing(ApproximateRequest{input:bytes,output:OutputFormat::Png,render:options},Execution{progress:execution.progress.take(),cancel:execution.cancel})?)
+            // Only seed geometry coarsely. The RGBA target and residual search
+            // below still use the full user-selected fitting resolution.
+            if render.background==BackgroundOption::TransparentFast&&render.resize_input.min(image.width().max(image.height()))>256 {
+                // Grow the seed detail with the requested count so larger
+                // budgets can recover finer interior geometry too.
+                let seed_detail=(128.0*(f64::from(render.count)/2000.0).sqrt()).ceil() as u32;
+                options.resize_input=render.resize_input.min(seed_detail.max(128));
+            }
+            let drawing=approximate_drawing(ApproximateRequest{input:bytes,output:OutputFormat::Png,render:options},Execution{progress:execution.progress.take(),cancel:execution.cancel,phase:None,fast:render.background==BackgroundOption::TransparentFast})?;
+            execution.mark("reference-end");Some(drawing)
         }else{None};
         // Resample premultiplied channels: invisible RGB cannot bleed into edges.
         let mut premult=image::Rgba32FImage::new(image.width(),image.height());
@@ -550,14 +570,28 @@ pub fn approximate_drawing(
         drop(image);
         let resized=image::imageops::resize(&premult,w,h,image::imageops::FilterType::CatmullRom);
         drop(premult);
-        let reference_pixels=reference.as_ref().map(|drawing|raster::render_rgb(drawing,w,h).ok_or_else(||ApproximateError::internal("reference raster allocation failed"))).transpose()?;
+        let reference_pixels=if render.background==BackgroundOption::TransparentFast {None}else{
+            reference.as_ref().map(|drawing|raster::render_rgb(drawing,w,h).ok_or_else(||ApproximateError::internal("reference raster allocation failed"))).transpose()?
+        };
         let target:Vec<[f64;4]>=resized.pixels().enumerate().map(|(i,p)|{
             let a=f64::from(p[3]).clamp(0.0,1.0);
-            if a>=254.0/255.0 {if let Some(rgb)=&reference_pixels {return [f64::from(rgb[i*3])/255.0*a,f64::from(rgb[i*3+1])/255.0*a,f64::from(rgb[i*3+2])/255.0*a,a];}}
+            if render.background!=BackgroundOption::TransparentFast&&a>=254.0/255.0 {if let Some(rgb)=&reference_pixels {return [f64::from(rgb[i*3])/255.0*a,f64::from(rgb[i*3+1])/255.0*a,f64::from(rgb[i*3+2])/255.0*a,a];}}
             [f64::from(p[0]).clamp(0.0,a),f64::from(p[1]).clamp(0.0,a),f64::from(p[2]).clamp(0.0,a),a]
         }).collect();
         let mut model=primeval_core::rgba::RgbaModel::new(w,h,target.clone(),render.seed);
         if let Some(mut drawing)=reference {
+            execution.mark("foundation-start");
+            if drawing.width!=w||drawing.height!=h {
+                // Uniform scaling preserves the single-asset triangle constraint.
+                let scale=f64::from(w.max(h))/f64::from(drawing.width.max(drawing.height));
+                for shape in &mut drawing.shapes {match &mut shape.geometry {
+                    primeval_core::Geometry::Polygon(points)=>{for p in points{p.x*=scale;p.y*=scale;}},
+                    primeval_core::Geometry::Ellipse{cx,cy,rx,ry,..}=>{*cx*=scale;*cy*=scale;*rx*=scale;*ry*=scale;},
+                    primeval_core::Geometry::Rect{x,y,width,height}=>{*x*=scale;*y*=scale;*width*=scale;*height*=scale;},
+                    primeval_core::Geometry::Quadratic{..}=>unreachable!("site supports filled shapes"),
+                }}
+                drawing.width=w;drawing.height=h;
+            }
             // Reconstruct only the coarse foundation with source alpha, then
             // retain the original later detail layers. Total count is unchanged.
             let base_count=(drawing.shapes.len()/4).clamp(1,16);
@@ -565,30 +599,52 @@ pub fn approximate_drawing(
             let rgb=raster::render_rgb(&foundation,w,h).ok_or_else(||ApproximateError::internal("foundation raster allocation failed"))?;
             let base_target=target.iter().enumerate().map(|(i,p)|{let a=p[3];[f64::from(rgb[i*3])/255.0*a,f64::from(rgb[i*3+1])/255.0*a,f64::from(rgb[i*3+2])/255.0*a,a]}).collect();
             let mut base=primeval_core::rgba::RgbaModel::new(w,h,base_target,render.seed);
-            for _ in 0..base_count {execution.check_cancelled()?;base.step(render.shape);}
-            if !base.refine(||execution.is_cancelled()){return Err(ApproximateError::Aborted);}
+            for _ in 0..base_count {
+                execution.check_cancelled()?;
+                if render.background==BackgroundOption::TransparentFast&&w.max(h)>256 {base.step_foundation_fast(render.shape);}
+                else {base.step(render.shape);}
+            }
+            if !(if render.background==BackgroundOption::TransparentFast {base.refine_fast(||execution.is_cancelled())}else{base.refine(||execution.is_cancelled())}){return Err(ApproximateError::Aborted);}
             let mut replacement=base.drawing().shapes;replacement.extend_from_slice(&drawing.shapes[base_count..]);drawing.shapes=replacement;
             if !model.seed_with_base(&drawing,render.shape,base_count){
                 // A reference candidate that cannot be represented must not
                 // block export. Retain a complete independent RGBA fit instead.
                 for _ in 0..render.count {execution.check_cancelled()?;model.step(render.shape);}
             }
+            execution.mark("foundation-end");
         }else {for step in 0..render.count {
             execution.check_cancelled()?;
             let shape=model.step(render.shape).clone();
             if let Some(progress)=execution.progress.as_mut(){progress(ProgressInfo{step:step+1,total:render.count,score:model.score(),shape:svg::shape_element(&shape.geometry,shape.color)});}
         }}
         execution.check_cancelled()?;
-        if !model.refine(||execution.is_cancelled()){return Err(ApproximateError::Aborted);}
-        if render.background==BackgroundOption::TransparentReference && !model.recycle_empty(render.shape,||execution.is_cancelled()){return Err(ApproximateError::Aborted);}
-        return Ok(model.drawing());
+        execution.mark("refine-start");
+        let refined=if render.background==BackgroundOption::TransparentFast {
+            if w.max(h)>256 {model.polish_colors(||execution.is_cancelled())}
+            else {model.refine_initial_fast(||execution.is_cancelled())}
+        }else{model.refine(||execution.is_cancelled())};
+        if !refined{return Err(ApproximateError::Aborted);}
+        execution.mark("refine-end");execution.mark("residual-start");
+        if render.background==BackgroundOption::TransparentFast{
+            let cancel=execution.cancel;
+            if !model.recycle_fast(render.shape,||cancel.is_some_and(CancellationToken::is_cancelled),||execution.mark("residual-placement-end")){return Err(ApproximateError::Aborted);}
+        }else if render.background==BackgroundOption::TransparentReference && !model.recycle_empty(render.shape,||execution.is_cancelled()){return Err(ApproximateError::Aborted);}
+        execution.mark("color-polish-start");
+        if render.background==BackgroundOption::TransparentFast&&!model.polish_colors(||execution.is_cancelled()){return Err(ApproximateError::Aborted);}
+        execution.mark("residual-end");return Ok(model.drawing());
     }
     let (target, background) = working_target(input, &render, || execution.check_cancelled())?;
     let mut options = ModelOptions::default();
     options.seed = render.seed;
     let mut model = Model::new(target, background, options);
+    if execution.fast {model.use_fast_search();}
 
-    let pipeline = pipeline::pipeline(render.shape);
+    let mut pipeline = pipeline::pipeline(render.shape);
+    if execution.fast {
+        pipeline.during=pipeline::During::Spaced{interval:64,divisor:1};
+        pipeline.refits=pipeline::Refits::Passes(1);
+        if render.shape==ShapeKind::RotatedEllipse {pipeline.joint=None;}
+    }
     for step in 0..render.count {
         execution.check_cancelled()?;
 
@@ -778,7 +834,7 @@ fn prepare_target(
 ) -> (RgbImage, Color) {
     let background = match background {
         BackgroundOption::Auto => average_background(&image),
-        BackgroundOption::Transparent|BackgroundOption::TransparentReference => Color::new(0,0,0,0),
+        BackgroundOption::Transparent|BackgroundOption::TransparentReference|BackgroundOption::TransparentFast => Color::new(0,0,0,0),
         BackgroundOption::Color(color) => color,
     };
     let image = if image.color().has_alpha() {

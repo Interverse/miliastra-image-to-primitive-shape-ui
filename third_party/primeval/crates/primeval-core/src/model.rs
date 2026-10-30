@@ -155,6 +155,13 @@ pub struct Model {
 }
 
 impl Model {
+    /// Low-latency search: keep every requested step, but use fewer random
+    /// proposals and independent climbs. Final refinement is still available.
+    pub fn use_fast_search(&mut self) {
+        self.effort.rounds=2;
+        self.search=Search{candidates:Some(64),age:Some(35),seeds:Some(1)};
+        self.refine_effort=RefineEffort{rounds:2,age:25};
+    }
     /// Starts a search for `target` from a canvas filled with `background`.
     ///
     /// `target` is at least 2 x 2 pixels: [`Buffer::from_rgb`] rejects

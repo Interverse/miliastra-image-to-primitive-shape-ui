@@ -2,7 +2,7 @@
 // workers: the calling worker starts its pool workers from this same file,
 // and the first message tells the two roles apart. The glue import is static
 // so that bundlers bundle it with its snippets and `.wasm` asset.
-import * as glueModule from "../wasm/threaded/primeval.js";
+import * as glueModule from "../wasm/threaded/primeval.js?v=fast-1";
 import { messageOf } from "./errors.js";
 import { requestRunner, scope } from "./worker-common.js";
 const glue = glueModule;
@@ -14,7 +14,7 @@ let builder;
 const poolWorkers = [];
 /** Starts one pool worker; both of its promises reject if it fails. */
 function spawnPoolWorker(init) {
-    const worker = new Worker(new URL("./worker-threaded.js", import.meta.url), {
+    const worker = new Worker(new URL("./worker-threaded.js?v=fast-1", import.meta.url), {
         type: "module",
     });
     poolWorkers.push(worker);

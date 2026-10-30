@@ -196,8 +196,17 @@
     return shapePairs.find(([id])=>$(prefix ? "retryShape"+id : "shape"+id).checked)?.[1] || "triangle";
   }
   const fillShapeInputs = Array.from(document.querySelectorAll("#legacyShapeChecks input"));
+  function orderFitShapes(prefix, method) {
+    const container = $(prefix ? "retryShapeChecks" : "legacyShapeChecks");
+    const order = method === "primeval" ? ["Triangle", "Circle", "Rect"] : ["Circle", "Rect", "Triangle"];
+    order.forEach((id, index) => {
+      const label = $(prefix ? "retryShape" + id : "shape" + id).closest(".shape-check");
+      if (container.children[index] !== label) container.insertBefore(label, container.children[index] || null);
+    });
+  }
   function syncShapeLabels() {
     const method=$("fitMethod").value, gaussian=method==="gaussian", primeval=method==="primeval";
+    orderFitShapes("", method);
     fillShapeInputs.forEach(input=>input.closest(".shape-check").classList.toggle("active",input.checked));
     $("legacyShapeChecks").hidden=gaussian;
     $("primevalSettings").hidden=!primeval;
@@ -570,6 +579,7 @@
       }
       cfg.allowed_shapes=method==="gaussian"?["blurred_circle"]:[shape];
       if(method==="primeval"){
+        cfg.primeval_speed=$("primevalSpeed").value;
         cfg.primeval_resolution=Number($("primevalResolution").value)||512;
         cfg.primeval_seed=42;
       }
@@ -773,7 +783,7 @@
     if (job.status !== "processing") return; // cancelled during decode
 
     const workerFile = job.config.mode === "outline" ? "js/worker-outline.js" :
-      job.config.fit_method === "primeval" ? "js/worker-primeval.js?v=4" :
+      job.config.fit_method === "primeval" ? "js/worker-primeval.js?v=5" :
       job.config.fit_method === "compression" ? "js/worker-compress.js?v=3" :
       (job.config.allowed_shapes || []).includes("blurred_circle") ?
         "js/worker-gaussian.js?v=34" : "js/worker-fill.js?v=2";
@@ -1622,6 +1632,7 @@
   const retryShapeInputs = Array.from(document.querySelectorAll("#retryShapeChecks .shape-check input"));
   function syncRetryShapeLabels() {
     const method=$("retryFitMethod").value;
+    orderFitShapes("retry", method);
     $("retryShapeChecks").hidden=method==="gaussian";
     $("retryGaussianSettings").hidden=method!=="gaussian";
     $("retryPrimevalSettings").hidden=method!=="primeval";

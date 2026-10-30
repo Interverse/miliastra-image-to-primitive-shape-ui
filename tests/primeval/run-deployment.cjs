@@ -33,7 +33,7 @@ const server=http.createServer((req,res)=>{
      const result=await new Promise((resolve,reject)=>{
       worker.onerror=e=>{worker.terminate();reject(Error(e.message));};
       worker.onmessage=({data})=>{if(data.type==='error'){worker.terminate();reject(Error(data.message));}if(data.type==='done'){worker.terminate();resolve(data.result);}};
-      worker.postMessage({cmd:'process',jobId:shape,rgba:decoded.rgba.buffer,width:64,height:64,config:{num_primitives:40,allowed_shapes:[shape]}});
+      worker.postMessage({cmd:'process',jobId:shape,rgba:decoded.rgba.buffer,width:64,height:64,config:{primeval_speed:"quality",num_primitives:40,allowed_shapes:[shape]}});
      });
      records.push({shape,count:result.elements.length,png:Array.from(new Uint8Array(result.primeval_png))});
     }

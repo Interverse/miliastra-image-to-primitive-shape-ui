@@ -29,7 +29,7 @@ const server=http.createServer((req,res)=>{
     const input=await PNGDecode.decode(new Uint8Array(await(await fetch('/tests/primeval/fixtures/input.png')).arrayBuffer()));
     const result=await new Promise((resolve,reject)=>{
      worker.onmessage=({data})=>{if(data.type==='done')resolve(data.result);if(data.type==='error')reject(Error(data.message));};
-     worker.postMessage({cmd:'process',jobId:shape,rgba:input.rgba.buffer,width:64,height:64,config:{num_primitives:40,allowed_shapes:[shape]}},[input.rgba.buffer]);
+     worker.postMessage({cmd:'process',jobId:shape,rgba:input.rgba.buffer,width:64,height:64,config:{primeval_speed:"quality",num_primitives:40,allowed_shapes:[shape]}},[input.rgba.buffer]);
     });
     const png=new Uint8Array(result.primeval_png),gold=new Uint8Array(await(await fetch('/tests/primeval/fixtures/'+shape+'.png')).arrayBuffer());
     const svg=await(await fetch('/tests/primeval/fixtures/'+shape+'.svg')).text();
@@ -49,7 +49,7 @@ const server=http.createServer((req,res)=>{
    const worker=new Worker('/js/worker-primeval.js');
    return await new Promise((resolve,reject)=>{
     worker.onmessage=({data})=>{if(data.type==='error'){worker.terminate();reject(Error(data.message));}if(data.type==='done'){worker.terminate();resolve(data.result.elements.length);}};
-    worker.postMessage({cmd:'process',jobId:'isolation',rgba:input.rgba.buffer,width:64,height:64,config:{num_primitives:40,allowed_shapes:['triangle']}});
+    worker.postMessage({cmd:'process',jobId:'isolation',rgba:input.rgba.buffer,width:64,height:64,config:{primeval_speed:"quality",num_primitives:40,allowed_shapes:['triangle']}});
    });
   });
   if(count!==41)throw Error('Static-host worker failed');

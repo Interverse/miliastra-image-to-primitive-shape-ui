@@ -54,6 +54,7 @@ pub fn approximate(
     render: JsValue,
     on_progress: Option<Function>,
 ) -> Result<JsValue, JsValue> {
+    let fast=js_sys::Reflect::get(&render,&JsValue::from_str("fast")).ok().and_then(|v|v.as_bool()).unwrap_or(false);
     let render = read_render(&render)?;
     let request = normalize_request(input, &output, render).map_err(|error| js_error(&error))?;
 
@@ -76,7 +77,9 @@ pub fn approximate(
             token.cancel();
         }
     };
-    let execution = Execution::new().cancellation(&token);
+    let timings=Array::new();let started=js_sys::Date::now();
+    let mut phase=|name:&'static str|{let entry=Object::new();set(&entry,"phase",name.into());set(&entry,"elapsed_ms",(js_sys::Date::now()-started).into());timings.push(&entry);};
+    let execution = Execution::new().cancellation(&token).phases(&mut phase).fast(fast);
     let execution = if on_progress.is_some() {
         execution.progress(&mut on_step)
     } else {
@@ -94,6 +97,7 @@ pub fn approximate(
         let object: Object = result_object(encoded).unchecked_into();
         set(&object, "svg", String::from_utf8_lossy(&svg.into_bytes()).as_ref().into());
         set(&object, "drawing", drawing_object(&drawing));
+        set(&object,"timings",timings.into());
         Ok(object.into())
     }).map_err(|error| js_error(&error))
 }

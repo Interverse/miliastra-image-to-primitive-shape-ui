@@ -28,7 +28,7 @@ check(Array.from(matte).join(',')==='240,240,245,170,145,222,100,50,200','refere
 check(Array.from(P.matteRGB(Uint8Array.from([100,50,200,0,100,50,200,255]),[18,52,86])).join(',')==='18,52,86,100,50,200','custom matte fills transparency and preserves opaque source pixels');
 const world={LOCALES:{}};for(const lang of ['en','zh-CN','zh-TW','ja','ko','fr','de','es','pt','ru','th','vi','id','tr','it'])world.LOCALES[lang]={};
 vm.runInNewContext(fs.readFileSync(path.join(root,'js/locales/fitting.js'),'utf8'),{window:world});
-for(const [lang,table] of Object.entries(world.LOCALES))check(Boolean(table['fitting.legacy']&&table['fitting.shapeHint']&&table['fillParams.pngModeDesc']&&table['fitting.customBackground']&&table['fitting.backgroundColor']),'localized controls '+lang);
+for(const [lang,table] of Object.entries(world.LOCALES))check(Boolean(table['fitting.legacy']&&table['fitting.shapeHint']&&table['fillParams.pngModeDesc']&&table['fitting.customBackground']&&table['fitting.backgroundColor']&&table['fitting.optimization']&&table['fitting.fast']&&table['fitting.maximumDetail']),'localized controls '+lang);
 const Gia=require(path.join(root,'js/gia-export.js')),exported=Gia.convertResultToGiaJson({image_size:{width:160,height:128},elements:P.drawingToElements(sample,160,128).elements},'shapes.png',1,{x:80,y:64});
 check(exported.elements.length===4,'GIA keeps one image per shape');
 check(exported.elements[1].image_asset_ref===100003,'GIA triangle asset retained');

@@ -12,6 +12,8 @@ frame.addEventListener('load',async()=>{
   const change=(id,value)=>{$(id).value=value;$(id).dispatchEvent(new w.Event('change'));};
   check(Array.from($('fitMethod').options,o=>o.value).join(',')==='primeval,gaussian,legacy','three fitting methods, Primeval default');
   check($('fitMethod').value==='primeval','Primeval is the default');
+  check($('primevalSpeed').value==='fast','Fast optimization is the default');
+  change('primevalSpeed','quality');
   check($('shapeRect').checked,'Rectangle preserves the previous default shape');
   for(const lang of Object.keys(w.LOCALES)){
    change('langSelect',lang);check($('fitMethod').options[2].textContent===w.LOCALES[lang]['fitting.legacy'],'localized selector '+lang);

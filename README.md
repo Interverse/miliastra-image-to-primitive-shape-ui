@@ -6,6 +6,7 @@ PNG, SVG, CSS, JSON, Lua and GIA. Images are processed locally.
 - **Primeval:** one selected shape family: benchmark ellipses (Circle),
   single-asset isosceles triangles, or rotated rectangles. Rectangle is default.
   PNG mode fits source alpha and exports independent transparent shapes.
+  Fast optimization is the default; Maximum detail retains the pinned search.
 - **Gaussian:** blurred circles using the existing Gaussian fitters.
 - **Legacy:** the original browser fitter, with one selected solid shape family.
 

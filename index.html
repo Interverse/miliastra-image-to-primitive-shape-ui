@@ -69,11 +69,23 @@
           </div>
           <div id="primevalSettings" class="form-stack">
             <div class="form-field">
+              <label for="primevalSpeed" data-i18n="fitting.optimization">Optimization</label>
+              <select id="primevalSpeed" class="num-input">
+                <option value="fast" data-i18n="fitting.fast">Fast</option>
+                <option value="quality" data-i18n="fitting.maximumDetail">Maximum detail</option>
+              </select>
+            </div>
+            <div class="form-field">
               <label for="primevalResolution" data-i18n="fillParams.gaussianResolution">Detail (px)</label>
               <input id="primevalResolution" type="number" min="32" max="2048" step="1" value="512" class="num-input">
             </div>
           </div>
           <div class="shape-checks" id="legacyShapeChecks">
+            <label class="shape-check">
+              <input type="radio" name="fitShape" id="shapeTriangle">
+              <span class="shape-icon">△</span>
+              <span data-i18n="shapes.triangle">Triangle</span>
+            </label>
             <label class="shape-check">
               <input type="radio" name="fitShape" id="shapeCircle">
               <span class="shape-icon">○</span>
@@ -83,11 +95,6 @@
               <input type="radio" name="fitShape" id="shapeRect" checked>
               <span class="shape-icon">□</span>
               <span data-i18n="shapes.rect">Rectangle</span>
-            </label>
-            <label class="shape-check">
-              <input type="radio" name="fitShape" id="shapeTriangle">
-              <span class="shape-icon">△</span>
-              <span data-i18n="shapes.triangle">Triangle</span>
             </label>
 
           </div>
@@ -401,9 +408,9 @@
           </select>
         </div>
         <div class="shape-checks" id="retryShapeChecks">
+          <label class="shape-check"><input type="radio" name="retryFitShape" id="retryShapeTriangle"><span class="shape-icon">△</span><span data-i18n="shapes.triangle">Triangle</span></label>
           <label class="shape-check"><input type="radio" name="retryFitShape" id="retryShapeCircle"><span class="shape-icon">○</span><span data-i18n="shapes.circle">Circle</span></label>
           <label class="shape-check"><input type="radio" name="retryFitShape" id="retryShapeRect" checked><span class="shape-icon">□</span><span data-i18n="shapes.rect">Rectangle</span></label>
-          <label class="shape-check"><input type="radio" name="retryFitShape" id="retryShapeTriangle"><span class="shape-icon">△</span><span data-i18n="shapes.triangle">Triangle</span></label>
         </div>
         <div id="retryPrimevalSettings" class="form-field">
           <label for="retryPrimevalResolution" data-i18n="fillParams.gaussianResolution">Detail (px)</label>
@@ -635,7 +642,7 @@
   <script src="js/locales/it.js?v=32"></script>
 
   <script src="js/locales/compression.js?v=3"></script>
-  <script src="js/locales/fitting.js?v=3"></script>
+  <script src="js/locales/fitting.js?v=4"></script>
   <script src="js/i18n.js?v=25"></script>
   <script src="js/zip.js?v=24"></script>
   <script src="js/gia.js?v=26"></script>
@@ -645,6 +652,6 @@
   <script src="js/gaussian.js?v=25"></script>
   <script src="js/compression-quality.js?v=1"></script>
   <script src="js/primeval-result.js?v=3"></script>
-  <script src="js/app.js?v=background-39"></script>
+  <script src="js/app.js?v=primeval-order-41"></script>
 </body>
 </html>

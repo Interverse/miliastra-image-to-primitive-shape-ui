@@ -1118,19 +1118,25 @@ pub(crate) fn fill_rotated_ellipse_direct(
         let mut row_x_min = f64::MAX;
         let mut row_x_max = f64::MIN;
 
+        #[cfg(all(target_arch="wasm32",target_feature="simd128"))]
+        let vector_spans=ellipse_spans_simd(iy,cx,cy,coeff_a,coeff_b,coeff_c);
         for sub in 0..NUM_AA {
+            #[cfg(all(target_arch="wasm32",target_feature="simd128"))]
+            let (discriminant,x1,x2)=vector_spans[sub];
+            #[cfg(not(all(target_arch="wasm32",target_feature="simd128")))]
+            let (discriminant,x1,x2)={
             let y_sub = iy as f64 + (sub as f64 + 0.5) / NUM_AA as f64;
             let dy = y_sub - cy;
             let quadratic_b = coeff_b * dy;
             let quadratic_c = coeff_c * dy * dy - 1.0;
             let discriminant = quadratic_b * quadratic_b - 4.0 * coeff_a * quadratic_c;
-            if discriminant < 0.0 {
-                continue;
-            }
 
             let root = discriminant.sqrt();
             let x1 = cx + (-quadratic_b - root) / (2.0 * coeff_a);
             let x2 = cx + (-quadratic_b + root) / (2.0 * coeff_a);
+                (discriminant,x1,x2)
+            };
+            if discriminant<0.0 {continue;}
             let left = x1.min(x2);
             let right = x1.max(x2);
             spans.push((left, right));
@@ -1150,6 +1156,28 @@ pub(crate) fn fill_rotated_ellipse_direct(
 
         emit_row(lines, edges, spans, iy, ix_min, ix_max, NUM_AA);
     }
+}
+
+// Pair the independent sub-row quadratic roots without changing IEEE
+// operation order or using reciprocal estimates / fused operations.
+#[cfg(all(target_arch="wasm32",target_feature="simd128"))]
+fn ellipse_spans_simd(iy:i32,cx:f64,cy:f64,a:f64,b:f64,c:f64)->[(f64,f64,f64);4] {
+    use std::arch::wasm32::*;
+    let mut result=[(0.0,0.0,0.0);4];
+    for pair in 0..2 {
+        let first=pair*2;
+        let y=f64x2_add(f64x2_splat(iy as f64),f64x2((first as f64+0.5)/4.0,(first as f64+1.5)/4.0));
+        let dy=f64x2_sub(y,f64x2_splat(cy));
+        let qb=f64x2_mul(f64x2_splat(b),dy);
+        let qc=f64x2_sub(f64x2_mul(f64x2_mul(f64x2_splat(c),dy),dy),f64x2_splat(1.0));
+        let disc=f64x2_sub(f64x2_mul(qb,qb),f64x2_mul(f64x2_splat(4.0*a),qc));
+        let root=f64x2_sqrt(disc);let den=f64x2_splat(2.0*a);
+        let left=f64x2_add(f64x2_splat(cx),f64x2_div(f64x2_sub(f64x2_neg(qb),root),den));
+        let right=f64x2_add(f64x2_splat(cx),f64x2_div(f64x2_add(f64x2_neg(qb),root),den));
+        result[first]=(f64x2_extract_lane::<0>(disc),f64x2_extract_lane::<0>(left),f64x2_extract_lane::<0>(right));
+        result[first+1]=(f64x2_extract_lane::<1>(disc),f64x2_extract_lane::<1>(left),f64x2_extract_lane::<1>(right));
+    }
+    result
 }
 
 #[cfg(test)]

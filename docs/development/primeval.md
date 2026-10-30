@@ -9,6 +9,50 @@ shape opacity. Background and game containers are extra controls. Circle uses
 rotated ellipses; Rectangle uses rotated rectangles. Triangle is constrained
 throughout fitting to local X/Y scale and rotation of one triangle asset.
 
+The Optimization selector defaults to **Fast**. It changes search placements:
+two independent RGB searches with 64 candidates and age 35, two refinement
+climbs, geometrically spaced refits and one final refit. Original joint settings
+remain for rectangles and triangles. Fast alpha fitting targets uploaded source
+colors directly, recolors retained interior layers, then places localized,
+multiscale residual shapes and polishes color/opacity. It uses one initial and
+one residual geometry pass with two climbs, age 25 (12 above 256 pixels), plus
+one color-only pass.
+Residual search uses four rounds of 64 candidates, age 35. Above 256 pixels,
+Fast ranks geometry proposals with Primeval's analytical rasterizer, repaints accepted geometry with
+export-exact coverage, and finishes with an exact color/opacity pass.
+Large-target Fast climbs stop accepting gains smaller than `max(1e-6, |initial layer energy|
+* 1e-4)`; this avoids prolonged subpixel searches for negligible changes. Fully
+occluded pixels are skipped exactly in layer sums and suffix accumulation.
+
+For alpha targets larger than 256 pixels, Fast uses a multiscale seed: 128 pixels
+at 2,000 controls, growing with the square root of the requested count. Geometry
+is scaled uniformly, preserving triangle assets. Source RGBA fitting, residual
+placement and final output still use the selected detail. The initial full-size
+pass adjusts colors rather than moving geometry; residual geometry is refined
+after placement. This is an internal search strategy, not a cap on counts or
+the selected fitting detail.
+
+**Maximum detail** retains the pinned RGB search/refit/joint schedule and the
+reference-preserving alpha path described below. Its opaque output is checked
+against frozen fixtures. Fast intentionally has different placements and is
+evaluated against source-image fidelity rather than pixel equality to that fit.
+Neither profile changes the selected count, imposes a timer or removes cancellation.
+
+Fast timing checks on the development machine (Chrome, isolated workers,
+16 threads, 2,000 painted shapes, 512-pixel detail; includes startup and control
+preview rendering):
+
+| Source | Rectangle | Ellipse | Triangle |
+|---|---:|---:|---:|
+| Furina, source alpha | 12.13 s | 16.33 s | 18.08 s |
+| Clorinde, source alpha | 6.12 s | 12.73 s | 12.89 s |
+| Piplup, opaque | 10.00 s | 17.81 s | 19.99 s |
+
+These measurements are not a universal deadline: larger counts/detail and the
+single-thread fallback can take longer. The local comparison gallery, raw
+geometry, native PNGs, independently rendered controls and unsuccessful trials
+remain ignored under `reference/primeval-speed-*`.
+
 With PNG mode off, the optional custom-background picker composites transparent
 source pixels onto the selected RGB color and uses it as the fitting canvas
 background. `background_color` is retained in job/export configuration; PNG,
@@ -28,8 +72,8 @@ artifact under a GitHub Pages project subpath and checks exact PNG fixtures.
 
 PNG mode now fits source transparency through a site-specific RGBA extension.
 It is activated only for inputs with non-opaque alpha and PNG mode enabled.
-Other inputs keep the original RGB path and its RGB(240,240,245) matte.
-The alpha-aware path first runs the complete pinned opaque pipeline, including
+Other inputs use RGB fitting and its RGB(240,240,245) matte unless overridden.
+The Maximum detail alpha-aware path first runs the complete pinned opaque pipeline, including
 its original joint refinement. Its native render supplies the opaque-color
 reference; source alpha supplies the transparency target. A small coarse
 foundation is rebuilt with alpha, replacing the same number of original layers.
@@ -60,8 +104,9 @@ Twenty seconds is not guaranteed. Counts and refinement are never cut short to
 meet a timer; requests above the old 100K cap are accepted up to the engine's
 32-bit representation/resource limits and remain cancellable.
 
-SIMD, multithreading, instance reuse and binary optimization improve runtime
-without reducing fitting work. `coi-sw.js` enables isolation on static hosts;
+SIMD, multithreading, cached scoring and binary optimization improve runtime.
+Fast additionally changes search effort and placements; Maximum detail keeps
+the reference schedule. `coi-sw.js` enables isolation on static hosts;
 an output-equivalent single-thread fallback works without it, but is slower.
 
 ## Rebuild (Windows)

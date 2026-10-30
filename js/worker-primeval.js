@@ -1,4 +1,4 @@
-/* Primeval 0.2.2 SIMD/Rayon engine; original search/refit/joint stages, seed 42. */
+/* Primeval 0.2.2 SIMD/Rayon engine; Fast and pinned Maximum detail profiles. */
 "use strict";
 importScripts("png-decode.js", "primeval-result.js?v=3");
 let runtime;
@@ -6,10 +6,13 @@ self.onmessage=async({data:msg})=>{
   if(msg.cmd!=="process")return;
   const started=performance.now(),config=msg.config || {};
   try{
+    const profile=config.primeval_speed??"fast";
+    if(!["fast","quality"].includes(profile))throw Error("Invalid optimization profile");
     const count=Number(config.num_primitives??2000),allowed=config.allowed_shapes || ["triangle"];
     if(!Number.isSafeInteger(count)||count<1)throw Error("Invalid shape count");
     if(allowed.length!==1||!["circle","rect","triangle"].includes(allowed[0]))throw Error("Choose one Primeval shape");
-    runtime ??= await import("./vendor/primeval/dist/browser-runtime.js");
+    self.PRIMEVAL_THREADS=Number.isInteger(config.primeval_threads)&&config.primeval_threads>0?config.primeval_threads:Math.min(16,navigator.hardwareConcurrency||1);
+    runtime ??= await import("./vendor/primeval/dist/browser-runtime.js?v=fast-1");
     const rgba=new Uint8ClampedArray(msg.rgba);
     const transparent=!!config.enable_png_mode&&rgba.some((a,i)=>i%4===3&&a<255);
     const background=!config.enable_png_mode&&config.background_color!=null?String(config.background_color):null;
@@ -20,7 +23,7 @@ self.onmessage=async({data:msg})=>{
     const detail=Number(config.primeval_resolution??512);
     if(!Number.isInteger(detail)||detail<32||detail>2048)throw Error("Invalid fitting detail");
     postMessage({type:"progress",jobId:msg.jobId,step:0,total:count,phase:""});
-    const output=await runtime.approximateInWorker({input,output:"png",render:{shape,count,alpha:"auto",...(background?{background}:{}),...(transparent?{background:config.primeval_alpha_strategy==="greedy"?"transparent":"transparent-reference"}:{}),seed:config.primeval_seed??42,resizeInput:Math.min(detail,Math.max(msg.width,msg.height)),outputSize:Math.max(msg.width,msg.height)},execution:{onProgress:info=>{
+    const output=await runtime.approximateInWorker({input,output:"png",render:{shape,count,fast:profile!=="quality",alpha:"auto",...(background?{background}:{}),...(transparent?{background:profile!=="quality"?"transparent-fast":config.primeval_alpha_strategy==="greedy"?"transparent":"transparent-reference"}:{}),seed:config.primeval_seed??42,resizeInput:Math.min(detail,Math.max(msg.width,msg.height)),outputSize:Math.max(msg.width,msg.height)},execution:{onProgress:info=>{
       // Avoid thousands of DOM/structured-clone updates; every engine step runs.
       if(info.step===1||info.step%Math.max(1,Math.floor(count/100))===0||info.step===count)postMessage({type:"progress",jobId:msg.jobId,step:info.step,total:info.total,phase:transparent&&info.step===count?"refine":""});
     }}});
@@ -40,7 +43,7 @@ self.onmessage=async({data:msg})=>{
       PrimevalResult.drawElements(ctx,converted.elements,Number(config.image_scale)||1);preview=ctx.getImageData(0,0,output.width,output.height).data;
     }
     const result={mode:"fill",image_center:converted.origin,image_size:{width:output.width,height:output.height},elements_count:converted.elements.length,elements:converted.elements,
-      config:{mode:"fill",fit_method:"primeval",engine:"primeval-browser",primeval_version:"0.2.2",primeval_shape:shape,primeval_seed:config.primeval_seed??42,primeval_resolution:detail,allowed_shapes:[allowed[0]],num_primitives:count,image_scale:Number(config.image_scale)||1,pixel_per_unit:1/(Number(config.image_scale)||1),unit_scale:Number(config.image_scale)||1,output_alpha:config.output_alpha??1,output_has_transparency:transparent,enable_png_mode:!!config.enable_png_mode,primeval_alpha_aware:transparent,primeval_alpha_strategy:transparent?(config.primeval_alpha_strategy==="greedy"?"greedy":"reference"):null,fill_variant:transparent?"png":"mask",source_size:{width:msg.width,height:msg.height},working_size:{width:output.drawing.width,height:output.drawing.height},matte,background_color:background,wasm_threads:self.crossOriginIsolated===true,primeval_reference:(config.output_alpha??1)===1},
+      config:{mode:"fill",fit_method:"primeval",engine:"primeval-browser",primeval_version:"0.2.2",primeval_timings:output.timings||[],primeval_speed:profile,primeval_shape:shape,primeval_seed:config.primeval_seed??42,primeval_resolution:detail,allowed_shapes:[allowed[0]],num_primitives:count,image_scale:Number(config.image_scale)||1,pixel_per_unit:1/(Number(config.image_scale)||1),unit_scale:Number(config.image_scale)||1,output_alpha:config.output_alpha??1,output_has_transparency:transparent,enable_png_mode:!!config.enable_png_mode,primeval_alpha_aware:transparent,primeval_alpha_strategy:transparent?(profile==="fast"?"source":config.primeval_alpha_strategy==="greedy"?"greedy":"reference"):null,fill_variant:transparent?"png":"mask",source_size:{width:msg.width,height:msg.height},working_size:{width:output.drawing.width,height:output.drawing.height},matte,background_color:background,wasm_threads:self.crossOriginIsolated===true,primeval_reference:(config.output_alpha??1)===1},
       mask:{enabled:false},mask_gray:null,image_rgba:source.buffer,preview_rgba:preview.buffer,primeval_png:output.data.buffer,primeval_svg:output.svg,primeval_drawing:output.drawing,elapsed_seconds:Math.round((performance.now()-started)/10)/100};
     postMessage({type:"done",jobId:msg.jobId,result},[result.image_rgba,result.preview_rgba,result.primeval_png]);
   }catch(error){postMessage({type:"error",jobId:msg.jobId,message:error?.message || String(error)});}
