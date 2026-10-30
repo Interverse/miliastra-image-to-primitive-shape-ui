@@ -13,6 +13,13 @@ Final PNG, SVG and geometry come from one fit. Untouched PNG/SVG exports retain
 the native output; edits invalidate that cache and undo restores it. Tests
 include frozen native PNG/SVG fixtures, six GIA variants and cancellation.
 
+The six browser modules in `js/vendor/primeval/dist/` are required runtime files
+and are explicitly exempted from the generic `dist/` Git ignore. Pages runs
+`scripts/prepare-pages.py` to validate and copy only runtime files into
+`.pages-site/` before uploading. Missing imports or ignored runtime files fail
+the deployment. `npm run test:deployment` fits all three shapes from that
+artifact under a GitHub Pages project subpath and checks exact PNG fixtures.
+
 Source transparency is currently flattened onto RGB(240,240,245); this is not
 alpha-aware silhouette fitting. Shapes may be placed in originally transparent
 regions. Source alpha is not reapplied to the fit. Game rendering/quantization

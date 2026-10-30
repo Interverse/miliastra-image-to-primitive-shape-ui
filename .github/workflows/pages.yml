@@ -29,10 +29,17 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Check runtime dependencies and prepare site
+        run: python scripts/prepare-pages.py
+
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
         with:
-          path: "."
+          path: ".pages-site"
 
       - name: Deploy to GitHub Pages
         id: deployment

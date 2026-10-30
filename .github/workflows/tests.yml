@@ -14,3 +14,5 @@ jobs:
         with:
           python-version: '3.13'
       - run: npm test
+      - run: python tests/primeval/test-deployment.py
+      - run: python scripts/prepare-pages.py

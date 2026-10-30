@@ -38,6 +38,7 @@ npm test
 npm install
 npm run test:browser
 npm run test:hosting
+npm run test:deployment
 ```
 
 Unit tests need Node and Python; browser checks additionally need Playwright and

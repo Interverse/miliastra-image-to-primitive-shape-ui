@@ -4,7 +4,8 @@
   "scripts": {
     "test": "node tests/primeval/run-tests.cjs && node tests/gaussian/run_tests.js && node tests/parity/gia-client/run_tests.js && node tests/parity/lua/run_tests.js",
     "test:browser": "node tests/primeval/run-browser.cjs 1440 && node tests/primeval/run-browser.cjs 390",
-    "test:hosting": "node tests/primeval/run-browser.cjs isolation && node tests/primeval/run-browser.cjs fallback"
+    "test:hosting": "node tests/primeval/run-browser.cjs isolation && node tests/primeval/run-browser.cjs fallback",
+    "test:deployment": "python tests/primeval/test-deployment.py && python scripts/prepare-pages.py && node tests/primeval/run-deployment.cjs"
   },
   "devDependencies": { "playwright": "1.62.1" },
   "engines": { "node": ">=22.12" }

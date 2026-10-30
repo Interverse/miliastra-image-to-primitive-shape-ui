@@ -3,6 +3,10 @@ __pycache__/
 *.pyc
 build/
 dist/
+# Bundled browser modules must ship with the website.
+!js/vendor/primeval/dist/
+!js/vendor/primeval/dist/**
+/.pages-site/
 *.spec
 win/build/
 win/dist/
