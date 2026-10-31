@@ -151,7 +151,13 @@ async function main() {
   const lua=Lua.buildStandaloneLuaScript(payload,{imageTemplateIndex:1});
   check(lua.includes("circleAsset = 106057"),"Lua uses blurred resource");
   check(lua.includes("control.imageType = Enum.ImageType.Basic"),"Lua uses Basic image mode");
-  check(!lua.includes("control.imageType = Enum.ImageType.Stretch"),"Lua does not force Stretch");
+  check(lua.includes("if imageAsset == 106057 then"),"Lua selects Basic only for blurred circles");
+
+  const solid={...result.elements[0],primitive_type:"ellipse",image_asset_ref:100002};
+  const mixedLua=Lua.buildStandaloneLuaScript({...payload,elements:[result.elements[0],solid]},{imageTemplateIndex:17});
+  check(mixedLua.includes("imageAsset = primitive[8] or circleAsset"),"mixed Gaussian/solid export supports per-circle assets");
+  check(/,100002\},/.test(mixedLua),"solid circle retains 100002 alongside Gaussian 106057");
+  check(!mixedLua.includes("imageTemplates"),"Gaussian and solid circles share one template");
 
   // Decode raw protobuf payloads from the supplied known-Basic references.
   // They match the generated image/extra settings except tint and resource.

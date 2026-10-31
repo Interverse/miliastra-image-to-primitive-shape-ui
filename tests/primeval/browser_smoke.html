@@ -50,7 +50,7 @@ frame.addEventListener('load',async()=>{
   w.URL.createObjectURL=blob=>{const url=originalCreate(blob);blobs.set(url,blob);return url;};
   const originalClick=w.HTMLAnchorElement.prototype.click;
   w.HTMLAnchorElement.prototype.click=function(){if(this.download)downloads.push({name:this.download,blob:blobs.get(this.href)});else originalClick.call(this);};
-  async function download(id){if(id==='btnExportClientLua')for(const input of d.querySelectorAll('#shapeTemplateIndexes input')){input.value={ellipse:123,rectangle:124,triangle:125}[input.dataset.shape];input.dispatchEvent(new w.Event('input'));}const n=downloads.length;$(id).click();await wait(()=>downloads.length>n||errors.length);check(!errors.length,id+' succeeds');return downloads.at(-1).blob;}
+  async function download(id){const n=downloads.length;$(id).click();await wait(()=>downloads.length>n||errors.length);check(!errors.length,id+' succeeds');return downloads.at(-1).blob;}
   async function upload(){
    const blob=await(await fetch('fixtures/input.png')).blob(),transfer=new w.DataTransfer();transfer.items.add(new w.File([blob],'golden.png',{type:'image/png'}));
    $('fileInput').files=transfer.files;$('fileInput').dispatchEvent(new w.Event('change'));
@@ -130,7 +130,7 @@ frame.addEventListener('load',async()=>{
     check(info.containerClass===cls&&info.children.length===41&&info.isClassic===classic,button+' correct controls '+shape);
    }
    $('clientLuaTemplateIndex').value='123';$('clientLuaTemplateIndex').dispatchEvent(new w.Event('input'));
-   const lua=await(await download('btnExportClientLua')).text();check(lua.includes('sourceWidth = 64'),'Lua export '+shape);if(shape==='circle')check(lua.includes('[1] = 123')&&lua.includes('[2] = 124')&&lua.includes('props.imageTemplates[primitiveType]'),'Lua routes each shape to its template index');
+   const lua=await(await download('btnExportClientLua')).text();check(lua.includes('sourceWidth = 64'),'Lua export '+shape);if(shape==='circle')check(!lua.includes('imageTemplates')&&lua.includes('control:SetImage(Enum.ImageSource.StaticReference, imageAsset)')&&!$('clientLuaTemplateIndex').hidden,'mixed Lua export uses one template and dynamic assets');
    check($('retryPrimevalSpeed').value==='fast','retry retains Maximum Detail');
    check($('retryFitMethod').value==='primeval'&&$('retryShape'+{circle:'Circle',triangle:'Triangle',rect:'Rect'}[shape]).checked,'retry preserves shape '+shape);
   }

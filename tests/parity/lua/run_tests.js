@@ -279,6 +279,9 @@ for (const [label, payload] of Object.entries(synthetic)) compare(`synthetic ${l
   // Image Control Template index: filled in when provided, TODO placeholder otherwise.
   const filled = LuaExport.buildStandaloneLuaScript(payload, { imageTemplateIndex: "  4242  " });
   check("template index fills the constant", filled.includes("\nlocal IMAGE_TEMPLATE_INDEX = 4242 -- Image Control Template index\n") && !filled.includes("TODO") && filled.includes("IMAGE_TEMPLATE_INDEX is set to 4242"));
+  check("mixed export shares one template", !filled.includes("imageTemplates") && filled.includes("            imageTemplate,\n            canvas,"));
+  check("mixed export sets assets dynamically", filled.includes("control:SetImage(Enum.ImageSource.StaticReference, imageAsset)") && filled.includes("rectangleAsset = 100001") && filled.includes("circleAsset = 100002") && filled.includes("triangleAsset = 100003"));
+  check("image type follows the selected asset", filled.includes("if imageAsset == 106057 then\n        control.imageType = Enum.ImageType.Basic\n    else\n        control.imageType = Enum.ImageType.Stretch"));
   check("template index accepts a number", LuaExport.buildStandaloneLuaScript(payload, { imageTemplateIndex: 7 }).includes("\nlocal IMAGE_TEMPLATE_INDEX = 7 --"));
   for (const bad of ["", "   ", "12a", "-1", "1.5", "1e3", null, undefined, "99999999999999999"]) {
     const out = LuaExport.buildStandaloneLuaScript(payload, { imageTemplateIndex: bad });

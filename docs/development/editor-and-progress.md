@@ -26,12 +26,11 @@ Edited PNG/SVG exports await the corresponding native render. Undo restores the
 original cached PNG/SVG. This avoids switching the whole drawing to Canvas 2D
 antialiasing on the first drag. Gizmos remain a screen-only overlay.
 
-Lua export shows a required template index field for every family present in a
-mixed drawing, including rectangle background controls. Values are remembered
-locally. The generated `imageTemplates` table maps numeric primitive type to
-template index; each instantiation selects its own entry. A single-family drawing
-retains the previous single-index flow and script layout. Batch ZIP export asks
-once per family used across its completed images. No template ID is guessed.
+Lua export uses one required Image Control Template index for all shapes, including
+background controls. Each instance calls SetImage with StaticReference: circle
+100002, rectangle 100001, triangle 100003, or Gaussian 106057. Gaussian instances
+use Basic image mode; solid shapes use Stretch. The index is remembered locally
+and shared with batch ZIP export; no per-family prompts are needed.
 
 The generation preview above the queue follows the highlighted job card. Click
 any job card, or focus it and press Enter/Space, to switch it; action buttons keep

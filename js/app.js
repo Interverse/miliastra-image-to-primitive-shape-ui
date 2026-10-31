@@ -2704,24 +2704,13 @@
   const TEMPLATE_INDEX_KEY = "shaper_lua_template_index";
   function templateIndexFields() { return [$("clientLuaTemplateIndex"), $("batchLuaTemplateIndex")]; }
 
-  function storedShapeTemplate(type){try{return localStorage.getItem('shaper_template_'+type)||'';}catch(e){return '';}}
-  let templateSignature='';
-  function shapeTemplateMap(){return Object.fromEntries(Array.from($('shapeTemplateIndexes').querySelectorAll('input')).map(input=>[input.dataset.shape,LuaExport.parseTemplateIndex(input.value)]));}
-  function syncShapeTemplateFields(){
-    const types=R?[...new Set(R.data.elements.map(e=>normalizeType(e.type)))].sort():[];
-    const signature=(R?.job.id||'')+types.join(',');if(signature===templateSignature)return;templateSignature=signature;
-    $('shapeTemplateIndexes').replaceChildren();
-    if(types.length<2)return;
-    for(const type of types){const label=document.createElement('label');label.className='form-field';const text=document.createElement('span');text.dataset.i18n={ellipse:'shapes.circle',rectangle:'shapes.rect',triangle:'shapes.triangle'}[type];text.textContent=t(text.dataset.i18n);const input=document.createElement('input');input.className='form-input';input.inputMode='numeric';input.dataset.shape=type;input.value=storedShapeTemplate(type)||'';input.addEventListener('input',()=>{try{localStorage.setItem('shaper_template_'+type,input.value);}catch(e){}refreshTemplateIndexState();});label.append(text,input);$('shapeTemplateIndexes').append(label);}
-  }
   function refreshTemplateIndexState() {
-    syncShapeTemplateFields();
     for (const field of templateIndexFields()) {
       const text = field.value.trim();
       field.classList.toggle("is-invalid", text !== "" && LuaExport.parseTemplateIndex(text) === null);
     }
-    const map=shapeTemplateMap();$('clientLuaTemplateIndex').hidden=Object.keys(map).length>1;
-    $("btnExportClientLua").disabled=Object.keys(map).length>1?Object.values(map).some(v=>v===null):LuaExport.parseTemplateIndex($("clientLuaTemplateIndex").value)===null;
+
+    $("btnExportClientLua").disabled=LuaExport.parseTemplateIndex($("clientLuaTemplateIndex").value)===null;
     $("clientLuaBudgetNote").hidden = compressionLuaFits();
   }
 
@@ -2747,10 +2736,9 @@
   function exportClientLua() {
     if (!R) return;
     const imageTemplateIndex = LuaExport.parseTemplateIndex($("clientLuaTemplateIndex").value);
-    const imageTemplateIndices=shapeTemplateMap();
-    if(Object.keys(imageTemplateIndices).length>1?Object.values(imageTemplateIndices).some(v=>v===null):imageTemplateIndex===null)return;
+    if(imageTemplateIndex===null)return;
     try {
-      const text = LuaExport.buildStandaloneLuaScript(buildJsonExportPayload(), { imageTemplateIndex:Object.values(imageTemplateIndices)[0]??imageTemplateIndex,imageTemplateIndices });
+      const text = LuaExport.buildStandaloneLuaScript(buildJsonExportPayload(), { imageTemplateIndex });
       downloadBlob(new Blob([text], { type: "text/x-lua" }), `${currentExportBaseName()}_client.lua`);
     } catch (error) {
       alert(t("result.export.gia.clientFailed", {
@@ -3028,9 +3016,6 @@
       const templates = await loadTemplates();
       // Optional: null keeps the TODO placeholder in every Lua script.
       const imageTemplateIndex = LuaExport.parseTemplateIndex($("batchLuaTemplateIndex").value);
-      const imageTemplateIndices={};
-      const types=[...new Set(doneJobs.flatMap(job=>job.result.elements.map(e=>normalizeType(e.type))))];
-      if(types.length>1)for(const type of types){const key={ellipse:'shapes.circle',rectangle:'shapes.rect',triangle:'shapes.triangle'}[type];const answer=prompt(t(key)+' — '+t('result.export.gia.clientLuaTemplate'),storedShapeTemplate(type)||String(imageTemplateIndex??''));if(answer===null)return;const index=LuaExport.parseTemplateIndex(answer);if(index===null)return;imageTemplateIndices[type]=index;try{localStorage.setItem('shaper_template_'+type,answer);}catch(e){}}
       const files = [];
       const usedNames = new Set();
       const uniqueName = (base, ext) => {
@@ -3073,7 +3058,7 @@
         // ... and the same payload as the self-contained Client Lua script
         files.push({
           name: uniqueName(`${job.baseName}_client`, "lua"),
-          data: encoder.encode(LuaExport.buildStandaloneLuaScript(payload, { imageTemplateIndex:Object.values(imageTemplateIndices)[0]??imageTemplateIndex,imageTemplateIndices })),
+          data: encoder.encode(LuaExport.buildStandaloneLuaScript(payload, { imageTemplateIndex })),
         });
       }
       downloadBlob(MiniZip.build(files), "shaper_results.zip");
