@@ -192,7 +192,6 @@ frame.addEventListener('load',async()=>{
     });
     check(nativeCount===150000,profile+' starts all requested shapes above its old 100K cap, then cancels');
   }
-  $('outlineLink').click();check(!$('primitiveListSection').hidden&&$('fillShapeSection').hidden,'decoration layout remains available');
   for(const shape of ['circle','triangle','rect']){
     const result=await new Promise((resolve,reject)=>{
       const worker=new w.Worker('/js/worker-primeval.js');
@@ -206,7 +205,6 @@ frame.addEventListener('load',async()=>{
     check(result.primeval_svg.includes('#2257c9')&&result.config.background_color==='#2257c9','chosen background in SVG and saved config '+shape);
   }
   $('homeLink').click();change('fitMethod','primeval');change('primevalSpeed','turbo');$('shapeMixed').click();$('numPrimsManual').value='8';$('primevalResolution').value='64';
-  if($('fillShapeSection').hidden)$('outlineLink').click();
   const parallelJobs=new Map(),parallelPost=w.Worker.prototype.postMessage;let completedParallel=0;
   w.Worker.prototype.postMessage=function(message,...args){if(message.cmd==='process'){parallelJobs.set(message.jobId,message.config.primeval_threads);this.addEventListener('message',({data})=>{if(data.type==='done')completedParallel++;});}return parallelPost.call(this,message,...args);};
   await upload();await upload();$('btnSubmit').click();await wait(()=>parallelJobs.size>=2||errors.length||d.querySelector('.job-error'));
@@ -214,8 +212,8 @@ frame.addEventListener('load',async()=>{
   check([...parallelJobs.values()].every(n=>n>=1&&n<=Math.max(1,Math.floor(w.navigator.hardwareConcurrency/2))),'parallel jobs share the CPU thread budget '+JSON.stringify({threads:[...parallelJobs.values()],hardware:w.navigator.hardwareConcurrency}));
   await wait(()=>completedParallel===2||errors.length||d.querySelector('.job-error'));w.Worker.prototype.postMessage=parallelPost;
   check(completedParallel===2&&!errors.length&&!d.querySelector('.job-error'),'both parallel jobs finish successfully');
-  $('outlineLink').click();
-  $('classicToolTab').click();check(d.querySelector('#viewClassic.active'),'GIA conversion page remains available');
+  check(!d.querySelector('#imageToolTab, #classicToolTab, #outlineLink, .tool-tabs'),'top bar has no tool tabs or mode switch');
+  check(!$('fillShapeSection').hidden,'image fitting stays the main view');
   check(!errors.length,'no runtime errors');document.querySelector('#status').textContent='PASS · '+messages.length+' fitting checks';document.body.dataset.result='pass';
  }catch(error){report.textContent+='\nFAIL '+error.stack;document.querySelector('#status').textContent='FAIL';document.body.dataset.result='fail';}
 });

@@ -83,9 +83,6 @@
     $("viewUpload").classList.toggle("active", view === "upload");
     $("viewResult").classList.toggle("active", view === "result");
     $("viewClassic").classList.toggle("active", view === "classic");
-    $("imageToolTab").classList.toggle("active", view !== "classic");
-    $("classicToolTab").classList.toggle("active", view === "classic");
-    $("outlineLink").hidden = view === "classic";
     updateSubtitle();
   }
 
@@ -102,7 +99,6 @@
     $("fillShapeSection").hidden = mode !== "fill";
     $("primitiveListSection").hidden = mode !== "outline";
     $("shapeSectionTitle").textContent = t(mode === "fill" ? "shapes.sectionTitle.fill" : "shapes.sectionTitle.outline");
-    $("outlineLink").textContent = t(mode === "fill" ? "topbar.link.outline" : "topbar.link.fill");
     $("shapeHint").textContent = mode === "fill" ? t("fitting.shapeHint") : "";
     if (mode === "outline") ensureOutlineDefault();
     updateSubtitle();
@@ -110,18 +106,11 @@
   }
 
   $("homeLink").addEventListener("click", (e) => { e.preventDefault(); setView("upload"); });
-  $("imageToolTab").addEventListener("click", () => setView("upload"));
-  $("classicToolTab").addEventListener("click", () => setView("classic"));
-  $("outlineLink").addEventListener("click", (e) => {
-    e.preventDefault();
-    setMode(currentMode === "fill" ? "outline" : "fill");
-  });
   $("btnBackToJobs").addEventListener("click", () => setView("upload"));
 
   I18N.onChange(() => {
     updateSubtitle();
     $("shapeSectionTitle").textContent = t(currentMode === "fill" ? "shapes.sectionTitle.fill" : "shapes.sectionTitle.outline");
-    $("outlineLink").textContent = t(currentMode === "fill" ? "topbar.link.outline" : "topbar.link.fill");
     $("shapeHint").textContent = currentMode === "fill" ? t("fitting.shapeHint") : "";
     refreshPrimitiveCardsI18n();
     syncShapeLabels();

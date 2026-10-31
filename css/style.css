@@ -182,36 +182,6 @@ body {
   min-width: 0;
 }
 
-.tool-tabs { flex-shrink: 0; }
-
-.tool-tabs {
-  display: flex;
-  background: var(--md-surface-container);
-  border-radius: var(--md-shape-full);
-  padding: 4px;
-  gap: 2px;
-}
-
-.tool-tab {
-  border: none;
-  background: transparent;
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--md-on-surface-variant);
-  padding: 6px 16px;
-  border-radius: var(--md-shape-full);
-  cursor: pointer;
-  transition: background .15s, color .15s;
-  white-space: nowrap;
-}
-
-.tool-tab:hover { background: var(--md-surface-container-high); }
-.tool-tab.active {
-  background: var(--md-secondary-container);
-  color: var(--md-on-secondary-container);
-}
-
 .topbar-link {
   font-size: 13px;
   font-weight: 500;
@@ -1335,8 +1305,6 @@ input[type="range"]::-webkit-slider-thumb {
   .topbar-left { flex: 1 1 100%; flex-wrap: wrap; overflow: visible; gap: 8px 12px; }
   .topbar-right { flex: 1 1 100%; flex-wrap: wrap; min-width: 0; gap: 8px; justify-content: flex-start; }
   .topbar-status { margin-left: auto; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-  .tool-tabs { flex-shrink: 1; min-width: 0; max-width: 100%; }
-  .tool-tab { white-space: normal; line-height: 1.2; }
   .canvas-area { min-height: 60vh; }
   #viewResult > .canvas-area { order: -1; }
   .canvas-wrap { min-height: 320px; }
@@ -1358,8 +1326,6 @@ input[type="range"]::-webkit-slider-thumb {
 @media (max-width: 520px) {
   .topbar { padding: 12px; }
   .topbar-left > a:first-child { flex: 1; }
-  .tool-tabs { order: 1; flex: 1 1 100%; }
-  .tool-tab { flex: 1; padding: 8px 12px; }
   .topbar-link { padding: 6px 8px; font-size: 12px; }
   .lang-select { max-width: 144px; }
   .panel { padding: 12px; }

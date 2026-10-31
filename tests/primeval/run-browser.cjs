@@ -66,7 +66,6 @@ const server=http.createServer((req,res)=>{
  if(ok){
   await page.locator('details').evaluate(e=>e.open=false);await page.locator('#app').scrollIntoViewIfNeeded();
   const app=page.frames().find(f=>f.url().endsWith('/index.html'));
-  await app.locator('#imageToolTab').click();await app.locator('#outlineLink').click();
   await app.evaluate(()=>document.querySelector('#numPrims').max='10000');
   await app.fill('#numPrimsManual','2000');
   for(const method of ['primeval','gaussian','legacy']){
@@ -84,13 +83,11 @@ const server=http.createServer((req,res)=>{
     await app.locator('#useBackgroundColor').uncheck();await app.locator('#enablePngMode').check();
    }
   }
-  await app.locator('#outlineLink').click();await app.locator('#primitiveListSection').scrollIntoViewIfNeeded();await page.locator('#app').screenshot({path:path.join(output,`site-decoration-${process.argv[2]||1440}.png`)});
-  await app.locator('#classicToolTab').click();await page.locator('#app').screenshot({path:path.join(output,`site-conversion-${process.argv[2]||1440}.png`)});
-  await app.locator('#imageToolTab').click();await app.locator('.job-card:has(.job-status.done) .job-actions button').first().click();
+  await app.locator('#homeLink').click();await app.locator('.job-card:has(.job-status.done) .job-actions button').first().click();
   await page.locator('#app').screenshot({path:path.join(output,`site-result-${process.argv[2]||1440}.png`)});
   await app.locator('#mainCanvas').click({position:await app.locator('#mainCanvas').evaluate(e=>({x:e.clientWidth/2,y:e.clientHeight/2}))});
   await page.locator('#app').screenshot({path:path.join(output,`site-gizmos-${process.argv[2]||1440}.png`)});
-  console.log('PASS '+report.split('\n').length+' checks; upload/result/decoration/conversion screenshots at '+(process.argv[2]||1440));
+  console.log('PASS '+report.split('\n').length+' checks; upload/result screenshots at '+(process.argv[2]||1440));
  }
  await browser.close();server.close();if(!ok)process.exitCode=1;
 })().catch(error=>{console.error(error);process.exit(1);});
