@@ -1504,8 +1504,10 @@ function processFill(jobId, rgba, width, height, config) {
       res.packed_color = packColor(res.color, res.alpha);
       results.push(res);
       done++;
-      if (done % 5 === 0 || done === numPrimitives) {
-        postMessage({ type: "progress", jobId, step: done, total: numPrimitives });
+      if (done % Math.max(1,Math.floor(numPrimitives/40)) === 0 || done === numPrimitives) {
+        const preview=new Uint8ClampedArray(model.current.length);
+        for(let p=0;p<preview.length;p+=4){const a=model.current[p+3];for(let c=0;c<3;c++)preview[p+c]=a?model.current[p+c]*255/a:0;preview[p+3]=a;}
+        postMessage({ type: "progress", jobId, step: done, total: numPrimitives,previewRGBA:preview.buffer,previewWidth:model.w,previewHeight:model.h },[preview.buffer]);
       }
     }
   }

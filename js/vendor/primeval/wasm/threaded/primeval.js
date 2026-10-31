@@ -106,6 +106,20 @@ export function approximate(input, output, render, on_progress) {
 }
 
 /**
+ * Render retained/edited geometry with the same rasterizer as fitting output.
+ * @param {any} value
+ * @param {number} output_size
+ * @returns {any}
+ */
+export function renderRetained(value, output_size) {
+    const ret = wasm.renderRetained(value, output_size);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
  * Installs the panic hook, once per instance, and sets where a panic is
  * reported: `report(message)` when it happens on this (the calling) thread,
  * and a `BroadcastChannel` named `channel` when it happens on another one.
@@ -199,6 +213,10 @@ function __wbg_get_imports(memory) {
             const ret = arg0.call(arg1, arg2);
             return ret;
         }, arguments); },
+        __wbg_from_296ca31f8d0f1c52: function(arg0) {
+            const ret = Array.from(arg0);
+            return ret;
+        },
         __wbg_getRandomValues_104f2a2a337e0ecc: function() { return handleError(function (arg0) {
             globalThis.crypto.getRandomValues(arg0);
         }, arguments); },
@@ -206,6 +224,14 @@ function __wbg_get_imports(memory) {
             const ret = Reflect.get(arg0, arg1);
             return ret;
         }, arguments); },
+        __wbg_get_6c896e0571ddae51: function(arg0, arg1) {
+            const ret = arg0[arg1 >>> 0];
+            return ret;
+        },
+        __wbg_get_unchecked_288889d017702237: function(arg0, arg1) {
+            const ret = arg0[arg1 >>> 0];
+            return ret;
+        },
         __wbg_instanceof_Window_82d71df4eddf88bc: function(arg0) {
             let result;
             try {
@@ -217,6 +243,10 @@ function __wbg_get_imports(memory) {
             return ret;
         },
         __wbg_length_7f3c00c40364105e: function(arg0) {
+            const ret = arg0.length;
+            return ret;
+        },
+        __wbg_length_d4bdea10311bd9cf: function(arg0) {
             const ret = arg0.length;
             return ret;
         },

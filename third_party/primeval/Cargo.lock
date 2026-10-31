@@ -540,6 +540,7 @@ dependencies = [
  "rand_chacha",
  "rayon",
  "tiny-skia",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -759,8 +760,6 @@ dependencies = [
 [[package]]
 name = "tiny-skia"
 version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47ffee5eaaf5527f630fb0e356b90ebdec84d5d18d937c5e440350f88c5a91ea"
 dependencies = [
  "arrayref",
  "arrayvec",

@@ -191,14 +191,18 @@
 
   /* ════════════════════ shape checkboxes ════════════════════ */
 
-  const shapePairs = [["Circle","circle"],["Rect","rect"],["Triangle","triangle"]];
+  const shapePairs = [["Circle","circle"],["Rect","rect"],["Triangle","triangle"],["Mixed","mixed"]];
   function selectedFitShape(prefix="") {
     return shapePairs.find(([id])=>$(prefix ? "retryShape"+id : "shape"+id).checked)?.[1] || "triangle";
   }
   const fillShapeInputs = Array.from(document.querySelectorAll("#legacyShapeChecks input"));
   function orderFitShapes(prefix, method) {
     const container = $(prefix ? "retryShapeChecks" : "legacyShapeChecks");
-    const order = method === "primeval" ? ["Triangle", "Circle", "Rect"] : ["Circle", "Rect", "Triangle"];
+    container.classList.toggle("primeval-palette", method === "primeval");
+    const mixed=$(prefix ? "retryShapeMixed" : "shapeMixed");
+    mixed.closest(".shape-check").hidden=method!=="primeval";
+    if(method!=="primeval"&&mixed.checked)$(prefix ? "retryShapeTriangle" : "shapeTriangle").checked=true;
+    const order = method === "primeval" ? ["Triangle", "Circle", "Rect", "Mixed"] : ["Circle", "Rect", "Triangle"];
     order.forEach((id, index) => {
       const label = $(prefix ? "retryShape" + id : "shape" + id).closest(".shape-check");
       if (container.children[index] !== label) container.insertBefore(label, container.children[index] || null);
@@ -212,6 +216,7 @@
     $("primevalSettings").hidden=!primeval;
     $("gaussianHint").hidden=!gaussian;
     $("shapeHint").hidden=method!=="legacy";
+    $("mixedShapeHint").hidden=!(primeval&&$("shapeMixed").checked&&$("primevalSpeed").value!=="turbo");
     $("gaussianSettings").hidden=!gaussian;
     $("enhancedMode").disabled=method!=="legacy";
     $("enhancedSettings").hidden=method!=="legacy";
@@ -222,6 +227,7 @@
   }
   $("fitMethod").addEventListener("change",()=>{syncShapeLabels();updateSubtitle();});
   fillShapeInputs.forEach(input=>input.addEventListener("change",syncShapeLabels));
+  $("primevalSpeed").addEventListener("change",syncShapeLabels);
   function syncBackgroundColor(){
     const active=$("fitMethod").value==="primeval"&&!$("enablePngMode").checked;
     $("backgroundColorSettings").hidden=!active;
@@ -512,9 +518,23 @@
   function addFiles(files) {
     for (const file of files) {
       if (!file || !file.type.startsWith("image/")) continue;
-      pendingFiles.push({ file, url: URL.createObjectURL(file) });
+      const entry = { file, url: URL.createObjectURL(file) };
+      pendingFiles.push(entry);
+      decodeToRGBA(file).then(decoded => {
+        entry.hasTransparency = hasTransparentPixels(decoded.data.data);
+        if (!pendingFiles.includes(entry)) return;
+        $("enablePngMode").checked = pendingFiles.some(item => item.hasTransparency);
+        syncBackgroundColor();
+      }).catch(() => {}); // The queue reports decoding failures.
     }
     updateUploadReady();
+  }
+
+  function hasTransparentPixels(rgba) {
+    for (let i = 3; i < rgba.length; i += 4) {
+      if (rgba[i] < 255) return true;
+    }
+    return false;
   }
 
   dropZone.addEventListener("click", () => fileInput.click());
@@ -579,7 +599,8 @@
       }
       cfg.allowed_shapes=method==="gaussian"?["blurred_circle"]:[shape];
       if(method==="primeval"){
-        cfg.primeval_speed=$("primevalSpeed").value;
+        cfg.primeval_turbo=$("primevalSpeed").value==="turbo";
+        cfg.primeval_speed=cfg.primeval_turbo?"fast":$("primevalSpeed").value;
         cfg.primeval_resolution=Number($("primevalResolution").value)||512;
         cfg.primeval_seed=42;
       }
@@ -738,8 +759,7 @@
 
   function pumpQueue() {
     while (runningCount() < MAX_CONCURRENT) {
-      const primevalRunning=jobs.some(job=>job.status==="processing"&&job.config.fit_method==="primeval");
-      const next = jobs.find((job) => job.status === "queued" && !(primevalRunning&&job.config.fit_method==="primeval"));
+      const next = jobs.find((job) => job.status === "queued");
       if (!next) break;
       startJob(next);
     }
@@ -770,6 +790,10 @@
 
   async function startJob(job) {
     job.status = "processing";
+    if(job.config.fit_method==='primeval'){
+      const slots=Math.max(1,Math.min(MAX_CONCURRENT,runningCount()+jobs.filter(j=>j.status==='queued').length));
+      job.config.primeval_threads=Math.max(1,Math.min(16,Math.floor((navigator.hardwareConcurrency||1)/slots)));
+    }
     renderJobs();
     let decoded;
     try {
@@ -781,12 +805,16 @@
       return;
     }
     if (job.status !== "processing") return; // cancelled during decode
+    // Decide per image, including mixed opaque/transparent upload batches.
+    job.config.enable_png_mode = hasTransparentPixels(decoded.data.data);
 
-    const workerFile = job.config.mode === "outline" ? "js/worker-outline.js" :
-      job.config.fit_method === "primeval" ? "js/worker-primeval.js?v=5" :
+    let workerFile = job.config.mode === "outline" ? "js/worker-outline.js?v=cpu-runtime-3" :
+      job.config.fit_method === "primeval" ? "js/worker-primeval.js?v=cpu-runtime-3" :
       job.config.fit_method === "compression" ? "js/worker-compress.js?v=3" :
       (job.config.allowed_shapes || []).includes("blurred_circle") ?
-        "js/worker-gaussian.js?v=34" : "js/worker-fill.js?v=2";
+        "js/worker-gaussian.js?v=cpu-runtime-3" : "js/worker-fill.js?v=cpu-runtime-3";
+    // Separate pooled instances by thread budget: a reused WASM pool cannot resize.
+    if(job.config.fit_method==='primeval')workerFile+='&poolThreads='+job.config.primeval_threads;
     const worker = acquireWorker(workerFile);
     job.worker = worker;
 
@@ -794,13 +822,16 @@
       const msg = event.data;
       if (msg.jobId !== job.id) return;
       if (msg.type === "progress") {
-        job.progress = msg.step;
-        job.progressTotal = msg.total;
+        if(!msg.previewOnly)job.progress = msg.step;
+        if(!msg.previewOnly)job.progressTotal = msg.total;
+        updateGenerationPreview(job,msg);
+        if(msg.refinementTotal){job.refinementStep=msg.refinementStep;job.refinementTotal=msg.refinementTotal;}else if(msg.shapeSvg){job.refinementTotal=0;}
         const phase=msg.phase || "";
         if(job.phase!==phase){job.phase=phase;renderJobs();}
         scheduleProgressFlush();
       } else if (msg.type === "done") {
         job.result = msg.result;
+        updateGenerationPreview(job,{});
         if(msg.result.primeval_png){job.primevalOriginalElements=JSON.stringify(msg.result.elements);job.primevalEdited=false;}
         job.status = "done";
         job.progress = job.progressTotal;
@@ -890,7 +921,7 @@
       if (job.status !== "processing") continue;
       const fill = progressFillEls.get(job.id);
       if (fill) {
-        const pct = job.progressTotal ? Math.round(100 * job.progress / job.progressTotal) : 0;
+        const pct = job.refinementTotal&&job.status==="processing"?Math.round(100*job.refinementStep/job.refinementTotal):job.progressTotal ? Math.round(100 * job.progress / job.progressTotal) : 0;
         fill.style.width = pct + "%";
       }
     }
@@ -928,7 +959,36 @@
     $("overallLabel").textContent = t("batch.jobCount", { done: doneCount, total: active.length || jobs.length });
   }
 
+  let selectedPreviewJobId=null,previewFramePending=false;
+  function renderGenerationPreview(){
+    const job=jobs.find(j=>j.id===selectedPreviewJobId)||jobs.find(j=>j.status==='processing')||jobs[0];
+    selectedPreviewJobId=job?.id||null;
+    $('generationStatus').closest('section').hidden=!job;
+    $('previewJobName').textContent=job?.name||'';
+    const vector=$('generationVector'),img=$('generationPreview');
+    vector.hidden=!job?.previewVector;img.hidden=!!job?.previewVector||!job?.previewUrl;
+    if(job?.previewVector&&vector.firstChild!==job.previewVector)vector.replaceChildren(job.previewVector);
+    if(job?.previewUrl&&img.src!==job.previewUrl)img.src=job.previewUrl;
+    const refining=job?.refinementTotal>0&&job.status==='processing';
+    const fraction=refining?job.refinementStep/job.refinementTotal:job?.progress/Math.max(1,job?.progressTotal||1);
+    $('generationStatus').textContent=job?(refining?t('compression.phase.refine'):statusLabel(job.status))+' · '+Math.min(100,Math.round(100*fraction))+'%':'';
+    $('refinementProgress').hidden=!refining;$('refinementProgress').max=job?.refinementTotal||1;$('refinementProgress').value=job?.refinementStep||0;
+    document.querySelectorAll('#jobList .job-card').forEach(card=>card.classList.toggle('preview-selected',card.dataset.jobId===selectedPreviewJobId));
+  }
+  function scheduleGenerationPreview(){if(previewFramePending)return;previewFramePending=true;requestAnimationFrame(()=>{previewFramePending=false;renderGenerationPreview();});}
+  function updateGenerationPreview(job,msg){
+    if(msg.previewSvg){
+      const root=new DOMParser().parseFromString(msg.previewSvg,'image/svg+xml').documentElement;
+      if(root.localName==='svg'){job.previewVector=document.importNode(root,true);job.previewLayers=Array.from(job.previewVector.children).filter(el=>!(el.localName==='rect'&&!el.hasAttribute('x')&&!el.hasAttribute('transform')));}
+    }else if(msg.shapeSvg&&Number.isInteger(msg.previewIndex)&&job.previewVector){
+      const root=new DOMParser().parseFromString('<svg xmlns="http://www.w3.org/2000/svg">'+msg.shapeSvg+'</svg>','image/svg+xml').documentElement;
+      const node=root.firstElementChild;if(node){const imported=document.importNode(node,true),old=job.previewLayers[msg.previewIndex];if(old)old.replaceWith(imported);else job.previewVector.append(imported);job.previewLayers[msg.previewIndex]=imported;}
+    }else if(msg.previewRGBA){job.previewVector=null;job.previewUrl=rgbaToCanvas(msg.previewRGBA,msg.previewWidth,msg.previewHeight).toDataURL();}
+    else if(job.result?.preview_rgba){job.previewVector=null;job.previewUrl=rgbaToCanvas(job.result.preview_rgba,job.result.image_size.width,job.result.image_size.height).toDataURL();}
+    scheduleGenerationPreview();
+  }
   function renderJobs() {
+    renderGenerationPreview();
     const list = $("jobList");
     $("batchEmpty").hidden = jobs.length > 0;
     list.innerHTML = "";
@@ -936,6 +996,10 @@
     for (const job of jobs) {
       const card = document.createElement("div");
       card.className = "job-card";
+      card.dataset.jobId=job.id;card.tabIndex=0;card.classList.toggle('preview-selected',job.id===selectedPreviewJobId);
+      const choosePreview=()=>{selectedPreviewJobId=job.id;renderGenerationPreview();};
+      card.addEventListener('click',event=>{if(!event.target.closest('button,a,input'))choosePreview();});
+      card.addEventListener('keydown',event=>{if(event.target===card&&(event.key==='Enter'||event.key===' ')){event.preventDefault();choosePreview();}});
 
       const thumb = document.createElement("img");
       thumb.className = "job-thumb";
@@ -978,7 +1042,7 @@
         fill.className = "progress-fill";
         fill.dataset.jobProgress = job.id;
         progressFillEls.set(job.id, fill);
-        const pct = job.progressTotal ? Math.round(100 * job.progress / job.progressTotal) : 0;
+        const pct = job.refinementTotal&&job.status==="processing"?Math.round(100*job.refinementStep/job.refinementTotal):job.progressTotal ? Math.round(100 * job.progress / job.progressTotal) : 0;
         fill.style.width = pct + "%";
         track.appendChild(fill);
         progress.appendChild(track);
@@ -1357,8 +1421,8 @@
       }
       ctx.clip();
     }
-    const reference=primevalCurrent() && $("showFill").checked;
-    if(reference&&assets.preview)ctx.drawImage(assets.preview,0,0,imageWidth,imageHeight);
+    const reference=nativeEditable() && $("showFill").checked;
+    if(reference&&assets.preview)ctx.drawImage(R.job.primevalEdited?(R.job.nativeEditCanvas||assets.preview):assets.preview,0,0,imageWidth,imageHeight);
     const elementIndices = new Map();
     data.elements.forEach((element,index)=>{if(!elementIndices.has(element))elementIndices.set(element,index);});
     renderOrderedElements(data).forEach((element) => {
@@ -1386,6 +1450,7 @@
       ctx.restore();
     }
     if (crop) ctx.restore(); // origin cross stays visible outside the crop
+    if(targetCtx===screenCtx)drawGizmos();
     drawOriginCross();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
@@ -1406,7 +1471,9 @@
     canvas.style.width = cssW + "px";
     canvas.style.height = cssH + "px";
 
+    if(nativeEditable()&&R.job.primevalEdited&&!R.job.nativeEditError){const job=R.job;ensureNativeEdit(job,R.data).catch(error=>{job.nativeEditError=error;console.error(error);});}
     const { s, offX, offY } = viewTransform();
+    canvas.dataset.viewScale=s;canvas.dataset.viewOffsetX=offX;canvas.dataset.viewOffsetY=offY;
     R.scale = s; // hit-testing / tooltip stroke logic reads this
 
     screenCtx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1517,6 +1584,15 @@
   function compressionCurrent(data = R?.data, job = R?.job) {
     return !data?.config?.quality || JSON.stringify(data.elements) === JSON.stringify(job.result.elements);
   }
+  function nativeEditable(job=R?.job,data=R?.data){return !!(job?.result?.primeval_drawing&&(data?.config?.output_alpha??1)===1);}
+  async function ensureNativeEdit(job,data){
+    const key=JSON.stringify(data.elements);if(job.nativeEditKey===key)return;
+    if(job.nativeEditPending){await job.nativeEditPending;return ensureNativeEdit(job,data);}
+    const snapshot={config:{image_scale:data.config.image_scale},image_size:{...data.image_size},elements:JSON.parse(key)};
+    job.nativeOriginalElements??=JSON.parse(job.primevalOriginalElements);
+    job.nativeEditPending=(async()=>{const rendered=await NativeEdit.render(snapshot,job.result.primeval_drawing,job.nativeOriginalElements);const decoded=await PNGDecode.decode(rendered.data);job.nativeEditCanvas=rgbaToCanvas(decoded.rgba.buffer,decoded.width,decoded.height);job.nativeEditPng=rendered.data;job.nativeEditSvg=rendered.svg;job.nativeEditKey=key;})().finally(()=>{job.nativeEditPending=null;});
+    await job.nativeEditPending;if(R?.job===job)scheduleRender();
+  }
   function primevalCurrent(){
     return Boolean(R?.job?.result?.primeval_png&&R.data.config?.primeval_reference&&!R.job.primevalEdited);
   }
@@ -1607,7 +1683,8 @@
       $("retryNumPrims").value=cfg.num_primitives ?? 2000;
       $("retryImageScale").value=cfg.image_scale ?? 1;
       $("retryOutputAlpha").value=Math.round((cfg.output_alpha ?? 1)*100);
-      for(const [id,shape] of shapePairs)$("retryShape"+id).checked=shape===(allowed.find(s=>["circle","rect","triangle"].includes(s)) || "triangle");
+      for(const [id,shape] of shapePairs)$("retryShape"+id).checked=shape===(allowed.find(s=>["circle","rect","triangle","mixed"].includes(s)) || "mixed");
+      $("retryPrimevalSpeed").value=cfg.primeval_turbo?"turbo":cfg.primeval_speed === "fastest" ? "fastest" : "fast";
       $("retryPrimevalResolution").value=cfg.primeval_resolution || 512;
       $("retryGaussianAlgorithm").value=cfg.gaussian_algorithm || "gaussianimage";
       $("retryGaussianIterations").value=cfg.gaussian_iterations || 600;
@@ -1636,10 +1713,12 @@
     $("retryShapeChecks").hidden=method==="gaussian";
     $("retryGaussianSettings").hidden=method!=="gaussian";
     $("retryPrimevalSettings").hidden=method!=="primeval";
+    $("retryMixedShapeHint").hidden=!(method==="primeval"&&$("retryShapeMixed").checked&&$("retryPrimevalSpeed").value!=="turbo");
     retryShapeInputs.forEach(input=>input.closest(".shape-check").classList.toggle("active",input.checked));
   }
   $("retryFitMethod").addEventListener("change",syncRetryShapeLabels);
   retryShapeInputs.forEach(input=>input.addEventListener("change",syncRetryShapeLabels));
+  $("retryPrimevalSpeed").addEventListener("change",syncRetryShapeLabels);
   $("btnRetryFill").addEventListener("click",()=>{
     if(!R||!validControlCount($("retryNumPrims")))return;
     const method=$("retryFitMethod").value;
@@ -1649,6 +1728,8 @@
       fit_method:method,num_primitives:Number($("retryNumPrims").value),allowed_shapes:shapes,
       image_scale:Number($("retryImageScale").value)||1,
       output_alpha:Math.max(0,Math.min(100,Number($("retryOutputAlpha").value)))/100,
+      primeval_turbo:method==="primeval"&&$("retryPrimevalSpeed").value==="turbo",
+      primeval_speed:$("retryPrimevalSpeed").value==="turbo"?"fast":$("retryPrimevalSpeed").value,
       primeval_resolution:Number($("retryPrimevalResolution").value)||512,primeval_seed:42,
       gaussian_algorithm:$("retryGaussianAlgorithm").value,
       gaussian_iterations:Math.max(1,Math.round(Number($("retryGaussianIterations").value)||600)),
@@ -1721,9 +1802,21 @@
   let dragAccum = 0;
   let pinchStart = null;      // {dist, zoom}
 
+  let gizmoDrag=null;
+  function gizmoPoints(){
+    if(!R||R.selected===null||R.selected<0)return null;
+    const el=R.data.elements[R.selected];if(!el||isBackgroundElement(el))return null;
+    const c=imagePointToElementCenter(el),a=elementRotationRad(el),actualW=(el.size.width||el.size.rx*2||1)*R.ppu/2,actualH=(el.size.height||el.size.ry*2||1)*R.ppu/2,w=Math.max(actualW,12/R.scale),h=Math.max(actualH,12/R.scale);
+    const point=(x,y)=>({x:c.x+x*Math.cos(a)-y*Math.sin(a),y:c.y+x*Math.sin(a)+y*Math.cos(a)});
+    return {el,c,w,h,a,actualW,actualH,corners:[point(-w,-h),point(w,-h),point(w,h),point(-w,h)],edges:[point(0,-h),point(w,0),point(0,h),point(-w,0)],rotate:point(0,-h-28/R.scale)};
+  }
+  function drawGizmos(){const savedScale=R.scale;R.scale=viewTransform().s;const g=gizmoPoints();if(!g){R.scale=savedScale;return;}const r=6/R.scale;ctx.save();ctx.strokeStyle='#38bdf8';ctx.fillStyle='#fff';ctx.lineWidth=2/R.scale;ctx.beginPath();g.corners.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();ctx.stroke();ctx.beginPath();ctx.moveTo((g.corners[0].x+g.corners[1].x)/2,(g.corners[0].y+g.corners[1].y)/2);ctx.lineTo(g.rotate.x,g.rotate.y);ctx.stroke();for(const p of [...g.corners,...g.edges,g.rotate,g.c]){ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.fill();ctx.stroke();}ctx.restore();R.scale=savedScale;}
+  canvas.addEventListener('pointermove',event=>{if(pointers.size)return;const g=gizmoPoints();if(!g){canvas.style.cursor='';return;}const p=canvasToImagePoint(event),handle=GizmoResize.hit(g,p,9/R.scale);if(handle){const angle=g.a+(handle.axis==='y'?Math.PI/2:0);canvas.style.cursor=handle.axis==='xy'?'nwse-resize':['ew-resize','nwse-resize','ns-resize','nesw-resize'][((Math.round(angle/(Math.PI/4))%4)+4)%4];}else canvas.style.cursor='';});
   canvas.addEventListener("pointerdown", (event) => {
     if (!R) return;
-    if (event.button !== 0) return; // left button only; right-click stays free
+    canvas.dataset.transformAxis='';
+    if (event.button !== 0 && event.button !== 1) return;
+    if(event.button===1)event.preventDefault();
     try { canvas.setPointerCapture(event.pointerId); } catch (e) { /* synthetic/expired pointer */ }
     pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     dragMoved = false;
@@ -1731,12 +1824,21 @@
     if (pointers.size === 2) {
       const [a, b] = [...pointers.values()];
       pinchStart = { dist: Math.hypot(a.x - b.x, a.y - b.y), zoom: currentView().zoom };
+      gizmoDrag=null;
       elementDrag = null; // a second finger means pinch, not element move
+    }
+    if(event.button===1){gizmoDrag=null;elementDrag=null;return;}
+    const g=gizmoPoints(),p=canvasToImagePoint(event);
+    if(g&&!originArmed&&pointers.size===1){
+      const rotate=Math.hypot(p.x-g.rotate.x,p.y-g.rotate.y)<12/R.scale;
+      const handle=GizmoResize.hit(g,p,9/R.scale);
+      const scale=!!handle&&Math.hypot(p.x-g.c.x,p.y-g.c.y)>5/R.scale;
+      if(rotate||scale){canvas.dataset.transformAxis=rotate?'rotate':handle.axis;gizmoDrag={index:R.selected,c:g.c,angle:Math.atan2(p.y-g.c.y,p.x-g.c.x),distance:Math.hypot(p.x-g.c.x,p.y-g.c.y),original:JSON.parse(JSON.stringify(g.el)),rotate,box:{...g,w:g.actualW,h:g.actualH},startPoint:p,side:handle?.side,axis:handle?.axis,startLocal:{x:(p.x-g.c.x)*Math.cos(elementRotationRad(g.el))+(p.y-g.c.y)*Math.sin(elementRotationRad(g.el)),y:-(p.x-g.c.x)*Math.sin(elementRotationRad(g.el))+(p.y-g.c.y)*Math.cos(elementRotationRad(g.el))},undo:JSON.stringify(R.data.elements),pushed:false};return;}
     }
     // grabbing an element starts a move gesture instead of a pan
     if (!originArmed && pointers.size === 1) {
       const point = canvasToImagePoint(event);
-      const hit = hitTest(point.x, point.y);
+      const hit = g&&Math.hypot(point.x-g.c.x,point.y-g.c.y)<12/R.scale?R.selected:hitTest(point.x, point.y);
       if (hit !== null) {
         if (!R.selectedSet.has(hit)) {
           if (event.ctrlKey || event.metaKey || event.shiftKey) R.selectedSet.add(hit);
@@ -1779,6 +1881,14 @@
       return;
     }
 
+    if(gizmoDrag&&pointers.size===1){
+      const g=gizmoDrag,p=canvasToImagePoint(event),el=R.data.elements[g.index];
+      if(!g.pushed){pushUndoSnapshot(g.undo);g.pushed=true;}
+      if(g.rotate){const a=elementRotationZ(g.original)-(Math.atan2(p.y-g.c.y,p.x-g.c.x)-g.angle)*180/Math.PI;el.rotation=typeof g.original.rotation==='object'?{...g.original.rotation,z:a}:a;}
+      else if(g.side!==null&&g.side!==undefined){const result=GizmoResize.resize(g.box,g.startPoint,p,g.side,0.01*R.ppu);el.size=Object.fromEntries(Object.entries(g.original.size).map(([k,v])=>[k,typeof v==='number'?v*(['rx','width'].includes(k)?result.sx:result.sy):v]));el.center.x=result.c.x/R.ppu;el.center.y=-result.c.y/R.ppu;}
+      else {const a=elementRotationRad(g.original),dx=p.x-g.c.x,dy=p.y-g.c.y,lx=dx*Math.cos(a)+dy*Math.sin(a),ly=-dx*Math.sin(a)+dy*Math.cos(a);const sx=g.axis==='y'?1:Math.max(0.01,Math.abs(lx)/Math.max(1e-9,Math.abs(g.startLocal.x))),sy=g.axis==='x'?1:Math.max(0.01,Math.abs(ly)/Math.max(1e-9,Math.abs(g.startLocal.y)));el.size=Object.fromEntries(Object.entries(g.original.size).map(([k,v])=>[k,typeof v==='number'?v*(['rx','width'].includes(k)?sx:sy):v]));}
+      elementDragged=true;refreshSelectionUI();scheduleRender();return;
+    }
     if (elementDrag && pointers.size === 1) {
       const point = canvasToImagePoint(event);
       const dwx = (point.x - elementDrag.startX) / R.ppu;
@@ -1812,8 +1922,10 @@
     if (pointers.has(event.pointerId)) pointers.delete(event.pointerId);
     if (pointers.size < 2) pinchStart = null;
     if (pointers.size === 0) canvas.classList.remove("dragging");
+    gizmoDrag=null;
     elementDrag = null; // elementDragged persists until the click event fires
   }
+  canvas.addEventListener("auxclick",event=>{if(event.button===1)event.preventDefault();});
   canvas.addEventListener("pointerup", endPointer);
   canvas.addEventListener("pointercancel", endPointer);
 
@@ -1947,6 +2059,7 @@
     if(R.job.result.primeval_png)R.job.primevalEdited=json!==R.job.primevalOriginalElements;
     R.data.elements = JSON.parse(json);
     R.data.elements_count = R.data.elements.length;
+    refreshTemplateIndexState();
     R.selectedSet.clear();
     R.selected = null;
     R.hovered = null;
@@ -1977,6 +2090,7 @@
     const doomed = [...R.selectedSet].sort((a, b) => b - a);
     for (const idx of doomed) R.data.elements.splice(idx, 1);
     R.data.elements_count = R.data.elements.length;
+    refreshTemplateIndexState();
     R.selectedSet.clear();
     R.selected = null;
     R.hovered = null;
@@ -2012,6 +2126,7 @@
     if (!show) return;
     editPanelSyncing = true;
     const type = normalizeType(el.type);
+    $("editShape").value=type;
     $("editX").value = Number(el.center.x).toFixed(2);
     $("editY").value = Number(el.center.y).toFixed(2);
     if (type === "ellipse") {
@@ -2069,11 +2184,13 @@
     if (!el) return;
     pushUndoSnapshot();
     mutate(el);
+    refreshTemplateIndexState();
     refreshSelectionUI();
     updateStats();
     renderCanvas();
   }
 
+  $('editShape').addEventListener('change',()=>applyEditField(el=>{const type=$('editShape').value,w=el.size.width||el.size.rx*2,h=el.size.height||el.size.ry*2;el.type=type;el.shape=type==='ellipse'?'circle':type==='rectangle'?'rect':'triangle';el.primitive_type=el.shape;el.image_asset_ref={ellipse:100002,rectangle:100001,triangle:100003}[type];el.size=type==='ellipse'?{rx:w/2,ry:h/2}:{width:w,height:h};delete el.gaussian;if(type==='triangle')el.triangle_pivot='box';else delete el.triangle_pivot;}));
   $("editX").addEventListener("change", () => applyEditField((el) => { el.center.x = Number($("editX").value) || 0; }));
   $("editY").addEventListener("change", () => applyEditField((el) => { el.center.y = Number($("editY").value) || 0; }));
   $("editSizeA").addEventListener("change", () => applyEditField((el) => {
@@ -2587,12 +2704,24 @@
   const TEMPLATE_INDEX_KEY = "shaper_lua_template_index";
   function templateIndexFields() { return [$("clientLuaTemplateIndex"), $("batchLuaTemplateIndex")]; }
 
+  function storedShapeTemplate(type){try{return localStorage.getItem('shaper_template_'+type)||'';}catch(e){return '';}}
+  let templateSignature='';
+  function shapeTemplateMap(){return Object.fromEntries(Array.from($('shapeTemplateIndexes').querySelectorAll('input')).map(input=>[input.dataset.shape,LuaExport.parseTemplateIndex(input.value)]));}
+  function syncShapeTemplateFields(){
+    const types=R?[...new Set(R.data.elements.map(e=>normalizeType(e.type)))].sort():[];
+    const signature=(R?.job.id||'')+types.join(',');if(signature===templateSignature)return;templateSignature=signature;
+    $('shapeTemplateIndexes').replaceChildren();
+    if(types.length<2)return;
+    for(const type of types){const label=document.createElement('label');label.className='form-field';const text=document.createElement('span');text.dataset.i18n={ellipse:'shapes.circle',rectangle:'shapes.rect',triangle:'shapes.triangle'}[type];text.textContent=t(text.dataset.i18n);const input=document.createElement('input');input.className='form-input';input.inputMode='numeric';input.dataset.shape=type;input.value=storedShapeTemplate(type)||'';input.addEventListener('input',()=>{try{localStorage.setItem('shaper_template_'+type,input.value);}catch(e){}refreshTemplateIndexState();});label.append(text,input);$('shapeTemplateIndexes').append(label);}
+  }
   function refreshTemplateIndexState() {
+    syncShapeTemplateFields();
     for (const field of templateIndexFields()) {
       const text = field.value.trim();
       field.classList.toggle("is-invalid", text !== "" && LuaExport.parseTemplateIndex(text) === null);
     }
-    $("btnExportClientLua").disabled = LuaExport.parseTemplateIndex($("clientLuaTemplateIndex").value) === null;
+    const map=shapeTemplateMap();$('clientLuaTemplateIndex').hidden=Object.keys(map).length>1;
+    $("btnExportClientLua").disabled=Object.keys(map).length>1?Object.values(map).some(v=>v===null):LuaExport.parseTemplateIndex($("clientLuaTemplateIndex").value)===null;
     $("clientLuaBudgetNote").hidden = compressionLuaFits();
   }
 
@@ -2618,9 +2747,10 @@
   function exportClientLua() {
     if (!R) return;
     const imageTemplateIndex = LuaExport.parseTemplateIndex($("clientLuaTemplateIndex").value);
-    if (imageTemplateIndex === null) { $("clientLuaTemplateIndex").focus(); return; }
+    const imageTemplateIndices=shapeTemplateMap();
+    if(Object.keys(imageTemplateIndices).length>1?Object.values(imageTemplateIndices).some(v=>v===null):imageTemplateIndex===null)return;
     try {
-      const text = LuaExport.buildStandaloneLuaScript(buildJsonExportPayload(), { imageTemplateIndex });
+      const text = LuaExport.buildStandaloneLuaScript(buildJsonExportPayload(), { imageTemplateIndex:Object.values(imageTemplateIndices)[0]??imageTemplateIndex,imageTemplateIndices });
       downloadBlob(new Blob([text], { type: "text/x-lua" }), `${currentExportBaseName()}_client.lua`);
     } catch (error) {
       alert(t("result.export.gia.clientFailed", {
@@ -2832,7 +2962,8 @@
       alert(t("result.export.failed", { error }));
     }
   });
-  $("btnExportSVG").addEventListener("click", () => {
+  $("btnExportSVG").addEventListener("click", async () => {
+    if(nativeEditable()&&R.job.primevalEdited){try{await ensureNativeEdit(R.job,R.data);downloadBlob(new Blob([R.job.nativeEditSvg],{type:"image/svg+xml"}),exportFileName("svg"));}catch(error){alert(t("result.export.failed",{error:error.message}));}return;}
     if (!R) return;
     try {
       downloadBlob(new Blob([buildSvgExportText()], { type: "image/svg+xml" }), exportFileName("svg"));
@@ -2840,7 +2971,8 @@
       alert(t("result.export.failed", { error }));
     }
   });
-  $("btnExportPNG").addEventListener("click", () => {
+  $("btnExportPNG").addEventListener("click", async () => {
+    if(nativeEditable()&&R.job.primevalEdited){try{await ensureNativeEdit(R.job,R.data);downloadBlob(new Blob([R.job.nativeEditPng],{type:"image/png"}),exportFileName("png"));}catch(error){alert(t("result.export.failed",{error:error.message}));}return;}
     if (!R) return;
     if(primevalCurrent()){
       downloadBlob(new Blob([R.job.result.primeval_png],{type:"image/png"}),exportFileName("png"));return;
@@ -2896,6 +3028,9 @@
       const templates = await loadTemplates();
       // Optional: null keeps the TODO placeholder in every Lua script.
       const imageTemplateIndex = LuaExport.parseTemplateIndex($("batchLuaTemplateIndex").value);
+      const imageTemplateIndices={};
+      const types=[...new Set(doneJobs.flatMap(job=>job.result.elements.map(e=>normalizeType(e.type))))];
+      if(types.length>1)for(const type of types){const key={ellipse:'shapes.circle',rectangle:'shapes.rect',triangle:'shapes.triangle'}[type];const answer=prompt(t(key)+' — '+t('result.export.gia.clientLuaTemplate'),storedShapeTemplate(type)||String(imageTemplateIndex??''));if(answer===null)return;const index=LuaExport.parseTemplateIndex(answer);if(index===null)return;imageTemplateIndices[type]=index;try{localStorage.setItem('shaper_template_'+type,answer);}catch(e){}}
       const files = [];
       const usedNames = new Set();
       const uniqueName = (base, ext) => {
@@ -2938,7 +3073,7 @@
         // ... and the same payload as the self-contained Client Lua script
         files.push({
           name: uniqueName(`${job.baseName}_client`, "lua"),
-          data: encoder.encode(LuaExport.buildStandaloneLuaScript(payload, { imageTemplateIndex })),
+          data: encoder.encode(LuaExport.buildStandaloneLuaScript(payload, { imageTemplateIndex:Object.values(imageTemplateIndices)[0]??imageTemplateIndex,imageTemplateIndices })),
         });
       }
       downloadBlob(MiniZip.build(files), "shaper_results.zip");

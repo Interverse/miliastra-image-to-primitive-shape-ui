@@ -13,7 +13,7 @@
   </script>
   <title data-i18n="app.pageTitle">Miliastra Wonderland Image Fitter</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='38' cy='42' r='26' fill='%234355B9'/%3E%3Crect x='48' y='44' width='36' height='36' rx='6' fill='%23E8A317' transform='rotate(12 66 62)'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="css/style.css?v=30">
+  <link rel="stylesheet" href="css/style.css?v=34">
 </head>
 <body>
   <header class="topbar">
@@ -30,7 +30,6 @@
       <button type="button" id="themeToggle" class="theme-toggle" data-i18n-aria-label="topbar.theme" aria-label="Toggle light/dark theme">🌙</button>
       <select id="langSelect" class="lang-select" data-i18n-aria-label="topbar.language"></select>
       <a href="https://github.com/Interverse/miliastra-image-to-primitive-shape-ui" target="_blank" rel="noopener noreferrer" class="topbar-link" data-i18n="topbar.repo">Repository</a>
-      <a href="https://ugc.070077.xyz/" target="_blank" rel="noopener noreferrer" class="topbar-link topbar-link-subtle" data-i18n="topbar.kb">Knowledge Base</a>
       <span class="topbar-status active" id="topbarStatus" data-i18n="topbar.status.ready">Ready</span>
     </div>
   </header>
@@ -71,8 +70,9 @@
             <div class="form-field">
               <label for="primevalSpeed" data-i18n="fitting.optimization">Optimization</label>
               <select id="primevalSpeed" class="num-input">
-                <option value="fast" data-i18n="fitting.fast">Fast</option>
-                <option value="quality" data-i18n="fitting.maximumDetail">Maximum detail</option>
+                <option value="turbo" data-i18n="fitting.turbo" selected>Turbo</option>
+                <option value="fastest" data-i18n="fitting.fastest">Draft</option>
+                <option value="fast" data-i18n="fitting.maximumDetail">Maximum Detail</option>
               </select>
             </div>
             <div class="form-field">
@@ -82,7 +82,7 @@
           </div>
           <div class="shape-checks" id="legacyShapeChecks">
             <label class="shape-check">
-              <input type="radio" name="fitShape" id="shapeTriangle" checked>
+              <input type="radio" name="fitShape" id="shapeTriangle">
               <span class="shape-icon">△</span>
               <span data-i18n="shapes.triangle">Triangle</span>
             </label>
@@ -91,13 +91,14 @@
               <span class="shape-icon">○</span>
               <span data-i18n="shapes.circle">Circle</span>
             </label>
-            <label class="shape-check active">
+            <label class="shape-check">
               <input type="radio" name="fitShape" id="shapeRect">
               <span class="shape-icon">□</span>
               <span data-i18n="shapes.rect">Rectangle</span>
             </label>
-
+            <label class="shape-check"><input type="radio" name="fitShape" id="shapeMixed" checked><span class="shape-icon">△○□</span><span data-i18n="shapes.mixed">Mixed</span></label>
           </div>
+          <p class="hint" id="mixedShapeHint" hidden data-i18n="fitting.mixedHint"></p>
           <p class="hint" id="gaussianHint" hidden data-i18n="shapes.gaussianHint"></p>
           <div id="gaussianSettings" class="form-stack" hidden>
             <input type="hidden" id="gaussianAlgorithm" value="gaussianimage">
@@ -280,6 +281,7 @@
         <span data-i18n="batch.empty.text"></span>
       </div>
 
+      <section class="generation-preview"><h3 id="generationPreviewTitle" data-i18n="editor.progress">Generation preview</h3><p id="previewJobName" class="hint"></p><div id="generationVector" hidden></div><img id="generationPreview" alt="" hidden><p id="generationStatus" class="hint"></p><progress id="refinementProgress" max="1" value="0" hidden aria-labelledby="generationStatus"></progress></section>
       <div class="job-list" id="jobList"></div>
       <p class="local-note" data-i18n="footer.local"></p>
     </main>
@@ -303,7 +305,6 @@
           <li><strong data-i18n="tips.rule1"></strong></li>
           <li><strong data-i18n="tips.rule2"></strong></li>
           <li data-i18n="fitting.batch"></li>
-          <li><span data-i18n="tips.tutorial"></span> <a href="https://www.bilibili.com/video/BV1kKDyB9EvY" target="_blank" rel="noopener noreferrer">BV1kKDyB9EvY</a></li>
         </ul>
       </section>
     </aside>
@@ -367,7 +368,7 @@
           </div>
           <div class="gia-export-group__field">
             <label for="clientLuaTemplateIndex" data-i18n="result.export.gia.clientLuaTemplate">Image Control Template index</label>
-            <input type="text" id="clientLuaTemplateIndex" class="form-input" inputmode="numeric" autocomplete="off" spellcheck="false">
+            <div id="shapeTemplateIndexes" class="form-stack"></div><input type="text" id="clientLuaTemplateIndex" class="form-input" inputmode="numeric" autocomplete="off" spellcheck="false">
             <p id="clientLuaBudgetNote" class="hint" hidden data-i18n="compression.luaBudget"></p>
             <p class="gia-export-group__desc gia-export-group__desc--field" data-i18n="result.export.gia.clientLuaTemplateHint"></p>
           </div>
@@ -410,11 +411,23 @@
         <div class="shape-checks" id="retryShapeChecks">
           <label class="shape-check"><input type="radio" name="retryFitShape" id="retryShapeTriangle"><span class="shape-icon">△</span><span data-i18n="shapes.triangle">Triangle</span></label>
           <label class="shape-check"><input type="radio" name="retryFitShape" id="retryShapeCircle"><span class="shape-icon">○</span><span data-i18n="shapes.circle">Circle</span></label>
-          <label class="shape-check"><input type="radio" name="retryFitShape" id="retryShapeRect" checked><span class="shape-icon">□</span><span data-i18n="shapes.rect">Rectangle</span></label>
+          <label class="shape-check"><input type="radio" name="retryFitShape" id="retryShapeRect"><span class="shape-icon">□</span><span data-i18n="shapes.rect">Rectangle</span></label>
+          <label class="shape-check"><input type="radio" name="retryFitShape" id="retryShapeMixed" checked><span class="shape-icon">△○□</span><span data-i18n="shapes.mixed">Mixed</span></label>
         </div>
-        <div id="retryPrimevalSettings" class="form-field">
-          <label for="retryPrimevalResolution" data-i18n="fillParams.gaussianResolution">Detail (px)</label>
-          <input id="retryPrimevalResolution" type="number" min="32" max="2048" step="1" value="512" class="num-input">
+        <p class="hint" id="retryMixedShapeHint" hidden data-i18n="fitting.mixedHint"></p>
+        <div id="retryPrimevalSettings" class="form-stack">
+          <div class="form-field">
+            <label for="retryPrimevalSpeed" data-i18n="fitting.optimization">Optimization</label>
+            <select id="retryPrimevalSpeed" class="num-input">
+              <option value="turbo" data-i18n="fitting.turbo" selected>Turbo</option>
+                <option value="fastest" data-i18n="fitting.fastest">Draft</option>
+              <option value="fast" data-i18n="fitting.maximumDetail">Maximum Detail</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="retryPrimevalResolution" data-i18n="fillParams.gaussianResolution">Detail (px)</label>
+            <input id="retryPrimevalResolution" type="number" min="32" max="2048" step="1" value="512" class="num-input">
+          </div>
         </div>
         <div id="retryGaussianSettings" class="form-stack" hidden>
             <input type="hidden" id="retryGaussianAlgorithm" value="gaussianimage">
@@ -532,7 +545,7 @@
           <tr><td data-i18n="result.info.rotation">Rotation</td><td id="infoRotation">—</td></tr>
         </table></div>
         <div id="editPanel" class="edit-panel" hidden>
-          <h3 data-i18n="result.edit.panelTitle">Edit Primitive</h3>
+          <h3 data-i18n="result.edit.panelTitle">Edit Primitive</h3><div class="form-field"><label for="editShape" data-i18n="result.info.type">Type</label><select id="editShape" class="form-select"><option value="ellipse" data-i18n="shapes.circle">Circle</option><option value="triangle" data-i18n="shapes.triangle">Triangle</option><option value="rectangle" data-i18n="shapes.rect">Rectangle</option></select></div>
           <div class="config-row config-row--paired">
             <label>X</label>
             <input type="number" id="editX" step="0.1" class="num-input">
@@ -642,16 +655,18 @@
   <script src="js/locales/it.js?v=32"></script>
 
   <script src="js/locales/compression.js?v=3"></script>
-  <script src="js/locales/fitting.js?v=4"></script>
+  <script src="js/locales/fitting.js?v=10"></script>
   <script src="js/i18n.js?v=25"></script>
   <script src="js/zip.js?v=24"></script>
   <script src="js/gia.js?v=26"></script>
   <script src="js/gia-export.js?v=26"></script>
-  <script src="js/lua-export.js?v=25"></script>
+  <script src="js/lua-export.js?v=editor-25"></script>
   <script src="js/png-decode.js?v=24"></script>
   <script src="js/gaussian.js?v=25"></script>
   <script src="js/compression-quality.js?v=1"></script>
   <script src="js/primeval-result.js?v=3"></script>
-  <script src="js/app.js?v=primeval-order-41"></script>
+  <script src="js/native-edit.js?v=2"></script>
+  <script src="js/gizmo-resize.js?v=1"></script>
+  <script src="js/app.js?v=cpu-runtime-57"></script>
 </body>
 </html>

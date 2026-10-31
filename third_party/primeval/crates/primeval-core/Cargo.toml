@@ -23,6 +23,7 @@ tiny-skia = { version = "0.12.0", default-features = false, features = ["std", "
 # `crypto.getRandomValues` there (also with a shared, threaded memory).
 [target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
 getrandom = { version = "0.4.3", features = ["wasm_js"] }
+wasm-bindgen = "=0.2.129"
 
 [features]
 asset-triangle = []

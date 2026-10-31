@@ -793,6 +793,9 @@ fn sub_row_coverage(overlap: f64) -> u32 {
 /// `0xFFFF`. (Scaling each sub-row to `0xFFFF / 4` first summed to 65532.)
 #[inline]
 fn coverage_to_alpha(covered: u32, sub_rows: usize) -> u32 {
+    if sub_rows == 4 {
+        return ((u64::from(covered) * 0xFFFF >> 18) as u32).min(0xFFFF);
+    }
     let full = sub_rows as u64 * SUB_ROW_ONE as u64;
     ((u64::from(covered) * 0xFFFF / full) as u32).min(0xFFFF)
 }
@@ -849,6 +852,98 @@ fn pixel_alpha(spans: &[(f64, f64)], px: i32, sub_rows: usize) -> u32 {
     coverage_to_alpha(covered, sub_rows)
 }
 
+/// Quantize each endpoint overlap once, in precisely pixel_alpha's arithmetic
+/// order. Every other pixel in a span contributes exactly SUB_ROW_ONE. Convex
+/// fills have at most four spans, so queries become four integer lane selects.
+struct PreparedSpans {
+    left: [i32; 4],
+    right: [i32; 4],
+    left_alpha: [u32; 4],
+    right_alpha: [u32; 4],
+}
+
+impl PreparedSpans {
+    fn new(spans: &[(f64, f64)]) -> Self {
+        let mut value = Self { left: [i32::MAX; 4], right: [i32::MIN; 4], left_alpha: [0; 4], right_alpha: [0; 4] };
+        for (i, &(left, right)) in spans.iter().enumerate() {
+            let lo = left.floor() as i32;
+            let hi = right.floor() as i32;
+            value.left[i] = lo;
+            value.right[i] = hi;
+            value.left_alpha[i] = sub_row_coverage(if lo == hi {right-left} else {(f64::from(lo)+1.0)-left});
+            value.right_alpha[i] = sub_row_coverage(right-f64::from(hi));
+        }
+        value
+    }
+
+    #[inline(always)]
+    fn alpha(&self, px: i32, sub_rows: usize) -> u32 {
+        #[cfg(all(target_arch="wasm32",target_feature="simd128"))]
+        let covered = unsafe {
+            use std::arch::wasm32::*;
+            // Every load spans exactly one four-element owned array.
+            let left = v128_load(self.left.as_ptr().cast());
+            let right = v128_load(self.right.as_ptr().cast());
+            let x = i32x4_splat(px);
+            let inside = v128_and(i32x4_gt(x,left),i32x4_lt(x,right));
+            let interior = v128_and(inside,u32x4_splat(65536));
+            let right_value = v128_bitselect(v128_load(self.right_alpha.as_ptr().cast()),interior,i32x4_eq(x,right));
+            let value = v128_bitselect(v128_load(self.left_alpha.as_ptr().cast()),right_value,i32x4_eq(x,left));
+            u32x4_extract_lane::<0>(value)+u32x4_extract_lane::<1>(value)+u32x4_extract_lane::<2>(value)+u32x4_extract_lane::<3>(value)
+        };
+        #[cfg(not(all(target_arch="wasm32",target_feature="simd128")))]
+        let covered = (0..4).map(|i|if px==self.left[i] {self.left_alpha[i]}else if px==self.right[i] {self.right_alpha[i]}else if px>self.left[i]&&px<self.right[i] {65536}else{0}).sum();
+        coverage_to_alpha(covered,sub_rows)
+    }
+
+    /// Four independent pixel columns, with exact u32 coverage arithmetic.
+    /// For c <= 4*65536, floor(c*65535/262144) is c/4 minus one
+    /// precisely when the remaining fraction cannot cover c/262144.
+    fn alphas4(&self,first:i32,sub_rows:usize)->[u32;4] {
+        #[cfg(all(target_arch="wasm32",target_feature="simd128"))]
+        if sub_rows==4 {
+            use std::arch::wasm32::*;
+            let x=i32x4(first,first+1,first+2,first+3);let mut covered=u32x4_splat(0);
+            for i in 0..4 {
+                let left=i32x4_splat(self.left[i]);let right=i32x4_splat(self.right[i]);
+                let interior=v128_and(v128_and(i32x4_gt(x,left),i32x4_lt(x,right)),u32x4_splat(65536));
+                let tail=v128_bitselect(u32x4_splat(self.right_alpha[i]),interior,i32x4_eq(x,right));
+                let contribution=v128_bitselect(u32x4_splat(self.left_alpha[i]),tail,i32x4_eq(x,left));
+                covered=i32x4_add(covered,contribution);
+            }
+            let fraction=i32x4_shl(v128_and(covered,u32x4_splat(3)),16);
+            let correction=v128_and(u32x4_gt(covered,fraction),u32x4_splat(1));
+            let alpha=i32x4_sub(u32x4_shr(covered,2),correction);
+            let mut output=[0;4];
+            // Store exactly four initialized u32 lanes.
+            unsafe {v128_store(output.as_mut_ptr().cast(),alpha);}
+            return output;
+        }
+        std::array::from_fn(|i|self.alpha(first+i as i32,sub_rows))
+    }
+
+    /// Most convex rows have one shared left column and one shared right
+    /// column. Emit those and their constant interior directly, without
+    /// sorting duplicate endpoints or querying the four spans repeatedly.
+    fn emit_common(&self, lines:&mut Vec<Scanline>, y:i32, lo_clip:i32, hi_clip:i32, count:usize, sub_rows:usize)->bool {
+        if count==0 {return true;}
+        let (lo,hi)=(self.left[0],self.right[0]);
+        if (1..count).any(|i|self.left[i]!=lo||self.right[i]!=hi){return false;}
+        let mut runs=RowRuns{lines,y,start:lo_clip,alpha:0};
+        if lo>=lo_clip&&lo<=hi_clip {runs.set(lo,coverage_to_alpha(self.left_alpha.iter().sum(),sub_rows));}
+        if hi>lo {
+            let start=lo.saturating_add(1).max(lo_clip);
+            let end=hi.saturating_sub(1).min(hi_clip);
+            if start<=end {runs.set(start,coverage_to_alpha(count as u32*65536,sub_rows));}
+            if hi>=lo_clip&&hi<=hi_clip {runs.set(hi,coverage_to_alpha(self.right_alpha.iter().sum(),sub_rows));}
+        }
+        let end=hi.saturating_add(1).max(lo_clip);
+        if end<=hi_clip {runs.set(end,0);}
+        runs.finish(hi_clip);
+        true
+    }
+}
+
 /// Builds one row's scanlines as maximal runs of equal non-zero alpha.
 struct RowRuns<'a> {
     lines: &'a mut Vec<Scanline>,
@@ -901,10 +996,30 @@ fn emit_row(
     sub_rows: usize,
 ) {
     edges.clear();
-    for &(left, right) in spans {
-        edges.push(left.floor() as i32);
-        edges.push(right.floor() as i32);
+    let prepared = if spans.len() <= 4 { Some(PreparedSpans::new(spans)) } else {
+        for &(left, right) in spans {
+            edges.push(left.floor() as i32);
+            edges.push(right.floor() as i32);
+        }
+        None
+    };
+    if let Some(prepared)=&prepared {
+        if prepared.emit_common(lines,y,ix_min,ix_max,spans.len(),sub_rows){return;}
+        // Small late-stage shapes touch fewer columns than the general
+        // endpoint sweep has events. Query those columns once each instead.
+        if ix_max-ix_min<=7 {
+            let mut runs=RowRuns{lines,y,start:ix_min,alpha:0};
+            let mut x=ix_min;
+            while x<=ix_max {
+                let alpha=prepared.alphas4(x,sub_rows);
+                for (i,value) in alpha.into_iter().enumerate().take((ix_max-x+1).min(4) as usize){runs.set(x+i as i32,value);}
+                x+=4;
+            }
+            runs.finish(ix_max);return;
+        }
+        for i in 0..spans.len(){edges.push(prepared.left[i]);edges.push(prepared.right[i]);}
     }
+    let alpha = |px| match &prepared {Some(prepared)=>prepared.alpha(px,sub_rows),None=>pixel_alpha(spans,px,sub_rows)};
     edges.sort_unstable();
     edges.dedup();
 
@@ -923,13 +1038,13 @@ fn emit_row(
             break;
         }
         if px < edge {
-            runs.set(px, pixel_alpha(spans, px, sub_rows));
+            runs.set(px, alpha(px));
         }
-        runs.set(edge, pixel_alpha(spans, edge, sub_rows));
+        runs.set(edge, alpha(edge));
         px = edge + 1;
     }
     if px <= ix_max {
-        runs.set(px, pixel_alpha(spans, px, sub_rows));
+        runs.set(px, alpha(px));
     }
     runs.finish(ix_max);
 }
@@ -999,6 +1114,30 @@ pub(crate) fn fill_polygon_direct(
         });
     }
 
+    if convex {
+        for iy in iy_min..iy_max {
+            spans.clear();
+            let mut x_min=f64::MAX;let mut x_max=f64::MIN;
+            for sample in 0..NUM_AA {
+                let y=iy as f64+(sample as f64+0.5)/NUM_AA as f64;
+                let mut first=None;
+                for side in sides.iter() {
+                    if y<side.y_lo||y>=side.y_hi {continue;}
+                    let t=(y-side.y0)/side.dy;let x=side.x0+t*side.dx;
+                    if let Some(left)=first {
+                        let (left,right)=if f64::total_cmp(&left,&x).is_gt(){(x,left)}else{(left,x)};
+                        x_min=x_min.min(left);x_max=x_max.max(right);
+                        spans.push((left,right));break;
+                    }else{first=Some(x);}
+                }
+            }
+            if spans.is_empty(){continue;}
+            let lo=(x_min.floor() as i32).max(0);let hi=((x_max.ceil() as i32)-1).min(w-1);
+            if lo<=hi {emit_row(lines,edges,spans,iy,lo,hi,NUM_AA);}
+        }
+        return;
+    }
+
     for iy in iy_min..iy_max {
         // Collect the x crossings of every sub-row, tagged with the sub-row.
         hits.clear();
@@ -1010,8 +1149,8 @@ pub(crate) fn fill_polygon_direct(
                 if y_sub < side.y_lo || y_sub >= side.y_hi {
                     continue;
                 }
-                let t = (y_sub - side.y0) / side.dy;
-                let x = side.x0 + t * side.dx;
+                let t=(y_sub-side.y0)/side.dy;
+                let x=side.x0+t*side.dx;
                 hits.push((x, s));
                 if convex && hits.len() == sub_start + 2 {
                     break;
@@ -1190,6 +1329,14 @@ mod tests {
     use crate::worker::WorkerCtx;
     use rand::{RngExt, SeedableRng};
     use rand_chacha::ChaCha8Rng;
+
+    #[test]
+    fn four_subrow_integer_lane_conversion_matches_original() {
+        for covered in 0..=4*65536u32 {
+            let lane=(covered>>2)-u32::from(covered>((covered&3)<<16));
+            assert_eq!(lane,coverage_to_alpha(covered,4));
+        }
+    }
 
     /// The convex fill, which stops at a sub-row's second crossing and
     /// orders the pair without a sort, equals the general even-odd fill on

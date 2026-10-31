@@ -276,6 +276,15 @@ pub fn optimise(
     optimise_shapes(target, background, history, alpha, settings, cancelled)
 }
 
+/// Run the identical joint optimizer with completed-iteration progress.
+pub fn optimise_observed(model:&Model,alpha:Alpha,settings:Settings,mut cancelled:impl FnMut()->bool,mut progress:impl FnMut(u32,u32))->Option<Drawing>{
+    let(target,background,history)=model.joint_parts();
+    let Parts{scene,mut layers,fixed}=parts::<f32>(target,background,history,settings.curved);
+    let iterations=settings.iterations.unwrap_or_else(||default_iterations(layers.len()))as usize;
+    run_observed(&scene,&mut layers,iterations,alpha==Alpha::Auto,settings.tuning,&mut cancelled,&mut progress)?;
+    if cancelled(){return None;}Some(export(&scene,&layers,&fixed,background))
+}
+
 /// The difference between `drawing`, an [`optimise`] result for `model`,
 /// rendered by [`optimise`]'s model, and `model`'s target: the RMSE over
 /// the RGB channels divided by 255, as [`Model::score_f64`] measures the
@@ -738,6 +747,18 @@ fn run<F: Real>(
     tuning: Tuning,
     cancelled: &mut impl FnMut() -> bool,
 ) -> Option<()> {
+    run_observed(scene,layers,iterations,auto_alpha,tuning,cancelled,&mut |_,_|{})
+}
+
+fn run_observed<F: Real>(
+    scene: &Scene<F>,
+    layers: &mut [Layer],
+    iterations: usize,
+    auto_alpha: bool,
+    tuning: Tuning,
+    cancelled: &mut impl FnMut() -> bool,
+    progress: &mut impl FnMut(u32,u32),
+) -> Option<()> {
     for layer in layers.iter_mut() {
         project(layer);
     }
@@ -752,6 +773,7 @@ fn run<F: Real>(
     // `β^t`, as running products.
     let (mut power1, mut power2) = (1.0, 1.0);
     for t in 0..iterations {
+        progress(t as u32,iterations as u32);
         if cancelled() {
             return None;
         }

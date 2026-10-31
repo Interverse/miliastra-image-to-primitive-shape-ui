@@ -54,6 +54,8 @@ mod input;
 pub mod lab;
 mod output;
 mod pipeline;
+mod mixed;
+mod turbo;
 mod raster;
 mod svg;
 
@@ -280,6 +282,12 @@ pub struct ApproximateRequest {
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProgressInfo {
+    /// A throttled intermediate render, never the final export.
+    pub preview: Option<String>,
+    /// Layer replaced/appended by shape; independent of mapped UI progress.
+    pub preview_index: Option<u32>,
+    /// Completed layer operations and maximum scheduled refinement work.
+    pub refinement: Option<(u32,u32)>,
     /// The step just completed, from `1` to `total`.
     pub step: u32,
     /// The number of steps the render runs, [`RenderOptions::count`].
@@ -364,11 +372,20 @@ pub struct Execution<'a> {
     cancel: Option<&'a CancellationToken>,
     phase: Option<&'a mut dyn FnMut(&'static str)>,
     fast: bool,
+    fastest: bool,
+    turbo: bool,
+    live_progress: bool,
 }
 
 impl<'a> Execution<'a> {
-    /// Select the latency-oriented search without changing the shape count.
+    /// Enable equivalent implementation optimizations for the full search.
     pub fn fast(mut self,enabled:bool)->Self{self.fast=enabled;self}
+    /// Select the earlier reduced-effort search without changing the shape count.
+    pub fn fastest(mut self,enabled:bool)->Self{self.fastest=enabled;self}
+    /// Experimental direct source-RGBA fitting with structured proposals.
+    pub fn turbo(mut self,enabled:bool)->Self{self.turbo=enabled;self}
+    /// Include browser-only refinement and layer updates in progress.
+    pub fn live_progress(mut self,enabled:bool)->Self{self.live_progress=enabled;self}
     /// Observe stage boundaries for performance diagnostics.
     pub fn phases(mut self, observer:&'a mut dyn FnMut(&'static str))->Self {self.phase=Some(observer);self}
     fn mark(&mut self,name:&'static str){if let Some(observer)=self.phase.as_mut(){observer(name);}}
@@ -524,16 +541,41 @@ pub fn approximate(
     render_drawing(&drawing, size, output)
 }
 
+fn refinement_update(execution:&mut Execution<'_>,count:u32,done:u32,total:u32,index:usize,shape:&primeval_core::DrawnShape){
+    if !execution.live_progress{return;}
+    if let Some(observer)=execution.progress.as_mut(){observer(ProgressInfo{refinement:Some((done,total)),preview_index:Some(index as u32),preview:None,step:count,total:count,score:0.0,shape:svg::shape_element(&shape.geometry,shape.color)});}
+}
+fn preview_svg(drawing:&Drawing)->Option<String>{
+    match render_drawing(drawing, drawing.width.max(drawing.height), OutputFormat::Svg).ok()? {ApproximateResult::Svg{data,..}=>Some(data),_=>None}
+}
+
 /// Fit once and retain final geometry, after every original refinement stage.
-pub fn approximate_drawing(
+pub fn approximate_drawing(request:ApproximateRequest,execution:Execution<'_>)->Result<Drawing,ApproximateError>{
+    if execution.turbo{return turbo::fit(request,execution);}
+    if request.render.shape==ShapeKind::Mixed{return mixed::fit(request,execution);}
+    approximate_drawing_inner(request,execution)
+}
+
+fn approximate_drawing_inner(
+    request: ApproximateRequest,
+    execution: Execution<'_>,
+) -> Result<Drawing, ApproximateError> {
+    approximate_decoded(request, execution, None)
+}
+
+// Internal decoded-image entry point: reference fitting need not encode a PNG
+// solely to decode the same RGB bytes again. The search pipeline is unchanged.
+fn approximate_decoded(
     request: ApproximateRequest,
     mut execution: Execution<'_>,
+    decoded: Option<DynamicImage>,
 ) -> Result<Drawing, ApproximateError> {
     let ApproximateRequest {
         input,
         output: _,
-        render,
+        mut render,
     } = request;
+    if render.background==BackgroundOption::TransparentFast&&!execution.fastest {render.background=BackgroundOption::TransparentReference;}
     if matches!(render.background,BackgroundOption::Transparent|BackgroundOption::TransparentReference|BackgroundOption::TransparentFast) {
         validate_options(&render)?;
         execution.check_cancelled()?;
@@ -544,7 +586,6 @@ pub fn approximate_drawing(
             execution.mark("reference-start");
             let mut flat=image.clone();flatten_onto(&mut flat,Color::new(240,240,245,255));
             let rgb=DynamicImage::ImageRgba8(flat).into_rgb8();
-            let bytes=raster::encode_png(rgb.width(),rgb.height(),rgb.as_raw()).map_err(|_|ApproximateError::internal("reference PNG encoding failed"))?;
             let mut options=render;options.background=BackgroundOption::Auto;
             // Only seed geometry coarsely. The RGBA target and residual search
             // below still use the full user-selected fitting resolution.
@@ -554,7 +595,9 @@ pub fn approximate_drawing(
                 let seed_detail=(128.0*(f64::from(render.count)/2000.0).sqrt()).ceil() as u32;
                 options.resize_input=render.resize_input.min(seed_detail.max(128));
             }
-            let drawing=approximate_drawing(ApproximateRequest{input:bytes,output:OutputFormat::Png,render:options},Execution{progress:execution.progress.take(),cancel:execution.cancel,phase:None,fast:render.background==BackgroundOption::TransparentFast})?;
+            let live=execution.live_progress;
+            let mut reference_progress=|mut info:ProgressInfo|{if live{info.preview=None;info.preview_index=None;info.shape.clear();}if let Some(observer)=execution.progress.as_mut(){observer(info);}};
+            let drawing=approximate_decoded(ApproximateRequest{input:Vec::new(),output:OutputFormat::Png,render:options},Execution{progress:Some(&mut reference_progress),cancel:execution.cancel,phase:None,fast:execution.fast,fastest:execution.fastest,turbo:false,live_progress:live},Some(DynamicImage::ImageRgb8(rgb)))?;
             execution.mark("reference-end");Some(drawing)
         }else{None};
         // Resample premultiplied channels: invisible RGB cannot bleed into edges.
@@ -579,6 +622,7 @@ pub fn approximate_drawing(
             [f64::from(p[0]).clamp(0.0,a),f64::from(p[1]).clamp(0.0,a),f64::from(p[2]).clamp(0.0,a),a]
         }).collect();
         let mut model=primeval_core::rgba::RgbaModel::new(w,h,target.clone(),render.seed);
+        if execution.fast||execution.fastest {model.enable_exact_optimizations();}
         if let Some(mut drawing)=reference {
             execution.mark("foundation-start");
             if drawing.width!=w||drawing.height!=h {
@@ -599,10 +643,12 @@ pub fn approximate_drawing(
             let rgb=raster::render_rgb(&foundation,w,h).ok_or_else(||ApproximateError::internal("foundation raster allocation failed"))?;
             let base_target=target.iter().enumerate().map(|(i,p)|{let a=p[3];[f64::from(rgb[i*3])/255.0*a,f64::from(rgb[i*3+1])/255.0*a,f64::from(rgb[i*3+2])/255.0*a,a]}).collect();
             let mut base=primeval_core::rgba::RgbaModel::new(w,h,base_target,render.seed);
-            for _ in 0..base_count {
+            if execution.fast||execution.fastest {base.enable_exact_optimizations();}
+            for foundation_step in 0..base_count {
                 execution.check_cancelled()?;
                 if render.background==BackgroundOption::TransparentFast&&w.max(h)>256 {base.step_foundation_fast(render.shape);}
                 else {base.step(render.shape);}
+                if execution.live_progress {if let Some(observer)=execution.progress.as_mut(){let d=base.snapshot();let last=d.shapes.last().unwrap();observer(ProgressInfo{refinement:None,preview_index:Some(foundation_step as u32),preview:if foundation_step==0{preview_svg(&d)}else{None},step:render.count,total:render.count,score:base.score(),shape:svg::shape_element(&last.geometry,last.color)});}}
             }
             if !(if render.background==BackgroundOption::TransparentFast {base.refine_fast(||execution.is_cancelled())}else{base.refine(||execution.is_cancelled())}){return Err(ApproximateError::Aborted);}
             let mut replacement=base.drawing().shapes;replacement.extend_from_slice(&drawing.shapes[base_count..]);drawing.shapes=replacement;
@@ -611,40 +657,51 @@ pub fn approximate_drawing(
                 // block export. Retain a complete independent RGBA fit instead.
                 for _ in 0..render.count {execution.check_cancelled()?;model.step(render.shape);}
             }
+            if execution.live_progress {if let Some(observer)=execution.progress.as_mut(){observer(ProgressInfo{refinement:None,preview_index:None,preview:preview_svg(&model.snapshot()),step:render.count,total:render.count,score:model.score(),shape:String::new()});}}
             execution.mark("foundation-end");
         }else {for step in 0..render.count {
             execution.check_cancelled()?;
             let shape=model.step(render.shape).clone();
-            if let Some(progress)=execution.progress.as_mut(){progress(ProgressInfo{step:step+1,total:render.count,score:model.score(),shape:svg::shape_element(&shape.geometry,shape.color)});}
+            if let Some(progress)=execution.progress.as_mut(){progress(ProgressInfo{refinement:None,preview_index:Some(step),preview:if step==0 || (step+1)%((render.count/40).max(32))==0{preview_svg(&model.snapshot())}else{None},step:step+1,total:render.count,score:model.score(),shape:svg::shape_element(&shape.geometry,shape.color)});}
         }}
         execution.check_cancelled()?;
         execution.mark("refine-start");
-        let refined=if render.background==BackgroundOption::TransparentFast {
-            if w.max(h)>256 {model.polish_colors(||execution.is_cancelled())}
-            else {model.refine_initial_fast(||execution.is_cancelled())}
-        }else{model.refine(||execution.is_cancelled())};
+        let cancel=execution.cancel;
+        let (passes,rounds)=if render.background==BackgroundOption::TransparentFast{if w.max(h)>256{(1,0)}else{(1,2)}}else{(12,4)};
+        let refined=model.refine_observed(passes,rounds,||cancel.is_some_and(CancellationToken::is_cancelled),|done,total,index,shape|refinement_update(&mut execution,render.count,done,total,index,shape));
         if !refined{return Err(ApproximateError::Aborted);}
         execution.mark("refine-end");execution.mark("residual-start");
-        if render.background==BackgroundOption::TransparentFast{
+        if matches!(render.background,BackgroundOption::TransparentFast|BackgroundOption::TransparentReference){
             let cancel=execution.cancel;
-            if !model.recycle_fast(render.shape,||cancel.is_some_and(CancellationToken::is_cancelled),||execution.mark("residual-placement-end")){return Err(ApproximateError::Aborted);}
-        }else if render.background==BackgroundOption::TransparentReference && !model.recycle_empty(render.shape,||execution.is_cancelled()){return Err(ApproximateError::Aborted);}
+            if !model.recycle_observed(render.shape,render.background==BackgroundOption::TransparentFast,||cancel.is_some_and(CancellationToken::is_cancelled),||{},|done,total,index,shape|refinement_update(&mut execution,render.count,done,total,index,shape)){return Err(ApproximateError::Aborted);}
+        }
         execution.mark("color-polish-start");
         if render.background==BackgroundOption::TransparentFast&&!model.polish_colors(||execution.is_cancelled()){return Err(ApproximateError::Aborted);}
         execution.mark("residual-end");return Ok(model.drawing());
     }
-    let (target, background) = working_target(input, &render, || execution.check_cancelled())?;
+    execution.mark("rgb-prepare-start");
+    let (target, background) = if let Some(image) = decoded {
+        validate_options(&render)?;
+        execution.check_cancelled()?;
+        let (working, background) = prepare_target(image, render.background, render.resize_input);
+        let (width, height) = working.dimensions();
+        (Buffer::from_rgb(width, height, working.into_raw()).ok_or_else(|| ApproximateError::internal("working image has an invalid pixel length"))?, background)
+    } else {
+        working_target(input, &render, || execution.check_cancelled())?
+    };
+    execution.mark("rgb-prepare-end");
     let mut options = ModelOptions::default();
     options.seed = render.seed;
     let mut model = Model::new(target, background, options);
-    if execution.fast {model.use_fast_search();}
+    if execution.fastest {model.use_fast_search();}
 
     let mut pipeline = pipeline::pipeline(render.shape);
-    if execution.fast {
+    if execution.fastest {
         pipeline.during=pipeline::During::Spaced{interval:64,divisor:1};
         pipeline.refits=pipeline::Refits::Passes(1);
         if render.shape==ShapeKind::RotatedEllipse {pipeline.joint=None;}
     }
+    execution.mark("rgb-search-start");
     for step in 0..render.count {
         execution.check_cancelled()?;
 
@@ -655,6 +712,8 @@ pub fn approximate_drawing(
                 .last_shape()
                 .ok_or_else(|| ApproximateError::internal("a step committed no shape"))?;
             progress(ProgressInfo {
+                refinement:None,preview_index:Some(step),
+                preview: if step==0 || (step+1)%((render.count/40).max(32))==0 {preview_svg(&model.drawing())}else{None},
                 step: step + 1,
                 total: render.count,
                 score: model.score_f64(),
@@ -675,13 +734,18 @@ pub fn approximate_drawing(
         .ok_or(ApproximateError::Aborted)?;
     }
 
+    execution.mark("rgb-search-end");
+    execution.mark("rgb-final-start");
     // The final stage revises the greedy shapes before encoding; it reports
     // no progress and stops once cancelled.
     execution.check_cancelled()?;
-    let (drawing, _) = pipeline::final_stage(&mut model, pipeline, render.alpha, None, || {
-        execution.is_cancelled()
+    let cancel=execution.cancel;
+    let (drawing, _) = pipeline::final_stage_observed(&mut model, pipeline, render.alpha, None, ||cancel.is_some_and(CancellationToken::is_cancelled),|done,total|{
+        if execution.live_progress {if let Some(observer)=execution.progress.as_mut(){observer(ProgressInfo{refinement:Some((done,total)),preview_index:None,preview:None,step:render.count,total:render.count,score:0.0,shape:String::new()});}}
     })
     .ok_or(ApproximateError::Aborted)?;
+
+    execution.mark("rgb-final-end");
 
     execution.check_cancelled()?;
     Ok(drawing)
@@ -869,6 +933,20 @@ mod tests {
     use super::*;
     use image::{DynamicImage, ImageFormat, Rgb, Rgba, RgbaImage};
     use std::error::Error as _;
+
+    #[test]
+    fn decoded_reference_matches_lossless_png_roundtrip() {
+        let rgba=RgbaImage::from_fn(32,24,|x,y|Rgba([(x*7)as u8,(y*9)as u8,90,if x<8{0}else{180}]));
+        let mut flat=rgba;flatten_onto(&mut flat,Color::new(240,240,245,255));
+        let rgb=DynamicImage::ImageRgba8(flat).into_rgb8();
+        let bytes=raster::encode_png(rgb.width(),rgb.height(),rgb.as_raw()).unwrap();
+        for shape in [ShapeKind::Triangle,ShapeKind::RotatedEllipse,ShapeKind::RotatedRectangle] {
+            let mut render=RenderOptions::default();render.shape=shape;render.count=8;render.resize_input=32;render.seed=Some(42);
+            let old=approximate_drawing_inner(ApproximateRequest{input:bytes.clone(),output:OutputFormat::Png,render},Execution::new().fast(true)).unwrap();
+            let new=approximate_decoded(ApproximateRequest{input:Vec::new(),output:OutputFormat::Png,render},Execution::new().fast(true),Some(DynamicImage::ImageRgb8(rgb.clone()))).unwrap();
+            assert_eq!(old,new,"decoded RGB must preserve the entire reference fit");
+        }
+    }
 
     fn fixture_image() -> DynamicImage {
         let image = RgbaImage::from_fn(12, 8, |x, y| {

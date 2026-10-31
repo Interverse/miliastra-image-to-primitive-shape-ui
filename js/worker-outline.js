@@ -833,16 +833,17 @@ function processOutline(jobId, rgba, width, height, config) {
     postMessage({
       type: "progress", jobId,
       step: 10 + Math.round(80 * (ci + 1) / bigContours.length), total: 100,
-      phase: "beads",
+      phase: "beads", previewSvg: outlinePreview(),
     });
   });
 
+  function outlinePreview(){return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">${allElements.map(e=>{const color=/^#[0-9a-f]{6}$/i.test(typeColors[e.type]||e.color||'')?(typeColors[e.type]||e.color):'#ffffff';const s=e.size;const shape=e.type===ELLIPSE?`<ellipse rx="${s.rx}" ry="${s.ry}"/>`:`<rect x="${-s.width/2}" y="${-s.height/2}" width="${s.width}" height="${s.height}"/>`;return `<g transform="translate(${e.center.x} ${e.center.y}) rotate(${e.rotation||0})" fill="${color}">${shape}</g>`;}).join('')}</svg>`;}
   allElements = suppressOverlap(allElements, width, height);
   for (const element of allElements) {
     if (typeColors[element.type]) element.color = typeColors[element.type];
   }
 
-  postMessage({ type: "progress", jobId, step: 95, total: 100, phase: "export" });
+  postMessage({ type: "progress", jobId, step: 95, total: 100, phase: "export", previewSvg:outlinePreview() });
 
   /* export transform (unit conversion, rect pivot shift) */
   const originUnits = { x: imageCenter[0] / primitiveSize, y: -imageCenter[1] / primitiveSize };

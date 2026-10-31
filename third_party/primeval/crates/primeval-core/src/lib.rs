@@ -33,6 +33,7 @@ mod error;
 mod error_grid;
 pub mod joint;
 mod model;
+mod mixed;
 mod optimize;
 mod prefix;
 mod raster;

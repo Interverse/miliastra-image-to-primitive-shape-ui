@@ -18,7 +18,7 @@ const server=http.createServer((req,res)=>{
  if(process.env.CHROME_PATH)launch.executablePath=process.env.CHROME_PATH;
  else if(!fs.existsSync(chromium.executablePath()))launch.channel='chrome';
  const browser=await chromium.launch(launch);
- const page=await browser.newPage({viewport:{width:Number(process.argv[2])||1440,height:1000},serviceWorkers:fallbackOnly?'block':'allow'});
+ const page=await browser.newPage({viewport:{width:Number(process.argv[2])||1440,height:1000},deviceScaleFactor:Number(process.env.TEST_DPR)||1,serviceWorkers:fallbackOnly?'block':'allow'});
  page.on('pageerror',error=>console.error('PAGEERROR',error.message));
  if(fallbackOnly){
   await page.goto('http://127.0.0.1:8350/index.html');
@@ -76,6 +76,7 @@ const server=http.createServer((req,res)=>{
    if(layout.scroll>layout.width+1)throw Error('Horizontal overflow '+method+' '+JSON.stringify(layout));
    await page.locator('#app').screenshot({path:path.join(output,`site-${method}-${process.argv[2]||1440}.png`)});
    if(method==='primeval'){
+    await app.selectOption('#primevalSpeed','turbo');await page.locator('#app').screenshot({path:path.join(output,`site-turbo-${process.argv[2]||1440}.png`)});
     await app.locator('#enablePngMode').uncheck();await app.locator('#useBackgroundColor').check();await app.locator('#backgroundColorRow').scrollIntoViewIfNeeded();
     const customLayout=await app.evaluate(()=>({scroll:document.documentElement.scrollWidth,width:document.documentElement.clientWidth}));
     if(customLayout.scroll>customLayout.width+1)throw Error('Horizontal overflow custom background');
@@ -87,6 +88,8 @@ const server=http.createServer((req,res)=>{
   await app.locator('#classicToolTab').click();await page.locator('#app').screenshot({path:path.join(output,`site-conversion-${process.argv[2]||1440}.png`)});
   await app.locator('#imageToolTab').click();await app.locator('.job-card:has(.job-status.done) .job-actions button').first().click();
   await page.locator('#app').screenshot({path:path.join(output,`site-result-${process.argv[2]||1440}.png`)});
+  await app.locator('#mainCanvas').click({position:await app.locator('#mainCanvas').evaluate(e=>({x:e.clientWidth/2,y:e.clientHeight/2}))});
+  await page.locator('#app').screenshot({path:path.join(output,`site-gizmos-${process.argv[2]||1440}.png`)});
   console.log('PASS '+report.split('\n').length+' checks; upload/result/decoration/conversion screenshots at '+(process.argv[2]||1440));
  }
  await browser.close();server.close();if(!ok)process.exitCode=1;

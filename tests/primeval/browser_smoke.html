@@ -12,11 +12,20 @@ frame.addEventListener('load',async()=>{
   const change=(id,value)=>{$(id).value=value;$(id).dispatchEvent(new w.Event('change'));};
   check(Array.from($('fitMethod').options,o=>o.value).join(',')==='primeval,gaussian,legacy','three fitting methods, Primeval default');
   check($('fitMethod').value==='primeval','Primeval is the default');
-  check($('primevalSpeed').value==='fast','Fast optimization is the default');
-  change('primevalSpeed','quality');
-  check($('shapeRect').checked,'Rectangle preserves the previous default shape');
+  check(Array.from($('primevalSpeed').options,o=>o.value).join(',')==='turbo,fastest,fast','optimization order');
+  check(Array.from($('retryPrimevalSpeed').options,o=>o.value).join(',')==='turbo,fastest,fast'&&$('retryPrimevalSpeed').value==='turbo','retry optimization order and default');
+  check($('primevalSpeed').value==='turbo'&&$('primevalSpeed').selectedOptions[0].textContent==='Turbo','Turbo is the default without experimental tag');
+  change('primevalSpeed','fast');
+  check($('shapeMixed').checked,'Mixed is the default shape');
+  check(w.getComputedStyle($('legacyShapeChecks')).gridTemplateColumns.split(' ').length===2,'Primeval uses a balanced two-column shape grid');
+  check($('primevalSpeed').selectedOptions[0].textContent===w.LOCALES.en['fitting.maximumDetail'],'merged detail mode uses the accelerated exact implementation');
   for(const lang of Object.keys(w.LOCALES)){
    change('langSelect',lang);check($('fitMethod').options[2].textContent===w.LOCALES[lang]['fitting.legacy'],'localized selector '+lang);
+   const cards=Array.from($('legacyShapeChecks').children).filter(e=>!e.hidden);
+   check(cards.length===4&&cards.every(e=>e.scrollWidth<=e.clientWidth+1),'four shape cards fit '+lang);
+   check($('primevalSpeed').options[0].textContent===w.LOCALES[lang]['fitting.turbo'],'localized optimization controls '+lang);
+   check($('shapeMixed').parentElement.textContent.includes(w.LOCALES[lang]['shapes.mixed']),'localized Mixed '+lang);
+   check($('primevalSpeed').options[1].textContent===w.LOCALES[lang]['fitting.fastest']&&$('retryPrimevalSpeed').options[1].textContent===w.LOCALES[lang]['fitting.fastest'],'localized Fastest '+lang);
   }
   change('langSelect','en');
   check($('backgroundColorSettings').hidden,'custom background hidden in PNG mode');
@@ -41,11 +50,13 @@ frame.addEventListener('load',async()=>{
   w.URL.createObjectURL=blob=>{const url=originalCreate(blob);blobs.set(url,blob);return url;};
   const originalClick=w.HTMLAnchorElement.prototype.click;
   w.HTMLAnchorElement.prototype.click=function(){if(this.download)downloads.push({name:this.download,blob:blobs.get(this.href)});else originalClick.call(this);};
-  async function download(id){const n=downloads.length;$(id).click();await wait(()=>downloads.length>n||errors.length);check(!errors.length,id+' succeeds');return downloads.at(-1).blob;}
+  async function download(id){if(id==='btnExportClientLua')for(const input of d.querySelectorAll('#shapeTemplateIndexes input')){input.value={ellipse:123,rectangle:124,triangle:125}[input.dataset.shape];input.dispatchEvent(new w.Event('input'));}const n=downloads.length;$(id).click();await wait(()=>downloads.length>n||errors.length);check(!errors.length,id+' succeeds');return downloads.at(-1).blob;}
   async function upload(){
    const blob=await(await fetch('fixtures/input.png')).blob(),transfer=new w.DataTransfer();transfer.items.add(new w.File([blob],'golden.png',{type:'image/png'}));
    $('fileInput').files=transfer.files;$('fileInput').dispatchEvent(new w.Event('change'));
   }
+  let latestNative;const captureNative=w.Worker.prototype.postMessage;
+  w.Worker.prototype.postMessage=function(message,...args){if(message.cmd==='process')this.addEventListener('message',({data})=>{if(data.type==='done')latestNative=data.result;});return captureNative.call(this,message,...args);};
   let done=0;
   for(const [shape,id] of [['circle','shapeCircle'],['triangle','shapeTriangle'],['rect','shapeRect']]){
    $('homeLink').click();change('fitMethod','primeval');$(id).click();$('numPrimsManual').value='40';$('primevalResolution').value='512';
@@ -54,6 +65,8 @@ frame.addEventListener('load',async()=>{
    d.querySelectorAll('.job-card')[done-1].querySelector('.job-actions button').click();
    const json=JSON.parse(await(await download('btnExportJSON')).text());
    check(json.elements.length===41&&json.config.fit_method==='primeval','requested shape count plus one background '+shape);
+   const rerendered=await w.NativeEdit.render(latestNative,latestNative.primeval_drawing,latestNative.elements);
+   const originalBytes=new Uint8Array(latestNative.primeval_png);check(rerendered.data.length===originalBytes.length&&rerendered.data.every((v,i)=>v===originalBytes[i]),'native edit renderer preserves untouched pixels '+shape);
    const type={circle:'ellipse',triangle:'triangle',rect:'rectangle'}[shape];
    check(json.elements.slice(1).every(e=>e.type===type),'exclusive exported geometry '+shape);
    if(shape==='triangle')check(json.elements.slice(1).every(e=>e.triangle_pivot==='box'&&e.image_asset_ref===100003),'one centered triangle asset per shape');
@@ -65,6 +78,46 @@ frame.addEventListener('load',async()=>{
     const element=json.elements.findLast(e=>e.center.x>8&&e.center.x<56&&-e.center.y>8&&-e.center.y<56),canvas=$('mainCanvas'),wrap=$('canvasWrap'),rect=canvas.getBoundingClientRect();
     canvas.dispatchEvent(new w.MouseEvent('click',{bubbles:true,clientX:rect.left+(wrap.clientWidth-64)/2+element.center.x,clientY:rect.top+(wrap.clientHeight-64)/2-element.center.y}));
     check(!$('btnDeleteSel').disabled,'fitted triangle can be selected');
+    const beforeTransform=JSON.parse(await(await download('btnExportJSON')).text());
+    const a=-(typeof element.rotation==='object'?element.rotation.z:element.rotation||0)*Math.PI/180;
+    const ox=rect.left+(wrap.clientWidth-64)/2,oy=rect.top+(wrap.clientHeight-64)/2;
+    const gizmoAngle=-Number($('editRot').value)*Math.PI/180,gizmoHeight=Number($('editSizeB').value)*($('editShape').value==='ellipse'?1:.5),gy=-(Math.max(gizmoHeight,12)+28),gx=Number($('editX').value)-gy*Math.sin(gizmoAngle),gy2=-Number($('editY').value)+gy*Math.cos(gizmoAngle);
+    canvas.dispatchEvent(new w.PointerEvent('pointerdown',{pointerId:77,button:0,clientX:ox+gx,clientY:oy+gy2}));
+    canvas.dispatchEvent(new w.PointerEvent('pointermove',{pointerId:77,clientX:ox+gx+15,clientY:oy+gy2+10}));
+    canvas.dispatchEvent(new w.PointerEvent('pointerup',{pointerId:77}));
+    canvas.dispatchEvent(new w.MouseEvent('click',{bubbles:true}));
+    check(JSON.stringify(JSON.parse(await(await download('btnExportJSON')).text()).elements)!==JSON.stringify(beforeTransform.elements),'rotation gizmo changes exported geometry');
+    $('btnUndo').click();
+    canvas.dispatchEvent(new w.MouseEvent('click',{bubbles:true,clientX:rect.left+(wrap.clientWidth-64)/2+element.center.x,clientY:rect.top+(wrap.clientHeight-64)/2-element.center.y}));
+
+    const cornerX=element.center.x+Math.max(element.size.width/2,12)*Math.cos(a)-Math.max(element.size.height/2,12)*Math.sin(a),cornerY=-element.center.y+Math.max(element.size.width/2,12)*Math.sin(a)+Math.max(element.size.height/2,12)*Math.cos(a);
+    canvas.dispatchEvent(new w.PointerEvent('pointerdown',{pointerId:78,button:0,clientX:ox+cornerX,clientY:oy+cornerY}));
+    canvas.dispatchEvent(new w.PointerEvent('pointermove',{pointerId:78,clientX:ox+cornerX+16,clientY:oy+cornerY+12}));canvas.dispatchEvent(new w.PointerEvent('pointerup',{pointerId:78}));canvas.dispatchEvent(new w.MouseEvent('click',{bubbles:true}));
+    check(JSON.stringify(JSON.parse(await(await download('btnExportJSON')).text()).elements)!==JSON.stringify(beforeTransform.elements),'scale gizmo changes exported geometry');
+    $('btnUndo').click();$('btnResetView').click();const currentRect=canvas.getBoundingClientRect();canvas.dispatchEvent(new w.PointerEvent('pointerdown',{pointerId:79,button:0,clientX:currentRect.left+(wrap.clientWidth-64)/2+element.center.x,clientY:currentRect.top+(wrap.clientHeight-64)/2-element.center.y}));canvas.dispatchEvent(new w.PointerEvent('pointerup',{pointerId:79}));
+    const axisBefore=JSON.parse(await(await download('btnExportJSON')).text()).elements;
+    const ax=Number($('editX').value),ay=-Number($('editY').value),angle=-Number($('editRot').value)*Math.PI/180,halfWidth=Math.max(12,Number($('editSizeA').value)*($('editShape').value==='ellipse'?1:0.5));
+    const rightX=currentRect.left+(wrap.clientWidth-64)/2+ax+halfWidth*Math.cos(angle),rightY=currentRect.top+(wrap.clientHeight-64)/2+ay+halfWidth*Math.sin(angle);
+    canvas.dispatchEvent(new w.PointerEvent('pointerdown',{pointerId:80,button:0,clientX:rightX,clientY:rightY}));canvas.dispatchEvent(new w.PointerEvent('pointermove',{pointerId:80,clientX:rightX+15*Math.cos(angle),clientY:rightY+15*Math.sin(angle)}));canvas.dispatchEvent(new w.PointerEvent('pointerup',{pointerId:80}));canvas.dispatchEvent(new w.MouseEvent('click',{bubbles:true}));
+    const axisAfter=JSON.parse(await(await download('btnExportJSON')).text()).elements;const axisChanged=axisAfter.findIndex((e,i)=>JSON.stringify(e.size)!==JSON.stringify(axisBefore[i].size));
+    check(axisChanged>=0&&(axisAfter[axisChanged].size.height??axisAfter[axisChanged].size.ry)===(axisBefore[axisChanged].size.height??axisBefore[axisChanged].size.ry),'X handle changes width independently of height');
+    $('btnUndo').click();canvas.dispatchEvent(new w.PointerEvent('pointerdown',{pointerId:83,button:0,clientX:currentRect.left+(wrap.clientWidth-64)/2+element.center.x,clientY:currentRect.top+(wrap.clientHeight-64)/2-element.center.y}));canvas.dispatchEvent(new w.PointerEvent('pointerup',{pointerId:83}));
+    const yBefore=JSON.parse(await(await download('btnExportJSON')).text()).elements;
+    await new Promise(resolve=>w.requestAnimationFrame(resolve));
+    const yRect=canvas.getBoundingClientRect(),ys=Number(canvas.dataset.viewScale),yox=Number(canvas.dataset.viewOffsetX),yoy=Number(canvas.dataset.viewOffsetY);
+    const yHalfW=Math.max(12/ys,Number($('editSizeA').value)*($('editShape').value==='ellipse'?1:.5)),yHalfH=Math.max(12/ys,Number($('editSizeB').value)*($('editShape').value==='ellipse'?1:.5)),ya=-Number($('editRot').value)*Math.PI/180;
+    const ycx=Number($('editX').value),ycy=-Number($('editY').value),startYx=yRect.left+yox+(ycx+yHalfW*.4*Math.cos(ya)+yHalfH*Math.sin(ya))*ys,startYy=yRect.top+yoy+(ycy+yHalfW*.4*Math.sin(ya)-yHalfH*Math.cos(ya))*ys;
+    canvas.dispatchEvent(new w.PointerEvent('pointerdown',{pointerId:84,button:0,clientX:startYx,clientY:startYy}));const yAxis=canvas.dataset.transformAxis;check(yAxis==='y','top box edge selects Y-only resizing');canvas.dispatchEvent(new w.PointerEvent('pointermove',{pointerId:84,clientX:startYx+15*Math.sin(ya),clientY:startYy-15*Math.cos(ya)}));canvas.dispatchEvent(new w.PointerEvent('pointerup',{pointerId:84}));canvas.dispatchEvent(new w.MouseEvent('click',{bubbles:true}));
+    const yAfter=JSON.parse(await(await download('btnExportJSON')).text()).elements,yChanged=yAfter.findIndex((e,i)=>JSON.stringify(e.size)!==JSON.stringify(yBefore[i].size));
+    check(yChanged>=0&&(yAfter[yChanged].size.width??yAfter[yChanged].size.rx)===(yBefore[yChanged].size.width??yBefore[yChanged].size.rx),'dragging top edge away from its midpoint changes Y without changing X '+JSON.stringify({yChanged,before:yChanged>=0?yBefore[yChanged].size:null,after:yChanged>=0?yAfter[yChanged].size:null,activeAxis:yAxis,selectedHidden:$('editPanel').hidden,fieldType:$('editShape').value,yHalfW,yHalfH,ya,startYx,startYy}));
+    $('btnUndo').click();canvas.dispatchEvent(new w.PointerEvent('pointerdown',{pointerId:85,button:0,clientX:currentRect.left+(wrap.clientWidth-64)/2+element.center.x,clientY:currentRect.top+(wrap.clientHeight-64)/2-element.center.y}));canvas.dispatchEvent(new w.PointerEvent('pointerup',{pointerId:85}));
+    const beforePanImage=canvas.toDataURL();
+    const beforePan=JSON.stringify(JSON.parse(await(await download('btnExportJSON')).text()).elements);
+    canvas.dispatchEvent(new w.PointerEvent('pointerdown',{pointerId:81,button:1,clientX:ox+32,clientY:oy+32}));canvas.dispatchEvent(new w.PointerEvent('pointermove',{pointerId:81,button:1,clientX:ox+52,clientY:oy+44}));canvas.dispatchEvent(new w.PointerEvent('pointerup',{pointerId:81,button:1}));
+    await new Promise(resolve=>w.requestAnimationFrame(resolve));check(canvas.toDataURL()!==beforePanImage,'middle-button drag pans the rendered viewport');
+    check(JSON.stringify(JSON.parse(await(await download('btnExportJSON')).text()).elements)===beforePan,'middle-button pan does not move shapes');$('btnResetView').click();
+    change('editShape','rectangle');check(JSON.parse(await(await download('btnExportJSON')).text()).elements.some(e=>e.image_asset_ref===100001&&!e.is_background),'shape selector changes the exported asset');$('btnUndo').click();
+    const resetRect=canvas.getBoundingClientRect();canvas.dispatchEvent(new w.MouseEvent('click',{bubbles:true}));canvas.dispatchEvent(new w.PointerEvent('pointerdown',{pointerId:82,button:0,clientX:resetRect.left+(wrap.clientWidth-64)/2+element.center.x,clientY:resetRect.top+(wrap.clientHeight-64)/2-element.center.y}));canvas.dispatchEvent(new w.PointerEvent('pointerup',{pointerId:82}));
     $('btnDeleteSel').click();
     check(JSON.parse(await(await download('btnExportJSON')).text()).elements.length===40,'editing changes the exported drawing');
     check((await(await download('btnExportSVG')).text())!==svg,'edited output does not return stale native SVG');
@@ -77,13 +130,43 @@ frame.addEventListener('load',async()=>{
     check(info.containerClass===cls&&info.children.length===41&&info.isClassic===classic,button+' correct controls '+shape);
    }
    $('clientLuaTemplateIndex').value='123';$('clientLuaTemplateIndex').dispatchEvent(new w.Event('input'));
-   check((await(await download('btnExportClientLua')).text()).includes('sourceWidth = 64'),'Lua export '+shape);
+   const lua=await(await download('btnExportClientLua')).text();check(lua.includes('sourceWidth = 64'),'Lua export '+shape);if(shape==='circle')check(lua.includes('[1] = 123')&&lua.includes('[2] = 124')&&lua.includes('props.imageTemplates[primitiveType]'),'Lua routes each shape to its template index');
+   check($('retryPrimevalSpeed').value==='fast','retry retains Maximum Detail');
    check($('retryFitMethod').value==='primeval'&&$('retryShape'+{circle:'Circle',triangle:'Triangle',rect:'Rect'}[shape]).checked,'retry preserves shape '+shape);
   }
+  change('retryPrimevalSpeed','fastest');$('retryNumPrims').value='12';$('btnRetryFill').click();
+  done++;await wait(()=>d.querySelectorAll('.job-status.done').length===done||errors.length||d.querySelector('.job-error'));
+  check(!errors.length&&!d.querySelector('.job-error'),'Fastest re-process completes');
+  d.querySelectorAll('.job-card')[done-1].querySelector('.job-actions button').click();
+  const fastest=JSON.parse(await(await download('btnExportJSON')).text());
+  check(fastest.config.primeval_speed==='fastest'&&!fastest.config.primeval_exact&&fastest.elements.length===13,'Fastest re-process retains profile and count');
+  check($('retryPrimevalSpeed').value==='fastest','retry retains Fastest selection');
   change('retryFitMethod','gaussian');check($('retryShapeChecks').hidden&&!$('retryGaussianSettings').hidden,'retry Gaussian has no solid-shape options');
   $('retryNumPrims').value='12';$('retryGaussianIterations').value='2';$('retryGaussianResolution').value='64';$('btnRetryFill').click();
   done++;await wait(()=>d.querySelectorAll('.job-status.done').length===done||errors.length||d.querySelector('.job-error'));
   check(!errors.length&&!d.querySelector('.job-error'),'Gaussian retry completes');
+  let nativeMixedPng,liveFrames=0,liveLayers=0,refinementSteps=[];const mixedPost=w.Worker.prototype.postMessage;
+  w.Worker.prototype.postMessage=function(message,...args){if(message.cmd==='process'&&message.config.allowed_shapes?.[0]==='mixed')this.addEventListener('message',({data})=>{if(data.type==='progress'&&data.previewSvg)liveFrames++;if(data.type==='progress'&&data.shapeSvg&&!data.previewSvg&&Number.isInteger(data.previewIndex))liveLayers++;if(data.refinementTotal)refinementSteps.push(data.refinementStep);if(data.type==='done')nativeMixedPng=new Uint8Array(data.result.primeval_png).slice();});return mixedPost.call(this,message,...args);};
+  $('homeLink').click();change('fitMethod','primeval');change('primevalSpeed','fast');$('shapeMixed').click();$('numPrimsManual').value='8';$('primevalResolution').value='64';
+  check(!$('mixedShapeHint').hidden&&!$('shapeMixed').closest('.shape-check').hidden,'Primeval Mixed is selectable with its hint');
+  await upload();$('btnSubmit').click();done++;await wait(()=>d.querySelectorAll('.job-status.done').length===done||errors.length||d.querySelector('.job-error'));
+  w.Worker.prototype.postMessage=mixedPost;check(liveFrames>0,'selected job receives intermediate fitting previews');check(liveLayers>0,'individual layer deltas stream to preview');check(refinementSteps.some(n=>n>0),'detail refinement reports real completed work');check(!d.getElementById('previewJob'),'preview dropdown removed');const cardsForPreview=d.querySelectorAll('#jobList .job-card');cardsForPreview[0].click();check(cardsForPreview[0].classList.contains('preview-selected'),'clicking a job card selects its preview');cardsForPreview[cardsForPreview.length-1].click();check(cardsForPreview[cardsForPreview.length-1].classList.contains('preview-selected'),'clicking another job swaps the preview');check(!$('generationPreview').hidden||!$('generationVector').hidden,'selected job preview is visible');
+  check(!errors.length&&!d.querySelector('.job-error'),'Mixed fit completes');d.querySelectorAll('.job-card')[done-1].querySelector('.job-actions button').click();
+  const mixed=JSON.parse(await(await download('btnExportJSON')).text());
+  check(mixed.config.num_primitives===8&&mixed.elements.length===(mixed.config.output_has_transparency?8:9)&&mixed.config.primeval_shape==='mixed','Mixed retains one shared count');
+  check(mixed.elements.every(e=>['ellipse','triangle','rectangle'].includes(e.type))&&Object.values(mixed.config.primeval_shape_counts).reduce((a,b)=>a+b,0)===8,'Mixed exports only supported assets');
+  const exportedMixedPng=new Uint8Array(await(await download('btnExportPNG')).arrayBuffer());check(nativeMixedPng.length===exportedMixedPng.length&&nativeMixedPng.every((v,i)=>v===exportedMixedPng[i]),'Mixed PNG export retains the guarded native bytes');
+  check($('retryShapeMixed').checked&&!$('retryMixedShapeHint').hidden,'retry preserves Mixed');
+  const mixedSvg=await(await download('btnExportSVG')).text();check(!mixedSvg.includes('<mask')&&!mixedSvg.includes('<clipPath'),'Mixed export needs no masks');
+  change('retryFitMethod','legacy');check($('retryShapeMixed').closest('.shape-check').hidden&&!$('retryShapeMixed').checked,'Legacy hides and clears Mixed');
+  change('retryFitMethod','primeval');$('retryShapeMixed').click();$('btnRetryFill').click();done++;await wait(()=>d.querySelectorAll('.job-status.done').length===done||errors.length||d.querySelector('.job-error'));
+  check(!errors.length&&!d.querySelector('.job-error'),'Mixed re-process completes');
+  d.querySelectorAll('.job-card')[done-1].querySelector('.job-actions button').click();
+  change('retryPrimevalSpeed','turbo');$('btnRetryFill').click();done++;await wait(()=>d.querySelectorAll('.job-status.done').length===done||errors.length||d.querySelector('.job-error'));
+  check(!errors.length&&!d.querySelector('.job-error'),'Turbo UI re-process completes');
+  d.querySelectorAll('.job-card')[done-1].querySelector('.job-actions button').click();
+  const turbo=JSON.parse(await(await download('btnExportJSON')).text());
+  check(turbo.config.primeval_turbo&&!turbo.config.primeval_exact&&$('retryPrimevalSpeed').value==='turbo','Turbo selection reaches worker and is restored');
   $('homeLink').click();change('fitMethod','primeval');$('numPrimsManual').value='1000000';await upload();$('btnSubmit').click();
   await wait(()=>d.querySelector('.job-status.processing'));const processing=d.querySelector('.job-status.processing').closest('.job-card');
   processing.querySelector('.job-actions button').click();await wait(()=>d.querySelector('.job-status.cancelled'));
@@ -100,12 +183,15 @@ frame.addEventListener('load',async()=>{
   $('useBackgroundColor').checked=false;$('useBackgroundColor').dispatchEvent(new w.Event('change'));
   check(!errors.length&&!d.querySelector('.job-error'),'generation resumes after cancellation');
   const largeInput=await w.PNGDecode.decode(new Uint8Array(await(await fetch('fixtures/input.png')).arrayBuffer()));
-  const nativeCount=await new Promise((resolve,reject)=>{
-    const worker=new w.Worker('/js/worker-primeval.js?v=1');
-    worker.onmessage=({data})=>{if(data.type==='error'){worker.terminate();reject(Error(data.message));}if(data.type==='progress'&&data.step===1){worker.terminate();resolve(data.total);}};
-    worker.postMessage({cmd:'process',jobId:'large-count',rgba:largeInput.rgba.buffer,width:64,height:64,config:{allowed_shapes:['triangle'],num_primitives:150000}},[largeInput.rgba.buffer]);
-  });
-  check(nativeCount===150000,'native engine starts all requested shapes above its old 100K cap, then cancels');
+  for(const profile of ['fastest','fast','quality']){
+    const nativeCount=await new Promise((resolve,reject)=>{
+      const worker=new w.Worker('/js/worker-primeval.js');
+      worker.onmessage=({data})=>{if(data.type==='error'){worker.terminate();reject(Error(data.message));}if(data.type==='progress'&&data.step===1){worker.terminate();resolve(data.total);}};
+      const rgba=largeInput.rgba.slice().buffer;
+      worker.postMessage({cmd:'process',jobId:'large-count',rgba,width:64,height:64,config:{primeval_speed:profile,allowed_shapes:['triangle'],num_primitives:150000}},[rgba]);
+    });
+    check(nativeCount===150000,profile+' starts all requested shapes above its old 100K cap, then cancels');
+  }
   $('outlineLink').click();check(!$('primitiveListSection').hidden&&$('fillShapeSection').hidden,'decoration layout remains available');
   for(const shape of ['circle','triangle','rect']){
     const result=await new Promise((resolve,reject)=>{
@@ -119,6 +205,16 @@ frame.addEventListener('load',async()=>{
     check(result.elements[0].is_background&&result.elements[0].color==='#2257c9'&&result.elements[0].alpha===1,'chosen background in exported controls '+shape);
     check(result.primeval_svg.includes('#2257c9')&&result.config.background_color==='#2257c9','chosen background in SVG and saved config '+shape);
   }
+  $('homeLink').click();change('fitMethod','primeval');change('primevalSpeed','turbo');$('shapeMixed').click();$('numPrimsManual').value='8';$('primevalResolution').value='64';
+  if($('fillShapeSection').hidden)$('outlineLink').click();
+  const parallelJobs=new Map(),parallelPost=w.Worker.prototype.postMessage;let completedParallel=0;
+  w.Worker.prototype.postMessage=function(message,...args){if(message.cmd==='process'){parallelJobs.set(message.jobId,message.config.primeval_threads);this.addEventListener('message',({data})=>{if(data.type==='done')completedParallel++;});}return parallelPost.call(this,message,...args);};
+  await upload();await upload();$('btnSubmit').click();await wait(()=>parallelJobs.size>=2||errors.length||d.querySelector('.job-error'));
+  check(parallelJobs.size===2&&completedParallel===0,'two Primeval jobs dispatched before either completes');
+  check([...parallelJobs.values()].every(n=>n>=1&&n<=Math.max(1,Math.floor(w.navigator.hardwareConcurrency/2))),'parallel jobs share the CPU thread budget '+JSON.stringify({threads:[...parallelJobs.values()],hardware:w.navigator.hardwareConcurrency}));
+  await wait(()=>completedParallel===2||errors.length||d.querySelector('.job-error'));w.Worker.prototype.postMessage=parallelPost;
+  check(completedParallel===2&&!errors.length&&!d.querySelector('.job-error'),'both parallel jobs finish successfully');
+  $('outlineLink').click();
   $('classicToolTab').click();check(d.querySelector('#viewClassic.active'),'GIA conversion page remains available');
   check(!errors.length,'no runtime errors');document.querySelector('#status').textContent='PASS · '+messages.length+' fitting checks';document.body.dataset.result='pass';
  }catch(error){report.textContent+='\nFAIL '+error.stack;document.querySelector('#status').textContent='FAIL';document.body.dataset.result='fail';}

@@ -43,15 +43,42 @@ fast-math. See `docs/development/primeval.md` for parity evidence and measured r
    antialiasing, byte-rounded repaint guards and subpixel moves. This requires
    tiny-skia in core at runtime; RGB-only engine behavior remains unchanged.
 
-8. Optional `render.fast` selects the site's latency-oriented search profile.
-   The website exposes Fast (default) and Maximum detail. Fast changes search
-   effort, refinement and placements, retaining every requested control.
-   `transparent-fast` fits source RGBA directly after seeding RGB detail; interior
-   geometry stays fixed while its color/opacity may improve. No source mask is
-   applied. See `docs/development/primeval.md` for the exact profile settings.
+8. Optional `render.fast` enables exact RGBA scratch/coverage acceleration.
+   Fast and Maximum detail now retain the same RNG streams, candidate counts,
+   working resolution, search/refinement schedules and placements. Optional
+   `render.fastest` restores the earlier reduced-effort/multiscale algorithm as
+   Fastest, including `transparent-fast` source-alpha fitting. The default is
+   Fast. Neither mode cuts requested controls or uses a timer cutoff. Nine
+   frozen original Fast fixtures check Fastest geometry, SVG, PNG and previews.
 9. RGBA scoring caches row moments, solves constrained alpha analytically and
    prunes with a conservative error bound. Exact coverage uses tiny-skia Mask;
    WASM compositing and ellipse/triangle projections use SIMD without fast-math.
    Tests compare masks, moments and solves to scalar/reference implementations.
    Phase timings are returned for profiling. Thread count defaults to at most 16;
    the scalar-hosting fallback runs the same profile and remains available.
+
+10. Native AA endpoints are quantized once in the original arithmetic order.
+    Common-column rows bypass sorting; integer SIMD queries retain the original
+    coverage sums. RGB's ordinary single-batch color solve uses bounded i64
+    arithmetic with identical rounding, retaining the original large-image path.
+11. `vendor/tiny-skia` pins the original 0.12.0 source and BSD-3-Clause license.
+    Its optional cleared-mask blitter bypasses generic white-over-black blending
+    while preserving scan conversion and byte coverage. Worker, path, mask, scan-edge
+    and row-moment allocations are reused only in the accelerated RGBA path.
+    See its SITE-PATCHES.md and the Fast/Maximum detail browser equality checks.
+
+
+12. `mixed` is a new abstract palette; the original `any` palette and every
+    original concrete-family RNG stream remain unchanged. The website compares
+    complete ellipse/rectangle/asset-triangle fits at the same count, then uses
+    equal-area family replacements and local RGBA/color/opacity refinement.
+    Actual exported-pixel loss guards both opaque detail and transparent spill.
+    Existing background controls are preserved; no source-alpha export mask is
+    added. See `docs/development/primeval-mixed.md` at the repo root.
+
+## Experimental Turbo
+
+Direct source-RGBA fitting, residual moment proposals and unified shape-family
+competition are isolated in `primeval-core/src/rgba/turbo.rs` and
+`primeval-render/src/turbo.rs`. Opt-in only; output differs and quality/runtime
+gates remain unmet. See `docs/development/primeval-turbo.md` in the site root.

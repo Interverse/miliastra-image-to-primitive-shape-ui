@@ -273,7 +273,7 @@ pub(crate) fn pipeline(shape: ShapeKind) -> Pipeline {
     };
     let (none, one) = (Refits::Passes(0), Refits::Passes(1));
     let (during, refits, joint) = match shape {
-        ShapeKind::Any => (spaced(20, 5), one, Some(1)),
+        ShapeKind::Any | ShapeKind::Mixed => (spaced(20, 5), one, Some(1)),
         ShapeKind::Triangle => (joint(20, 5, 20), none, Some(1)),
         ShapeKind::Rectangle | ShapeKind::Polygon => (spaced(20, 5), none, Some(1)),
         ShapeKind::RotatedRectangle => (spaced(20, 2), none, Some(1)),
@@ -386,6 +386,7 @@ pub enum Chosen {
 /// The joint result is kept only if it exports closer to the target than
 /// the refitted model's drawing ([`better_export`]). Returns the drawing to
 /// encode and which it is, or `None` once `cancelled` returns true.
+#[allow(dead_code)] // Retained for offline lab/reference callers.
 pub(crate) fn final_stage(
     model: &mut Model,
     pipeline: Pipeline,
@@ -393,14 +394,27 @@ pub(crate) fn final_stage(
     iterations: Option<u32>,
     mut cancelled: impl FnMut() -> bool,
 ) -> Option<(Drawing, Chosen)> {
+    final_stage_observed(model,pipeline,alpha,iterations,cancelled,|_,_|{})
+}
+
+pub(crate) fn final_stage_observed(
+    model: &mut Model,
+    pipeline: Pipeline,
+    alpha: Alpha,
+    iterations: Option<u32>,
+    mut cancelled: impl FnMut() -> bool,
+    mut progress: impl FnMut(u32,u32),
+) -> Option<(Drawing, Chosen)> {
     match pipeline.refits {
         Refits::Passes(passes) => {
-            for _ in 0..passes {
+            for pass in 0..passes {
+                progress(pass,passes);
                 model.refine_unless(alpha, &mut cancelled)?;
             }
         }
         Refits::Until { min_gain, cap } => {
-            for _ in 0..cap {
+            for pass in 0..cap {
+                progress(pass,cap);
                 let before = model.score_f64();
                 if before == 0.0 {
                     break;
@@ -420,7 +434,7 @@ pub(crate) fn final_stage(
     settings.iterations = Some(iterations.unwrap_or_else(|| {
         joint::default_iterations(model.drawing().shapes.len()).saturating_mul(scale)
     }));
-    let optimised = joint::optimise(model, alpha, settings, cancelled)?;
+    let optimised = joint::optimise_observed(model, alpha, settings, cancelled, progress)?;
     Some(better_export(model.target(), model.drawing(), optimised))
 }
 

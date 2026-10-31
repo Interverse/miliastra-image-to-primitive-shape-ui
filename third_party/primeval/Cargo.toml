@@ -1,5 +1,6 @@
 [workspace]
 resolver = "3"
+exclude = ["vendor/tiny-skia"]
 members = [
     "crates/primeval-core",
     "crates/primeval-render",
@@ -54,3 +55,6 @@ debug = 1
 [profile.wasm-release]
 inherits = "release"
 panic = "abort"
+
+[patch.crates-io]
+tiny-skia = { path = "vendor/tiny-skia" }

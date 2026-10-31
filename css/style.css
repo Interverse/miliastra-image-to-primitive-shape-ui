@@ -555,7 +555,7 @@ body {
   color: var(--md-on-surface-variant);
   margin-bottom: 0;
 }
-.gia-export-group__field label::after { content: " *"; color: var(--md-error); }
+.gia-export-group__field > label::after { content: " *"; color: var(--md-error); }
 .gia-export-group__field .form-input {
   font-size: 13px;
   padding: 8px 12px;
@@ -690,6 +690,11 @@ body {
    Shape checks / params
    ============================================================ */
 .shape-checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-sm); }
+/* Four equal cards in a compact 2 × 2 grid, including translated labels. */
+#legacyShapeChecks .shape-check,
+#retryShapeChecks .shape-check { justify-content: center; min-height: 76px; }
+#legacyShapeChecks .shape-check > span:last-child,
+#retryShapeChecks .shape-check > span:last-child { line-height: 1.3; }
 #fillShapeSection { display: grid; gap: var(--space-md); }
 #fillShapeSection > .hint { margin: 0; }
 .form-stack { display: grid; gap: var(--space-md); min-width: 0; }
@@ -1341,6 +1346,7 @@ input[type="range"]::-webkit-slider-thumb {
 
 .compression-limits { margin-top: 12px; }
 #legacyShapeChecks, #retryShapeChecks { grid-template-columns: repeat(3,minmax(0,1fr)); }
+#legacyShapeChecks.primeval-palette, #retryShapeChecks.primeval-palette { grid-template-columns: repeat(2,minmax(0,1fr)); }
 #legacyShapeChecks[hidden], #retryShapeChecks[hidden] { display:none; }
 #primevalSettings, #retryPrimevalSettings { margin-top:12px; }
 .compression-limits summary, #retryLegacySettings summary { cursor: pointer; padding: 8px 0; }
@@ -1364,3 +1370,7 @@ input[type="range"]::-webkit-slider-thumb {
   .batch-header { gap: 8px; }
   .batch-header > h2 { flex-basis: 100%; }
 }
+
+.generation-preview{display:grid;gap:12px;padding:16px;border:1px solid var(--md-outline-variant);border-radius:16px;margin-bottom:16px}.generation-preview img{width:100%;max-height:420px;object-fit:contain;background:repeating-conic-gradient(#454545 0% 25%,#333 0% 50%) 0/20px 20px}.generation-preview select{min-width:0;width:100%}
+
+.job-card{cursor:pointer}.job-card.preview-selected{outline:2px solid var(--md-primary);outline-offset:-2px}#generationVector{background:repeating-conic-gradient(#454545 0% 25%,#333 0% 50%) 0/20px 20px}#generationVector>svg{display:block;width:100%;height:420px;max-height:50vh}#refinementProgress{width:100%;accent-color:var(--md-primary)}

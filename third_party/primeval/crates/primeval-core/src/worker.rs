@@ -120,6 +120,11 @@ pub(crate) struct WorkerCtx<R> {
     pub(crate) height: i32,
     /// Reusable storage for rasterized scanlines.
     pub(crate) lines: Vec<Scanline>,
+    /// Scratch reused by the exact RGBA rasterizer; no search settings change.
+    pub(crate) rgba_reuse: bool,
+    pub(crate) rgba_mask: Vec<u8>,
+    pub(crate) rgba_path: Option<tiny_skia::Path>,
+    pub(crate) rgba_raster: tiny_skia::MaskRasterScratch,
     /// Reusable storage for stroking quadratic curves.
     pub(crate) stroke: StrokeScratch,
     /// Reusable per-row storage for the anti-aliased polygon and
@@ -252,6 +257,10 @@ impl<R: Rng> WorkerCtx<R> {
             width,
             height,
             lines: Vec::with_capacity(4096),
+            rgba_reuse: false,
+            rgba_mask: Vec::new(),
+            rgba_path: None,
+            rgba_raster: tiny_skia::MaskRasterScratch::default(),
             stroke: StrokeScratch::default(),
             rows: RowScratch::default(),
             rng,

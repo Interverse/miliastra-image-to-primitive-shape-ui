@@ -55,6 +55,8 @@ pub fn approximate(
     on_progress: Option<Function>,
 ) -> Result<JsValue, JsValue> {
     let fast=js_sys::Reflect::get(&render,&JsValue::from_str("fast")).ok().and_then(|v|v.as_bool()).unwrap_or(false);
+    let fastest=js_sys::Reflect::get(&render,&JsValue::from_str("fastest")).ok().and_then(|v|v.as_bool()).unwrap_or(false);
+    let turbo=Reflect::get(&render,&JsValue::from_str("turbo")).ok().and_then(|v|v.as_bool()).unwrap_or(false);
     let render = read_render(&render)?;
     let request = normalize_request(input, &output, render).map_err(|error| js_error(&error))?;
 
@@ -68,6 +70,9 @@ pub fn approximate(
             return;
         }
         let progress = Object::new();
+        if let Some(svg)=info.preview {set(&progress,"previewSvg",svg.into());}
+        if let Some((done,total))=info.refinement{set(&progress,"refinementStep",done.into());set(&progress,"refinementTotal",total.into());}
+        if let Some(index)=info.preview_index{set(&progress,"previewIndex",index.into());}
         set(&progress, "step", info.step.into());
         set(&progress, "total", info.total.into());
         set(&progress, "score", info.score.into());
@@ -79,7 +84,7 @@ pub fn approximate(
     };
     let timings=Array::new();let started=js_sys::Date::now();
     let mut phase=|name:&'static str|{let entry=Object::new();set(&entry,"phase",name.into());set(&entry,"elapsed_ms",(js_sys::Date::now()-started).into());timings.push(&entry);};
-    let execution = Execution::new().cancellation(&token).phases(&mut phase).fast(fast);
+    let execution = Execution::new().cancellation(&token).phases(&mut phase).fast(fast).fastest(fastest).turbo(turbo).live_progress(true);
     let execution = if on_progress.is_some() {
         execution.progress(&mut on_step)
     } else {
@@ -106,6 +111,31 @@ fn numbers(values: impl IntoIterator<Item = f64>) -> JsValue {
     let array = Array::new();
     for value in values { array.push(&value.into()); }
     array.into()
+}
+
+/// Render retained/edited geometry with the same rasterizer as fitting output.
+#[wasm_bindgen(js_name = renderRetained)]
+pub fn render_retained(value:JsValue,output_size:u32)->Result<JsValue,JsValue>{
+    let get=|v:&JsValue,key:&str|Reflect::get(v,&key.into());
+    let number=|v:JsValue|v.as_f64().filter(|v|v.is_finite()).ok_or_else(||JsValue::from_str("Invalid geometry number"));
+    let color=|v:JsValue|->Result<primeval_core::Color,JsValue>{let a=Array::from(&v);if a.length()!=4{return Err("Invalid color".into());}let mut c=[0u8;4];for i in 0..4{let n=number(a.get(i))?;if !(0.0..=255.0).contains(&n){return Err("Invalid color".into());}c[i as usize]=n.round()as u8;}Ok(primeval_core::Color::new(c[0],c[1],c[2],c[3]))};
+    let width=number(get(&value,"width")?)?;let height=number(get(&value,"height")?)?;
+    if width<2.0||height<2.0||width.fract()!=0.0||height.fract()!=0.0||width>u32::MAX as f64||height>u32::MAX as f64{return Err("Invalid drawing size".into());}
+    let mut drawing=Drawing{width:width as u32,height:height as u32,background:color(get(&value,"background")?)?,shapes:Vec::new()};
+    for item in Array::from(&get(&value,"shapes")?).iter(){
+        let g=Array::from(&get(&item,"geometry")?).iter().map(&number).collect::<Result<Vec<_>,_>>()?;
+        let kind=get(&item,"kind")?.as_string().unwrap_or_default();
+        let geometry=match(kind.as_str(),g.len()){
+            ("ellipse",5) if g[2]>0.0&&g[3]>0.0=>Geometry::Ellipse{cx:g[0],cy:g[1],rx:g[2],ry:g[3],rotation:g[4]},
+            ("rectangle",4) if g[2]>0.0&&g[3]>0.0=>Geometry::Rect{x:g[0],y:g[1],width:g[2],height:g[3]},
+            ("polygon",6|8)=>Geometry::Polygon(g.chunks_exact(2).map(|p|primeval_core::Point{x:p[0],y:p[1]}).collect()),
+            _=>return Err("Unsupported edited geometry".into()),
+        };
+        drawing.shapes.push(primeval_core::DrawnShape{geometry,color:color(get(&item,"color")?)?});
+    }
+    let result=result_object(primeval_render::render_drawing(&drawing,output_size,primeval_render::OutputFormat::Png).map_err(|e|js_error(&e))?);
+    let svg=primeval_render::render_drawing(&drawing,output_size,primeval_render::OutputFormat::Svg).map_err(|e|js_error(&e))?;
+    if let primeval_render::ApproximateResult::Svg{data,..}=svg{Reflect::set(&result,&"svg".into(),&data.into())?;}Ok(result)
 }
 
 fn drawing_object(drawing: &Drawing) -> JsValue {

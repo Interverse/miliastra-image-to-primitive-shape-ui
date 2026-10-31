@@ -30,7 +30,8 @@ build. Serve the root over HTTP, usually port 8321. GitHub Pages uses
    occupy no space.
 4. Do not cap or silently truncate user-selected fitting steps or counts. Keep
    cancellation. Representation/resource limits must fail explicitly.
-5. Primeval and Legacy allow exactly one solid shape family. Gaussian uses only
+5. Primeval supports single-family modes and Mixed (ellipse/rectangle/triangle).
+   Legacy allows exactly one solid shape family. Gaussian uses only
    blurred circles. Circle in Primeval means benchmark rotated ellipses.
 6. Preserve the pinned fitting output and single-asset triangle constraint.
    Do not fake transparency or quality by reapplying source alpha after fitting.

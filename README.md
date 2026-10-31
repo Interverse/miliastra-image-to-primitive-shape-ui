@@ -3,10 +3,12 @@
 A static, browser-only tool that fits images with game UI shapes and exports
 PNG, SVG, CSS, JSON, Lua and GIA. Images are processed locally.
 
-- **Primeval:** one selected shape family: benchmark ellipses (Circle),
-  single-asset isosceles triangles, or rotated rectangles. Rectangle is default.
+- **Primeval:** benchmark ellipses (Circle),
+  single-asset isosceles triangles, rotated rectangles, or guarded Mixed mode.
+  Mixed shares one shape budget across the three families. Mixed is default.
   PNG mode fits source alpha and exports independent transparent shapes.
-  Fast optimization is the default; Maximum detail retains the pinned search.
+  Optimization: Fastest, Fast (default), Maximum Detail. Fast matches Maximum
+  Detail; Fastest restores the earlier reduced-effort algorithm.
 - **Gaussian:** blurred circles using the existing Gaussian fitters.
 - **Legacy:** the original browser fitter, with one selected solid shape family.
 
@@ -42,6 +44,7 @@ npm run test:browser
 npm run test:hosting
 npm run test:deployment
 npm run test:alpha
+npm run test:mixed
 ```
 
 Unit tests need Node and Python; browser checks additionally need Playwright and

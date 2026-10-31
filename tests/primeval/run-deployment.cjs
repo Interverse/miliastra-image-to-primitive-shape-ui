@@ -27,21 +27,27 @@ const server=http.createServer((req,res)=>{
    const input=fs.readFileSync(path.join(__dirname,'fixtures/input.png')).toString('base64');
    const records=await page.evaluate(async({input})=>{
     const records=[];
-    for(const shape of ['circle','triangle','rect']){
+    for(const profile of ['quality','fast'])for(const shape of ['circle','triangle','rect']){
      const png=Uint8Array.from(atob(input),c=>c.charCodeAt(0)),decoded=await PNGDecode.decode(png);
      const worker=new Worker(new URL('js/worker-primeval.js',location.href));
      const result=await new Promise((resolve,reject)=>{
       worker.onerror=e=>{worker.terminate();reject(Error(e.message));};
       worker.onmessage=({data})=>{if(data.type==='error'){worker.terminate();reject(Error(data.message));}if(data.type==='done'){worker.terminate();resolve(data.result);}};
-      worker.postMessage({cmd:'process',jobId:shape,rgba:decoded.rgba.buffer,width:64,height:64,config:{primeval_speed:"quality",num_primitives:40,allowed_shapes:[shape]}});
+      worker.postMessage({cmd:'process',jobId:shape,rgba:decoded.rgba.buffer,width:64,height:64,config:{primeval_speed:profile,num_primitives:40,allowed_shapes:[shape]}});
      });
-     records.push({shape,count:result.elements.length,png:Array.from(new Uint8Array(result.primeval_png))});
+     records.push({shape,profile,backend:result.config.primeval_backend,count:result.elements.length,png:Array.from(new Uint8Array(result.primeval_png))});
+    }
+    for(const profile of ['fast','quality']){
+     const decoded=await PNGDecode.decode(Uint8Array.from(atob(input),c=>c.charCodeAt(0))),worker=new Worker(new URL('js/worker-primeval.js',location.href));
+     const result=await new Promise((resolve,reject)=>{worker.onerror=e=>{worker.terminate();reject(Error(e.message));};worker.onmessage=({data})=>{if(data.type==='error'){worker.terminate();reject(Error(data.message));}if(data.type==='done'){worker.terminate();resolve(data.result);}};worker.postMessage({cmd:'process',rgba:decoded.rgba.buffer,width:64,height:64,config:{allowed_shapes:['mixed'],num_primitives:8,primeval_resolution:64,primeval_speed:profile}});});
+     records.push({shape:'mixed',profile,count:result.elements.length,png:Array.from(new Uint8Array(result.primeval_png)),drawing:JSON.stringify(result.primeval_drawing)});
     }
     return records;
    },{input});
    assert.deepEqual(failures,[]);
-   for(const r of records){assert.equal(r.count,41);assert.deepEqual(Buffer.from(r.png),fs.readFileSync(path.join(__dirname,'fixtures',r.shape+'.png')));}
-   console.log('PASS deployment artifact: project subpath, all three shapes and exact PNGs');
+   const mixed=records.filter(r=>r.shape==='mixed');assert.equal(mixed[0].drawing,mixed[1].drawing);assert.deepEqual(mixed[0].png,mixed[1].png);
+   for(const r of records){if(r.shape==='mixed'){assert.equal(r.count,9);continue;}assert.equal(r.backend,"wasm");assert.equal(r.count,41);assert.deepEqual(Buffer.from(r.png),fs.readFileSync(path.join(__dirname,'fixtures',r.shape+'.png')));}
+   console.log('PASS deployment artifact: project subpath, all three shapes, WASM, Mixed, and exact PNGs');
    await context.close();
   }
  }finally{await browser.close();}

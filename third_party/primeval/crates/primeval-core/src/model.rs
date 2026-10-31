@@ -240,11 +240,13 @@ impl Model {
     ///
     /// Returns the number of candidate evaluations the search made.
     pub fn step(&mut self, kind: ShapeKind, alpha: Alpha) -> u64 {
-        let (rounds, effort) = self.search_round_effort(kind);
+        let (mut rounds, effort) = self.search_round_effort(kind);
+        let family_efforts=crate::mixed::FAMILIES.map(|family|self.search_round_effort(family).1);
+        if kind==ShapeKind::Mixed{rounds*=3;}
         self.prepare_grid();
         // Only the kinds that rank coarsely read the coarse copy, so only
         // they pay for syncing it.
-        let (current, coarse_round) = self.canvas.search_view(kind.ranks_coarsely());
+        let (current, coarse_round) = self.canvas.search_view(kind.ranks_coarsely()||kind==ShapeKind::Mixed);
         let round = SearchRound {
             half_resolution: false,
             target: &self.target,
@@ -263,19 +265,16 @@ impl Model {
             usize::try_from(rounds).expect("round count fits in usize"),
             || scratch.like(crate::rng::round_rng(seed, step, 0)),
         );
-        let results: Vec<(State, u64)> = self
-            .workers
-            .par_iter_mut()
-            .enumerate()
-            .map(|(index, worker)| {
-                worker.reset_like(scratch, crate::rng::round_rng(seed, step, index as u64));
-                #[cfg(test)]
-                {
-                    worker.pruning = pruning;
-                }
-                worker.counted(|worker| worker.search_round(&round, kind, alpha, effort))
-            })
-            .collect();
+        let results:Vec<(State,u64)>=self.workers.par_iter_mut().enumerate()
+            .map(|(index,worker)|{
+                worker.reset_like(scratch,crate::rng::round_rng(seed,step,(if kind==ShapeKind::Mixed{index/3}else{index})as u64));
+                #[cfg(test)] {worker.pruning=pruning;}
+                worker.counted(|worker|{
+                    let (family,effort)=if kind==ShapeKind::Mixed{(crate::mixed::family(index),family_efforts[index%3])}else{(kind,effort)};
+                    let search=SearchRound{coarse:if family.ranks_coarsely(){round.coarse}else{None},..round};
+                    worker.search_round(&search,family,alpha,effort)
+                })
+            }).collect();
 
         let evaluations = results.iter().map(|(_, evaluations)| evaluations).sum();
         // `collect` keeps round order and `min_by_key` returns the first of

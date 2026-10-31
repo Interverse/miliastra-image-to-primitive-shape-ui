@@ -4,54 +4,91 @@ The website runs Primeval 0.2.2's Rust engine, pinned to commit
 `41e3196b41f8a03b2e1d4bea726a9c5bd71db530`, through locally bundled WASM.
 Source and modifications are in `third_party/primeval/SITE-PATCHES.md`.
 
-Default settings: 2,000 shapes, 512-pixel fitting detail, seed 42 and automatic
+Default settings: Mixed, 2,000 shapes, 512-pixel fitting detail, seed 42 and automatic
 shape opacity. Background and game containers are extra controls. Circle uses
 rotated ellipses; Rectangle uses rotated rectangles. Triangle is constrained
 throughout fitting to local X/Y scale and rotation of one triangle asset.
 
-The Optimization selector defaults to **Fast**. It changes search placements:
-two independent RGB searches with 64 candidates and age 35, two refinement
-climbs, geometrically spaced refits and one final refit. Original joint settings
-remain for rectangles and triangles. Fast alpha fitting targets uploaded source
-colors directly, recolors retained interior layers, then places localized,
-multiscale residual shapes and polishes color/opacity. It uses one initial and
-one residual geometry pass with two climbs, age 25 (12 above 256 pixels), plus
-one color-only pass.
-Residual search uses four rounds of 64 candidates, age 35. Above 256 pixels,
-Fast ranks geometry proposals with Primeval's analytical rasterizer, repaints accepted geometry with
-export-exact coverage, and finishes with an exact color/opacity pass.
-Large-target Fast climbs stop accepting gains smaller than `max(1e-6, |initial layer energy|
-* 1e-4)`; this avoids prolonged subpixel searches for negligible changes. Fully
-occluded pixels are skipped exactly in layer sums and suffix accumulation.
+Draft was previously labeled Fastest. Its stored/API profile remains `fastest`
+for saved-job compatibility; it still offers a lower-effort alternative to Turbo.
 
-For alpha targets larger than 256 pixels, Fast uses a multiscale seed: 128 pixels
-at 2,000 controls, growing with the square root of the requested count. Geometry
-is scaled uniformly, preserving triangle assets. Source RGBA fitting, residual
-placement and final output still use the selected detail. The initial full-size
-pass adjusts colors rather than moving geometry; residual geometry is refined
-after placement. This is an internal search strategy, not a cap on counts or
-the selected fitting detail.
+The Optimization selector contains **Turbo**, **Draft** and
+**Maximum Detail**, with
+**Turbo** selected by default. The latter runs the accelerated exact
+`fast` implementation. The unaccelerated `quality` profile remains an internal
+regression oracle; older jobs using it reopen as Maximum Detail and run `fast`
+when reprocessed. Upload and re-process share the same options.
 
-**Maximum detail** retains the pinned RGB search/refit/joint schedule and the
-reference-preserving alpha path described below. Its opaque output is checked
-against frozen fixtures. Fast intentionally has different placements and is
-evaluated against source-image fidelity rather than pixel equality to that fit.
-Neither profile changes the selected count, imposes a timer or removes cancellation.
+The first speed iteration removes the intermediate RGB reference PNG encode/decode
+by passing its decoded RGB bytes directly into the unchanged fitting pipeline.
+Worker metadata now separates input preparation, fitting/native export (including
+startup), output decoding, control conversion and preview/source preparation.
+Engine phase markers distinguish RGB preparation/search/final refinement where
+available. These are inclusive markers, not additive kernel timings.
+`scripts/profile-primeval.cjs input.png triangle 400 512` retains the original
+source dimensions, output, hashes and timings under ignored `reference/primeval-profiles/`.
+This is profiling groundwork, not a demonstrated major speedup or a new search
+algorithm. Structured proposals and direct RGBA search remain future experiments.
 
-Fast timing checks on the development machine (Chrome, isolated workers,
-16 threads, 2,000 painted shapes, 512-pixel detail; includes startup and control
-preview rendering):
+Fast and Maximum Detail run the complete pinned RGB search, periodic refits and
+final refinement, then the same reference-preserving alpha path described below.
+Fast does not reduce candidate counts, patience, passes or fitting resolution.
 
-| Source | Rectangle | Ellipse | Triangle |
-|---|---:|---:|---:|
-| Furina, source alpha | 12.13 s | 16.33 s | 18.08 s |
-| Clorinde, source alpha | 6.12 s | 12.73 s | 12.89 s |
-| Piplup, opaque | 10.00 s | 17.81 s | 19.99 s |
+**Draft** restores the earlier ~20-second Fast algorithm: two RGB rounds with
+64 candidates and age 35, two refinement climbs and the original shorter refit
+schedule. Rectangles and triangles retain joint optimization. Transparent images
+use source RGBA colors, localized residual placement and shorter alpha passes.
+Above 256 pixels, the RGB seed starts at 128 pixels (growing with the square root
+of the requested control count), while RGBA fitting/output keep the selected
+detail. This mode can produce different placements and quality from Fast.
+It never cuts the requested control count or stops on a timer. Runtime still
+depends on the image, detail, count and browser hardware.
 
-These measurements are not a universal deadline: larger counts/detail and the
-single-thread fallback can take longer. The local comparison gallery, raw
-geometry, native PNGs, independently rendered controls and unsuccessful trials
-remain ignored under `reference/primeval-speed-*`.
+Browser requests use `render.fastest` for the restored profile and
+`render.fast` for equivalent full-search acceleration. `transparent-fast`
+activates the earlier alpha strategy only with `fastest`; otherwise it retains
+the reference-preserving compatibility behavior.
+
+Fast enables allocation reuse for RGBA workers, paths, masks, edge lists and row moments.
+The native rasterizer quantizes endpoint overlaps once, emits common spans
+directly and checks narrow rows in independent integer SIMD lanes. The ordinary
+single-batch RGB color solve avoids unnecessary software i128 arithmetic while
+retaining its original rounding and large-image fallback. tiny-skia's optional
+coverage-only blitter keeps its original scan conversion and supersampling.
+No fast-math, source-alpha mask, requested control-count reduction or timer cutoff is used.
+Maximum detail remains an independent RGBA reference without these scratch and
+coverage-blitter shortcuts. All raster changes preserve the pinned output.
+
+`npm run test:alpha` compares Fast and Maximum detail drawings, converted control
+geometry, SVG text, PNG bytes and preview bytes for all three shape families,
+with opaque and semitransparent targets, in threaded and single-thread browsers.
+A 320-pixel case also checks that Fast retains the selected fitting resolution.
+Fastest is checked against nine frozen original Fast output hashes (geometry,
+SVG, PNG and preview), including opaque/transparent and 320-pixel inputs.
+These small generated fixtures live in `tests/primeval/fixtures/fastest.json`.
+Rust tests also compare coverage against the original tiny-skia pipeline and
+native per-pixel oracles. Larger local runs retain frozen pre-change WASM,
+full geometry and independently rendered controls under ignored
+`reference/primeval-exact-*`; every trial output is retained.
+
+Cold browser measurement on the development laptop: Nahida, source alpha,
+2,000 controls, 128-pixel fitting detail, seed 42, 16 workers. Time includes
+startup and preview/control rendering. The frozen pre-change Maximum detail
+and the optimized output have identical drawings, native pixels and control pixels.
+
+| Shape | Frozen Maximum detail | Exact Fast |
+|---|---:|---:|
+| Triangle | 73.93 s | 52.52 s |
+| Circle / ellipse | 67.95 s | 52.60 s |
+| Rectangle | 39.77 s | 25.90 s |
+
+These are single measurements; repeated trials vary with hardware load.
+The default 512-pixel detail can take longer.
+
+The 20-second target has not been reached with exact Maximum detail output.
+Do not use the old reduced-quality Fast timings as measurements of this path.
+Runtime depends on count, detail, source and browser hardware; the full search
+and cancellation remain available even when it exceeds 20 seconds.
 
 With PNG mode off, the optional custom-background picker composites transparent
 source pixels onto the selected RGB color and uses it as the fitting canvas
@@ -105,8 +142,8 @@ meet a timer; requests above the old 100K cap are accepted up to the engine's
 32-bit representation/resource limits and remain cancellable.
 
 SIMD, multithreading, cached scoring and binary optimization improve runtime.
-Fast additionally changes search effort and placements; Maximum detail keeps
-the reference schedule. `coi-sw.js` enables isolation on static hosts;
+Fast and Maximum detail keep identical search effort, placements and refinement
+schedules; Fast changes only equivalent implementation details. `coi-sw.js` enables isolation on static hosts;
 an output-equivalent single-thread fallback works without it, but is slower.
 
 ## Rebuild (Windows)
@@ -127,3 +164,17 @@ in empty source pixels 0.063/255. Smaller 128px stress cases remain more
 variable. Keep PNG/control renderer comparisons separate and retain failed
 strict diagnostic results. Do not promise pixel-perfect matching or a 20-second
 runtime: development cases can take minutes in this quality path.
+
+[Mixed mode](primeval-mixed.md) compares complete single-family fits and then
+reconsiders geometry types without adding controls. It is optional, takes longer,
+and preserves the best baseline when its exported-pixel guard rejects a candidate.
+
+[Experimental Turbo](primeval-turbo.md) implements direct source-RGBA search with
+structured proposals. Select it in the Optimization dropdown. It has not passed the default-detail
+Fastest-runtime / Maximum-Detail-quality gate.
+
+Batch scheduling allows multiple Primeval jobs at once, using the same hardware-based
+queue concurrency as other engines. Each new batch shares logical CPU threads
+across its active slots (at most 16 threads per Primeval fit). Separate pooled
+worker URLs key the pool by thread budget so reused WASM instances do not retain
+an incompatible pool size. Cancellation and fitting count/detail are unchanged.

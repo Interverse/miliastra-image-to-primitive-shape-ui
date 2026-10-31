@@ -34,7 +34,9 @@ const isString = (value) => typeof value === "string";
 const isSeed = (value) => typeof value === "number" || typeof value === "bigint";
 function normalizeRender(render) {
     const values = {
+        fastest: field(render,"fastest",v=>typeof v==="boolean","must be a boolean"),
         fast: field(render,"fast",v=>typeof v==="boolean","must be a boolean"),
+        turbo: field(render,"turbo",v=>typeof v==="boolean","must be a boolean"),
         count: field(render, "count", isNumber, "must be a number"),
         shape: field(render, "shape", isString, "must be a string"),
         // The type check shares Rust's wording; Rust checks the value.

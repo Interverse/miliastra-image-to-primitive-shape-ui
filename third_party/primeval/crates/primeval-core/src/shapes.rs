@@ -42,13 +42,15 @@ pub enum ShapeKind {
     /// Simple, strictly convex quadrilaterals, every angle strictly above
     /// 15°.
     Polygon,
+    /// Competing rotated ellipses, rotated rectangles and asset triangles.
+    Mixed,
 }
 
 /// The one table of shape names: every [`ShapeKind`] with its public name, in
 /// declaration order, so `NAMES[kind as usize]` is `kind`'s row. `as_str`,
 /// `FromStr`, [`ShapeKind::REQUIREMENT`] and the concrete-kind list all derive
 /// from it.
-const NAMES: [(ShapeKind, &str); 9] = [
+const NAMES: [(ShapeKind, &str); 10] = [
     (ShapeKind::Any, "any"),
     (ShapeKind::Triangle, "triangle"),
     (ShapeKind::Rectangle, "rectangle"),
@@ -58,11 +60,12 @@ const NAMES: [(ShapeKind, &str); 9] = [
     (ShapeKind::Quadratic, "quadratic"),
     (ShapeKind::RotatedEllipse, "rotated-ellipse"),
     (ShapeKind::Polygon, "polygon"),
+    (ShapeKind::Mixed, "mixed"),
 ];
 
-/// The concrete kinds: every row of [`NAMES`] after [`ShapeKind::Any`].
-const CONCRETE_KINDS: [ShapeKind; NAMES.len() - 1] = {
-    let mut kinds = [ShapeKind::Any; NAMES.len() - 1];
+/// The original concrete kinds; neither abstract palette is included.
+const CONCRETE_KINDS: [ShapeKind; NAMES.len() - 2] = {
+    let mut kinds = [ShapeKind::Any; NAMES.len() - 2];
     let mut index = 0;
     while index < kinds.len() {
         kinds[index] = NAMES[index + 1].0;
@@ -231,6 +234,7 @@ impl Shape {
         round: &SearchRound<'_>,
     ) -> Self {
         let kind = match kind {
+            ShapeKind::Mixed => crate::mixed::FAMILIES[worker.rng.random_range(0..3)],
             ShapeKind::Any => {
                 ShapeKind::all_kinds()[worker.rng.random_range(0..ShapeKind::all_kinds().len())]
             }
@@ -255,7 +259,7 @@ impl Shape {
                 Self::RotatedEllipse(RotatedEllipse::random(worker, round))
             }
             ShapeKind::Polygon => Self::Polygon(Polygon::random(worker, round, 4)),
-            ShapeKind::Any => unreachable!("ShapeKind::Any is resolved before shape creation"),
+            ShapeKind::Any | ShapeKind::Mixed => unreachable!("ShapeKind::Any is resolved before shape creation"),
         }
     }
 
@@ -1035,7 +1039,7 @@ impl RotatedRectangle {
     /// [`sin_cos_whole_degrees`], the table of
     /// [`crate::util::sin_cos_degrees`], so that every target computes the
     /// same ones; whole quarter turns are exact.
-    fn corners(&self) -> [(f64, f64); 4] {
+    pub(crate) fn corners(&self) -> [(f64, f64); 4] {
         let half_x = f64::from(self.sx) / 2.0;
         let half_y = f64::from(self.sy) / 2.0;
         let (sin_a, cos_a) = sin_cos_whole_degrees(self.angle);
@@ -2079,6 +2083,7 @@ mod tests {
             (ShapeKind::Quadratic, "quadratic"),
             (ShapeKind::RotatedEllipse, "rotated-ellipse"),
             (ShapeKind::Polygon, "polygon"),
+            (ShapeKind::Mixed, "mixed"),
         ];
 
         for (kind, value) in cases {
@@ -2092,7 +2097,7 @@ mod tests {
         assert_eq!(
             ShapeKind::REQUIREMENT,
             "must be one of: any, triangle, rectangle, ellipse, circle, \
-             rotated-rectangle, quadratic, rotated-ellipse, polygon"
+             rotated-rectangle, quadratic, rotated-ellipse, polygon, mixed"
         );
         let listed: Vec<&str> = ShapeKind::REQUIREMENT
             .strip_prefix("must be one of: ")
@@ -2104,7 +2109,8 @@ mod tests {
             .map(|name| name.parse().expect(name))
             .collect();
         assert_eq!(kinds[0], ShapeKind::Any);
-        assert_eq!(&kinds[1..], ShapeKind::all_kinds());
+        assert_eq!(kinds.last(),Some(&ShapeKind::Mixed));
+        assert_eq!(&kinds[1..kinds.len()-1], ShapeKind::all_kinds());
     }
 
     #[test]
@@ -2113,7 +2119,7 @@ mod tests {
             "hexagon".parse::<ShapeKind>(),
             Err(ParseError::new(
                 "shape must be one of: any, triangle, rectangle, ellipse, circle, \
-                 rotated-rectangle, quadratic, rotated-ellipse, polygon"
+                 rotated-rectangle, quadratic, rotated-ellipse, polygon, mixed"
             ))
         );
     }

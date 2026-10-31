@@ -18,10 +18,18 @@ if variant=='single':
 env['RUSTFLAGS']=flags;target=work/f'target-site-{variant}'
 subprocess.run([str(work/'cargo-home/bin/cargo.exe'),toolchain,'build','--locked','--profile','wasm-release','-p','primeval-wasm','--features',features,'--target','wasm32-unknown-unknown','--target-dir',str(target),*args],cwd=source,env=env,check=True)
 output=vendor/'wasm'/variant;output.mkdir(parents=True,exist_ok=True)
-subprocess.run([str(bindgen),'--target','web','--no-typescript','--remove-name-section','--out-dir',str(output),'--out-name','primeval',str(target/'wasm32-unknown-unknown/wasm-release/primeval_wasm.wasm')],check=True)
+staged=work/f'site-bindgen-{variant}';staged.mkdir(parents=True,exist_ok=True)
+subprocess.run([str(bindgen),'--target','web','--no-typescript','--remove-name-section','--out-dir',str(staged),'--out-name','primeval',str(target/'wasm32-unknown-unknown/wasm-release/primeval_wasm.wasm')],check=True)
 optimizers=list((work/'binaryen').rglob('wasm-opt.exe'))
 if optimizers:
- wasm=output/'primeval_bg.wasm';optimized=work/f'site-optimized-{variant}.wasm'
+ wasm=staged/'primeval_bg.wasm';optimized=work/f'site-optimized-{variant}.wasm'
  subprocess.run([str(optimizers[0]),str(wasm),'-O3','--enable-simd','--enable-threads','--enable-bulk-memory','--enable-mutable-globals','--enable-sign-ext','--enable-nontrapping-float-to-int','-o',str(optimized)],check=True)
  shutil.copy2(optimized,wasm)
+# Publish finished files atomically. In-place truncation can fail on Windows
+# while a browser/editor holds a read-only memory mapping of the old WASM.
+for generated in staged.rglob('*'):
+ if generated.is_file():
+  destination=output/generated.relative_to(staged);destination.parent.mkdir(parents=True,exist_ok=True)
+  pending=destination.with_name(destination.name+'.pending')
+  shutil.copy2(generated,pending);os.replace(pending,destination)
 print('Built',variant,output)

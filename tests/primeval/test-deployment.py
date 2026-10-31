@@ -32,5 +32,6 @@ class DeploymentChecks(unittest.TestCase):
                 pages.assemble(Path(output))
 
 
+
 if __name__ == '__main__':
     unittest.main()

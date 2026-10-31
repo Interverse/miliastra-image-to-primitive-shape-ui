@@ -215,6 +215,19 @@ impl ColorFit {
     /// The fitted colour, each channel rounded to the nearest integer and
     /// clamped to `0..=255`; the default colour when nothing had weight.
     fn color(mut self, alpha: i32) -> Color {
+        // A single batch has fewer than 2^22 pixels. Even the largest rounded
+        // numerator, 511*M*M*pixels, fits i64. Avoid promoting every ordinary
+        // candidate to software i128 arithmetic; the long-image path remains.
+        if self.total.weights == 0 {
+            let weights = self.batch.weights as i64;
+            if weights == 0 {return Color::default();}
+            let channel = |i: usize| -> u8 {
+                let numerator = i64::from(M)*self.batch.differences[i]+self.batch.currents[i] as i64;
+                if numerator <= 0 {return 0;}
+                ((2*numerator+weights)/(2*weights)).min(255) as u8
+            };
+            return Color::new(channel(0),channel(1),channel(2),alpha as u8);
+        }
         self.flush();
         let total = self.total;
         let weights = total.weights;

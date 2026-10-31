@@ -1,0 +1,95 @@
+{
+  "description": "Original pre-exact-optimization Fast engine, now named Fastest; SHA-256 output hashes, seed 42.",
+  "cases": [
+    {
+      "shape": "triangle",
+      "size": 32,
+      "png": false,
+      "count": 32,
+      "drawing": "eb1b21775edec0aafae1ff193d055b316967d7677e52f134dddb6f9f0d42bf5a",
+      "svg": "aee0112edd6dfa90317e671a08ac5117f709410c02b2e1347c54b05ec7d25865",
+      "png_bytes": "8abecdf7ec23a473a342c188268d32d386c58b826c00cb162922a9c526a7bedc",
+      "preview": "f7cbc74e8e02cf0f97df997f3a15fb0c125fd6ab2e19340f23c600105b0ca28d"
+    },
+    {
+      "shape": "circle",
+      "size": 32,
+      "png": false,
+      "count": 32,
+      "drawing": "01e9fddc537596e92394d6d8fe4b8293122b3d30f0b6832428db78b64a5eb169",
+      "svg": "5d63f9da91749031214f2fb7418f5925ad6cd67f6b6e99f09485613a15fb1340",
+      "png_bytes": "b3560ab4e0c258483ff589e553a1087cb32ccf6b2218da706e3c2e953c56f8e1",
+      "preview": "51ae7c640e23f3cb21422569b75d4c5008a4688760c19478f848797b1ef88d21"
+    },
+    {
+      "shape": "rect",
+      "size": 32,
+      "png": false,
+      "count": 32,
+      "drawing": "fb9bbd48a0131f298780332a7c0ce282174f06cf06d74897d538b8cbde31f31b",
+      "svg": "0fd50d38c9686f13fdab89035c17ce57c31e4d0c6d3cc21bee5fdb5ec9cfe0cb",
+      "png_bytes": "2544a473fda80cf7f624bcce8561a441f147a75ec2fcde64994a0e7032344dc8",
+      "preview": "b943a433a373df214d0619ee4d04ca1d07142b5e553a03cd4b361f09c85bc0a1"
+    },
+    {
+      "shape": "triangle",
+      "size": 32,
+      "png": true,
+      "count": 32,
+      "drawing": "08b7e5029d68a4951a5f6264da3509f9b120a06b053a5f7d1eedf632b97a3919",
+      "svg": "32d46de76794fd619b7abc596bc927ed1ea0fbcd5039a02e9e43d00f023f6756",
+      "png_bytes": "3e02604c2a025cbb713518cccd4e7407b2206e9980e1c4edf191b1049b6fc058",
+      "preview": "c587121e81d1291c6a53873b485182c9e1e2c256226ab8b8369ef99aa1ced858"
+    },
+    {
+      "shape": "circle",
+      "size": 32,
+      "png": true,
+      "count": 32,
+      "drawing": "f8f8edfc89c05b053045c0fb6c92e6b7534d9f69e056d12b92fd4fe690824493",
+      "svg": "cc1ae1ba227824f15ef9be4b3bda8bd68588fcb97962cd680e39c4a8162ce278",
+      "png_bytes": "02ebd3893475ef4a970b0a7bf22cdd0392fcda145231f63671cde390693ede63",
+      "preview": "79d0553c8a2ba11e70b706eb7443f5e331904d8cbf2dfae1ec8985094ed13133"
+    },
+    {
+      "shape": "rect",
+      "size": 32,
+      "png": true,
+      "count": 32,
+      "drawing": "e0993c725b0c794fe72a5e65da01ef40be7a1e6c6802a079a0c9977dee9f8873",
+      "svg": "c2cfb54c157810c1e818f3162011b19c12d6c3f354f1b76fedded05242d457b0",
+      "png_bytes": "1da17c96f41fada6c427cf36327a84e6d90d4f21cd4e67b2057a7343cf886dc7",
+      "preview": "659d6b4fc310c0b51dba1a58a6d9c0cb85da7f20f9c8130f5dc24e70cb7e83ff"
+    },
+    {
+      "shape": "triangle",
+      "size": 320,
+      "png": true,
+      "count": 8,
+      "drawing": "b680558692778584cc8538778daed3503a65aa6f73a7d7bbdb62e79e9b63c4ef",
+      "svg": "7dce01a0dd7e8625050d0f9f652bdd807f992a91775030d9540ef577500a851c",
+      "png_bytes": "6ab32220a999412ccb75d0c17b0f08b24de8dc025bd7109ead22c7450b20eb1d",
+      "preview": "ddcc07bcad77327ed1ca823b6154f35ca7b27bc608bf7917c2e73386e7d5c333"
+    },
+    {
+      "shape": "circle",
+      "size": 320,
+      "png": true,
+      "count": 8,
+      "drawing": "d44051515505f3895f935b6462d2e81776419b846b35d88a17ae5e18a19c8370",
+      "svg": "8e6fb70bf3d27def6528129031f170169506fffa461d8565fdb66ff6f9935b07",
+      "png_bytes": "a8da0ead0a5174d2a0a8a4c8dc1fc06a7f8002ff03e36201fa601df14a4b0919",
+      "preview": "0375a756f74b769465f742c2c8948d756e455bf717e250096a9a610209e425ff"
+    },
+    {
+      "shape": "rect",
+      "size": 320,
+      "png": true,
+      "count": 8,
+      "drawing": "bf065b7381c89a0f83cc6d5e775cb4b1c6a83c4523c081f314c3cf5ca590baa9",
+      "svg": "83c1dd413b0b442cc2d893923171e963afca83b33ee4c44d84f96d9bb80f2ac3",
+      "png_bytes": "79448f683170dec785a764cb3bea0b8c0d34271f5b34567f76a2fce46e7144dc",
+      "preview": "f0ff39496e8461d44eff76a88b2e2fd763d7405000bd0de4e2d9000a80cda71b"
+    }
+  ]
+}

@@ -245,7 +245,7 @@ mod tests {
         assert_eq!(
             error,
             "INVALID_OPTION: shape must be one of: any, triangle, rectangle, ellipse, circle, \
-             rotated-rectangle, quadratic, rotated-ellipse, polygon"
+             rotated-rectangle, quadratic, rotated-ellipse, polygon, mixed"
         );
     }
 

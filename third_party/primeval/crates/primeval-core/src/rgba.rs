@@ -7,38 +7,56 @@ use crate::worker::{WorkerCtx, SearchRound, RoundEffort};
 use crate::shapes::{Shape, Step, Polygon, RotatedEllipse};
 use crate::scanline::Scanline;
 use rayon::prelude::*;
-use std::sync::OnceLock;
+use std::sync::{OnceLock,Mutex};
+
+mod turbo;
 
 const N: usize = 11;
 const ALPHA_WEIGHT: f64 = 4.0;
-fn alpha_weight(alpha:f64)->f64 {if alpha==0.0 {16.0}else{ALPHA_WEIGHT}}
+
 type Sums = [f64; N];
 
 fn coverage<'a,R:rand::Rng>(shape:&Shape,worker:&'a mut WorkerCtx<R>,exact:bool)->&'a [Scanline] {
     if !exact{return shape.rasterize(worker);}
-    use tiny_skia::{Mask,PathBuilder,Rect,Transform,FillRule};
+    use tiny_skia::{Mask,PathBuilder,Rect,Transform,FillRule,IntSize};
     let (x1,y1,x2,y2)=shape.candidate_rectangle(worker.width,worker.height,false);
     worker.lines.clear();if x2<x1||y2<y1{return &worker.lines;}
-    let geometry=shape.geometry();let mut transform=Transform::from_translate(-x1 as f32,-y1 as f32);
-    let path=match &geometry {
-        Geometry::Polygon(p)=>{let mut b=PathBuilder::new();b.move_to(p[0].x as f32,p[0].y as f32);for q in &p[1..]{b.line_to(q.x as f32,q.y as f32);}b.close();b.finish()},
-        Geometry::Rect{x,y,width,height}=>Rect::from_xywh(*x as f32,*y as f32,*width as f32,*height as f32).map(PathBuilder::from_rect),
+    let reuse=worker.rgba_reuse;
+    let mut builder=if reuse {worker.rgba_path.take().map(|p|p.clear()).unwrap_or_default()}else{PathBuilder::new()};
+    let mut transform=Transform::from_translate(-x1 as f32,-y1 as f32);
+    // Seeded polygons already hold precisely these coordinates. Avoid a
+    // temporary heap-allocated Geometry::Polygon in the accelerated path.
+    let path=if reuse&&matches!(shape,Shape::Polygon(_)) {
+        let Shape::Polygon(p)=shape else{unreachable!()};
+        builder.move_to(p.x[0] as f32,p.y[0] as f32);
+        for i in 1..p.order{builder.line_to(p.x[i] as f32,p.y[i] as f32);}builder.close();builder.finish()
+    }else{match shape.geometry() {
+        Geometry::Polygon(p)=>{builder.move_to(p[0].x as f32,p[0].y as f32);for q in &p[1..]{builder.line_to(q.x as f32,q.y as f32);}builder.close();builder.finish()},
+        Geometry::Rect{x,y,width,height}=>Rect::from_xywh(x as f32,y as f32,width as f32,height as f32).map(PathBuilder::from_rect),
         Geometry::Ellipse{cx,cy,rx,ry,rotation}=>{
-            let (sin,cos)=crate::sin_cos_degrees(*rotation);let rotate=Transform::from_row(cos as f32,sin as f32,-sin as f32,cos as f32,0.0,0.0);
-            transform=transform.pre_concat(Transform::identity().pre_translate(*cx as f32,*cy as f32).pre_concat(rotate).pre_translate(-*cx as f32,-*cy as f32));
-            Rect::from_ltrb((cx-rx) as f32,(cy-ry) as f32,(cx+rx) as f32,(cy+ry) as f32).and_then(PathBuilder::from_oval)
+            let (sin,cos)=crate::sin_cos_degrees(rotation);let rotate=Transform::from_row(cos as f32,sin as f32,-sin as f32,cos as f32,0.0,0.0);
+            transform=transform.pre_concat(Transform::identity().pre_translate(cx as f32,cy as f32).pre_concat(rotate).pre_translate(-cx as f32,-cy as f32));
+            Rect::from_ltrb((cx-rx) as f32,(cy-ry) as f32,(cx+rx) as f32,(cy+ry) as f32).and_then(|oval|{builder.push_oval(oval);builder.finish()})
         },
         _=>return shape.rasterize(worker),
-    };
-    let Some(path)=path else{return &worker.lines;};
+    }};
+    let Some(mut path)=path else{return &worker.lines;};
+    // Mask::fill_path clones a transformed path. Consuming our owned path
+    // applies exactly the same transform without allocating another copy.
+    if reuse&&!transform.is_identity(){let Some(transformed)=path.transform(transform)else{return &worker.lines;};path=transformed;transform=Transform::identity();}
     let w=(x2-x1+1) as u32;let h=(y2-y1+1) as u32;
-    let Some(mut mask)=Mask::new(w,h)else{return &worker.lines;};
-    mask.fill_path(&path,FillRule::Winding,true,transform);
+    let mask=if reuse {
+        let mut bytes=std::mem::take(&mut worker.rgba_mask);bytes.resize(w as usize*h as usize,0);bytes.fill(0);
+        Mask::from_vec(bytes,IntSize::from_wh(w,h).unwrap())
+    }else{Mask::new(w,h)};
+    let Some(mut mask)=mask else{return &worker.lines;};
+    if reuse {mask.fill_path_coverage_cached(&path,FillRule::Winding,&mut worker.rgba_raster);}else{mask.fill_path(&path,FillRule::Winding,true,transform);}
     for y in 0..h {let mut x=0;while x<w {
         let alpha=mask.data()[(y*w+x) as usize];let start=x;x+=1;
         while x<w&&mask.data()[(y*w+x) as usize]==alpha{x+=1;}
         if alpha>0{worker.lines.push(Scanline{y:y1+y as i32,x1:x1+start as i32,x2:x1+x as i32-1,alpha:u32::from(alpha)*257});}
     }}
+    if reuse {worker.rgba_mask=mask.take();worker.rgba_path=Some(path);}
     &worker.lines
 }
 
@@ -153,10 +171,14 @@ fn quantized_fit(s:&Sums,alpha:f64)->(f64,Color) {
 pub struct RgbaModel {
     width:u32, height:u32, target:Vec<[f64;4]>, current:Vec<[f64;4]>,
     prefix:Vec<Sums>, error_prefix:Vec<f64>, proposal:Buffer, canvas:Buffer, grid:ErrorGrid,
+    background:Color,
+    optimized:bool, turbo:bool, clear_alpha_weight:f64,
+    step_workers:Vec<WorkerCtx<rand_chacha::ChaCha8Rng>>,
     seed:u64, shapes:Vec<DrawnShape>, layers:Vec<Shape>, score:f64,family:ShapeKind,exact_coverage:bool,frozen:Vec<bool>,fast_residual:bool,
 }
 
 impl RgbaModel {
+    fn alpha_weight(&self,alpha:f64)->f64 {if alpha==0.0{self.clear_alpha_weight}else{ALPHA_WEIGHT}}
     /// Target pixels are normalized premultiplied RGBA, resampled before entry.
     pub fn new(width:u32,height:u32,target:Vec<[f64;4]>,seed:Option<u64>) -> Self {
         assert!(width>=2 && height>=2 && target.len()==width as usize*height as usize);
@@ -169,10 +191,13 @@ impl RgbaModel {
         let proposal=Buffer::from_rgb(width,height,proxy(&target)).unwrap();
         let canvas=Buffer::from_rgb(width,height,proxy(&current)).unwrap();
         let score=target.iter().map(|p|p[0]*p[0]+p[1]*p[1]+p[2]*p[2]+ALPHA_WEIGHT*p[3]*p[3]).sum();
-        let mut model=Self{width,height,target,current,prefix:vec![[0.0;N];(width as usize+1)*height as usize],error_prefix:vec![0.0;(width as usize+1)*height as usize],proposal,canvas,grid:ErrorGrid::new(width,height,16,16),seed:seed.unwrap_or_else(crate::util::entropy_seed),shapes:Vec::new(),layers:Vec::new(),score,family:ShapeKind::Any,exact_coverage:false,frozen:Vec::new(),fast_residual:false};
+        let mut model=Self{background:Color::new(0,0,0,0),optimized:false,turbo:false,clear_alpha_weight:16.0,step_workers:Vec::new(),width,height,target,current,prefix:vec![[0.0;N];(width as usize+1)*height as usize],error_prefix:vec![0.0;(width as usize+1)*height as usize],proposal,canvas,grid:ErrorGrid::new(width,height,16,16),seed:seed.unwrap_or_else(crate::util::entropy_seed),shapes:Vec::new(),layers:Vec::new(),score,family:ShapeKind::Any,exact_coverage:false,frozen:Vec::new(),fast_residual:false};
         for y in 0..height as usize {model.update_row(y);}
         model
     }
+
+    /// Reuse scratch storage without changing candidates, RNG or floating-point math.
+    pub fn enable_exact_optimizations(&mut self) {self.optimized=true;}
 
     /// Start from the complete opaque search/refinement instead of replacing
     /// its allocation of fine detail with a second independent greedy fit.
@@ -180,26 +205,29 @@ impl RgbaModel {
         self.seed_with_base(drawing,kind,0)
     }
 
+    /// Import the complete incumbent, including its existing background control.
+    pub fn seed_mixed(&mut self,drawing:&Drawing)->bool{self.background=drawing.background;self.seed_drawing(drawing,ShapeKind::Mixed)}
+
     /// Retain a previously alpha-fitted foundation under original detail layers.
     pub fn seed_with_base(&mut self,drawing:&Drawing,kind:ShapeKind,base_count:usize)->bool {
         if drawing.width!=self.width||drawing.height!=self.height{return false;}
         self.grid.compute(&self.proposal,&self.canvas);
         let round=SearchRound{half_resolution:false,target:&self.proposal,current:&self.canvas,error_grid:&self.grid,score:0,coarse:None};
-        let mut worker=WorkerCtx::new(self.width as i32,self.height as i32,crate::rng::round_rng(self.seed,0,18));
+        let mut worker=WorkerCtx::new(self.width as i32,self.height as i32,crate::rng::round_rng(self.seed,0,18));worker.rgba_reuse=self.optimized;
         let template=Shape::random(kind,&mut worker,&round);
         let Some(layers)=drawing.shapes.iter().map(|s|{
-            if kind==ShapeKind::Triangle {if let Geometry::Polygon(p)=&s.geometry {if p.len()==3 {
+            if matches!(kind,ShapeKind::Triangle|ShapeKind::Mixed) {if let Geometry::Polygon(p)=&s.geometry {if p.len()==3 {
                 return Some(Shape::Polygon(Polygon{order:3,x:[p[0].x,p[1].x,p[2].x,0.0],y:[p[0].y,p[1].y,p[2].y,0.0]}));
             }}}
-            if kind==ShapeKind::RotatedEllipse {if let Geometry::Ellipse{cx,cy,rx,ry,rotation}=&s.geometry {
+            if matches!(kind,ShapeKind::RotatedEllipse|ShapeKind::Mixed) {if let Geometry::Ellipse{cx,cy,rx,ry,rotation}=&s.geometry {
                 if *rx>0.0&&*ry>0.0 {return Some(Shape::RotatedEllipse(RotatedEllipse{x:*cx,y:*cy,rx:*rx,ry:*ry,angle:*rotation}));}
             }}
-            if kind==ShapeKind::RotatedRectangle {if let Geometry::Polygon(p)=&s.geometry {if p.len()==4 {
+            if matches!(kind,ShapeKind::RotatedRectangle|ShapeKind::Mixed) {if let Geometry::Polygon(p)=&s.geometry {if p.len()==4 {
                 return Some(Shape::Polygon(Polygon{order:4,x:[p[0].x,p[1].x,p[2].x,p[3].x],y:[p[0].y,p[1].y,p[2].y,p[3].y]}));
             }}}
             template.adopted(&s.geometry,self.width,self.height)
         }).collect::<Option<Vec<_>>>() else{return false;};
-        let mut canvas=vec![[0.0_f32;4];self.target.len()];let mut shapes=drawing.shapes.clone();let mut frozen=vec![false;shapes.len()];
+        let mut canvas=vec![self.background_pixel();self.target.len()];let mut shapes=drawing.shapes.clone();let mut frozen=vec![false;shapes.len()];
         for (index,(shape,drawn)) in layers.iter().zip(&mut shapes).enumerate(){
             let lines=coverage(shape,&mut worker,true);let mut alpha=0.0;let mut area=0.0;let mut safe=true;
             for line in lines {for x in line.x1..=line.x2 {let weight=line.coverage();area+=weight;alpha+=weight*self.target[line.y as usize*self.width as usize+x as usize][3];for dy in -1..=1 {for dx in -1..=1 {let xx=x+dx;let yy=line.y+dy;if xx<0||yy<0||xx>=self.width as i32||yy>=self.height as i32||self.target[yy as usize*self.width as usize+xx as usize][3]<254.0/255.0{safe=false;}}}}}
@@ -207,8 +235,8 @@ impl RgbaModel {
             // saturated alpha has no coordinate gradient until every layer
             // covering it is removed. Interior reference layers remain intact;
             // boundary/background layers are free to regrow during RGBA fitting.
-            if index>=base_count&&area>0.0&&alpha/area<0.995 {drawn.color.a=0;}
-            frozen[index]=index>=base_count&&area>0.0&&safe;
+            if kind!=ShapeKind::Mixed&&index>=base_count&&area>0.0&&alpha/area<0.995 {drawn.color.a=0;}
+            frozen[index]=kind!=ShapeKind::Mixed&&index>=base_count&&area>0.0&&safe;
             Self::paint(&mut canvas,self.width,lines,drawn.color);
         }
         self.current=canvas.into_iter().map(|p|p.map(f64::from)).collect();self.score=self.loss(&self.current);
@@ -222,9 +250,9 @@ impl RgbaModel {
         for x in 0..w {
             let i=y*w+x;let t=self.target[i];let c=self.current[i];
             let mut v=[0.0;N];v[0]=1.0;
-            self.error_prefix[base+x+1]=self.error_prefix[base+x]+(0..4).map(|k|(t[k]-c[k]).powi(2)*if k==3{alpha_weight(t[3])}else{1.0}).sum::<f64>();
+            self.error_prefix[base+x+1]=self.error_prefix[base+x]+(0..4).map(|k|(t[k]-c[k]).powi(2)*if k==3{self.alpha_weight(t[3])}else{1.0}).sum::<f64>();
             for k in 0..3 {let d=t[k]-c[k];v[1+k]=d;v[4+k]=c[k];v[7]+=c[k]*c[k];v[8]+=c[k]*d;}
-            v[9]=alpha_weight(t[3])*(1.0-c[3])*(t[3]-c[3]);v[10]=alpha_weight(t[3])*(1.0-c[3]).powi(2);
+            v[9]=self.alpha_weight(t[3])*(1.0-c[3])*(t[3]-c[3]);v[10]=self.alpha_weight(t[3])*(1.0-c[3]).powi(2);
             for k in 0..N {self.prefix[base+x+1][k]=self.prefix[base+x][k]+v[k];}
             self.canvas.pixels_mut()[i*3]=(c[3]*255.0).round() as u8;
             self.canvas.pixels_mut()[i*3+1]=((c[0]+c[1]+c[2])/3.0*255.0).round() as u8;
@@ -264,27 +292,40 @@ impl RgbaModel {
         self.grid.compute(&self.proposal,&self.canvas);
         let round=SearchRound{half_resolution:false,target:&self.proposal,current:&self.canvas,error_grid:&self.grid,score:0,coarse:None};
         let mut effort=RoundEffort::of(kind);if self.fast_residual{effort.candidates=64;effort.age=35;}let step=self.shapes.len() as u64;
-        let search=|index:u64| {
-            let mut worker=WorkerCtx::new(self.width as i32,self.height as i32,crate::rng::round_rng(self.seed,step,index));
-            let mut shape=Shape::random(kind,&mut worker,&round);if self.fast_residual{Self::narrow(&mut shape,index,(256.0/f64::from(self.width.max(self.height))).min(1.0));}
-            let mut scored=self.evaluate_shape(&shape,&mut worker,0.0);
+        let rounds=if self.turbo{8}else{(if self.fast_residual{4}else{16})*if kind==ShapeKind::Mixed{3}else{1}};
+        let proposals=if self.turbo{self.turbo_proposals(kind)}else{Vec::new()};
+        let mut workers=if self.optimized{std::mem::take(&mut self.step_workers)}else{Vec::new()};
+        workers.resize_with(rounds,||{let mut work=WorkerCtx::new(self.width as i32,self.height as i32,crate::rng::round_rng(self.seed,step,0));work.rgba_reuse=self.optimized;work});
+        let search=|(index,worker):(usize,&mut WorkerCtx<_>)| {
+            let stream=if kind==ShapeKind::Mixed{index/3}else{index};
+            let kind=if kind==ShapeKind::Mixed{crate::mixed::family(index)}else{kind};
+            let mut effort=if self.family==ShapeKind::Mixed{RoundEffort::of(kind)}else{effort};if self.fast_residual{effort.candidates=64;effort.age=35;}
+            if self.turbo{effort.candidates=32;effort.age=50;}
+            let index=index as u64;worker.rng=crate::rng::round_rng(self.seed,step,stream as u64);
+            let mut shape=Shape::random(kind,worker,&round);if self.fast_residual{Self::narrow(&mut shape,index,(256.0/f64::from(self.width.max(self.height))).min(1.0));}
+            let mut scored=self.evaluate_shape(&shape,worker,0.0);
             for _ in 1..effort.candidates {
-                let mut candidate=Shape::random(kind,&mut worker,&round);if self.fast_residual{Self::narrow(&mut candidate,index,(256.0/f64::from(self.width.max(self.height))).min(1.0));}
-                let score=self.evaluate_shape(&candidate,&mut worker,scored.0);
+                let mut candidate=Shape::random(kind,worker,&round);if self.fast_residual{Self::narrow(&mut candidate,index,(256.0/f64::from(self.width.max(self.height))).min(1.0));}
+                if self.turbo {Self::project_rectangle(&mut candidate);}
+                let score=self.evaluate_shape(&candidate,worker,scored.0);
                 if score.0<scored.0 {shape=candidate;scored=score;}
+            }
+            if self.turbo {
+                for candidate in proposals.iter().skip(index as usize).step_by(rounds) {let trial=self.evaluate_shape(candidate,worker,scored.0);if trial.0<scored.0{shape=candidate.clone();scored=trial;}}
             }
             let mut age=0;
             while age<effort.age {
-                let mut candidate=shape.clone();candidate.mutate(&mut worker,Step::Coarse);
-                let score=self.evaluate_shape(&candidate,&mut worker,scored.0);
+                let mut candidate=shape.clone();candidate.mutate(worker,if self.turbo{Step::Scaled((0.8408964152537145_f64).powi(age as i32).max(1.0/64.0))}else{Step::Coarse});
+                if self.turbo {Self::project_rectangle(&mut candidate);}
+                let score=self.evaluate_shape(&candidate,worker,scored.0);
                 if score.0<scored.0 {shape=candidate;scored=score;age=0;}else{age+=1;}
             }
             (shape,scored)
         };
-        let rounds=if self.fast_residual{4}else{16};
-        let results:Vec<_>=(0..rounds).into_par_iter().map(search).collect();
+        let results:Vec<_>=workers.par_iter_mut().enumerate().map(search).collect();
+        if self.optimized{self.step_workers=workers;}
         let (shape,(delta,color))=results.into_iter().enumerate().min_by(|(ia,a),(ib,b)|a.1.0.total_cmp(&b.1.0).then(ia.cmp(ib))).unwrap().1;
-        let mut worker=WorkerCtx::new(self.width as i32,self.height as i32,crate::rng::round_rng(self.seed,step,16));
+        let mut worker=WorkerCtx::new(self.width as i32,self.height as i32,crate::rng::round_rng(self.seed,step,16));worker.rgba_reuse=self.optimized;
         let lines=coverage(&shape,&mut worker,self.exact_coverage);
         let a=f64::from(color.a)/255.0;let rgb=[color.r,color.g,color.b].map(|v|f64::from(v)/255.0);
         let mut dirty=vec![false;self.height as usize];
@@ -376,24 +417,25 @@ impl RgbaModel {
                 sums[1+c]+=coverage*residual;sums[4+c]+=square*b[c];sums[7]+=square*b[c]*b[c];sums[8]+=coverage*b[c]*residual;
             }
             let residual=self.target[pixel][3]-suffix[pixel][3]-transmission[pixel]*b[3];
-            let weight=alpha_weight(self.target[pixel][3]);
+            let weight=self.alpha_weight(self.target[pixel][3]);
             sums[9]+=weight*coverage*(1.0-b[3])*residual;sums[10]+=weight*square*(1.0-b[3]).powi(2);
         }}
         sums
     }
 
-    fn layer_prefix_sums(&self,lines:&[Scanline],base:&[[f32;4]],suffix:&[[f64;4]],transmission:&[f64],rows:&[OnceLock<Vec<Sums>>])->Sums {
+    fn layer_prefix_sums(&self,lines:&[Scanline],base:&[[f32;4]],suffix:&[[f64;4]],transmission:&[f64],rows:&[OnceLock<Vec<Sums>>],spare:Option<&[Mutex<Vec<Sums>>]>)->Sums {
         let mut sums=[0.0;N];let width=self.width as usize;
         for line in lines {
             let row=rows[line.y as usize].get_or_init(||{
-                let mut prefix=vec![[0.0;N];width+1];let offset=line.y as usize*width;
+                let mut prefix=spare.map(|pool|std::mem::take(&mut *pool[line.y as usize].lock().expect("row scratch is not poisoned"))).unwrap_or_default();
+                prefix.resize(width+1,[0.0;N]);prefix[0]=[0.0;N];let offset=line.y as usize*width;
                 for x in 0..width {
                     let pixel=offset+x;let t=transmission[pixel];
                     if t==0.0 {prefix[x+1]=prefix[x];continue;}
                     let b=base[pixel].map(f64::from);let square=t*t;
                     let mut v=[0.0;N];v[0]=square;
                     for c in 0..3 {let residual=self.target[pixel][c]-suffix[pixel][c]-t*b[c];v[1+c]=t*residual;v[4+c]=square*b[c];v[7]+=square*b[c]*b[c];v[8]+=t*b[c]*residual;}
-                    let residual=self.target[pixel][3]-suffix[pixel][3]-t*b[3];let weight=alpha_weight(self.target[pixel][3]);
+                    let residual=self.target[pixel][3]-suffix[pixel][3]-t*b[3];let weight=self.alpha_weight(self.target[pixel][3]);
                     v[9]=weight*t*(1.0-b[3])*residual;v[10]=weight*square*(1.0-b[3]).powi(2);
                     for k in 0..N {prefix[x+1][k]=prefix[x][k]+v[k];}
                 }
@@ -413,16 +455,27 @@ impl RgbaModel {
     pub fn refine_fast(&mut self,cancelled:impl FnMut()->bool)->bool {self.refine_passes(1,2,cancelled)}
     /// Initial boundary adjustment before residual controls are placed.
     pub fn refine_initial_fast(&mut self,cancelled:impl FnMut()->bool)->bool {self.refine_passes(1,2,cancelled)}
+    fn background_pixel(&self)->[f32;4]{let a=f32::from(self.background.a)/255.0;[f32::from(self.background.r)/255.0*a,f32::from(self.background.g)/255.0*a,f32::from(self.background.b)/255.0*a,a]}
+    /// Reconsider layer families at a fixed control count; callers guard the
+    /// exported pixels against the original drawing before accepting the result.
+    pub fn refine_mixed(&mut self,cancelled:impl FnMut()->bool)->bool{self.refine_passes(2,6,cancelled)}
     /// Refit colors and opacity with geometry held fixed.
     pub fn polish_colors(&mut self,cancelled:impl FnMut()->bool)->bool {self.refine_passes(1,0,cancelled)}
-    fn refine_passes(&mut self,passes:u64,rounds:u64,mut cancelled:impl FnMut()->bool)->bool {
+    fn refine_passes(&mut self,passes:u64,rounds:u64,cancelled:impl FnMut()->bool)->bool {
+        self.refine_observed(passes,rounds,cancelled,|_,_,_,_|{})
+    }
+    /// Observe actual layer work without changing refinement arithmetic or order.
+    pub fn refine_observed(&mut self,passes:u64,rounds:u64,mut cancelled:impl FnMut()->bool,mut observer:impl FnMut(u32,u32,usize,&DrawnShape))->bool {
         let n=self.target.len();let count=self.layers.len();if count==0{return true;}
         let plan=crate::refine::replay_plan(count,n*16);
-        let mut worker=WorkerCtx::new(self.width as i32,self.height as i32,crate::rng::round_rng(self.seed,0,17));
+        let mut worker=WorkerCtx::new(self.width as i32,self.height as i32,crate::rng::round_rng(self.seed,0,17));worker.rgba_reuse=self.optimized;
         let mut lines:Vec<Vec<Scanline>>=self.layers.iter().map(|s|coverage(s,&mut worker,self.exact_coverage).to_vec()).collect();
+        let mut refiners:Vec<_>=(0..rounds).map(|_|if self.optimized {let mut work=WorkerCtx::new(self.width as i32,self.height as i32,crate::rng::refine_rng(self.seed,0,0,0));work.rgba_reuse=true;Some(work)}else{None}).collect();
+        let mut cached_rows:Vec<_>=(0..self.height).map(|_|OnceLock::new()).collect();
+        let mut spare_rows:Vec<_>=(0..self.height).map(|_|Mutex::new(Vec::new())).collect();
         for pass in 0..passes {
             let old_shapes=self.shapes.clone();let old_layers=self.layers.clone();let old_score=self.score;
-            let mut forward=vec![[0.0_f32;4];n];let mut checkpoints=Vec::new();
+            let mut forward=vec![self.background_pixel();n];let mut checkpoints=Vec::new();
             for i in 0..count {
                 if cancelled(){return false;}
                 if i%plan.interval==0 {checkpoints.push(forward.clone());}
@@ -438,22 +491,36 @@ impl RgbaModel {
                     if cancelled(){return false;}
                     if !self.frozen[i]&&rounds>0 {
                     let base=bases[i-bottom].as_ref().expect("active layer has a base canvas");
-                    let rows:Vec<_>=(0..self.height).map(|_|OnceLock::new()).collect();
+                    // Reset logical readiness, retaining row allocations. No
+                    // climb is running here, so each previous value is owned.
+                    let local_rows;
+                    let (rows,spare)=if self.optimized {
+                        let mut remaining=32*1024*1024;
+                        for (row,pool) in cached_rows.iter_mut().zip(&mut spare_rows) {
+                            if let Some(data)=row.take(){*pool.get_mut().expect("row scratch is not poisoned")=data;}
+                            let data=pool.get_mut().expect("row scratch is not poisoned");
+                            let bytes=data.capacity()*std::mem::size_of::<Sums>();
+                            if bytes>remaining {*data=Vec::new();}else{remaining-=bytes;}
+                        }
+                        (&cached_rows[..],Some(&spare_rows[..]))
+                    }else{local_rows=(0..self.height).map(|_|OnceLock::new()).collect::<Vec<_>>();(&local_rows[..],None)};
                     // Fast ranks geometry with the native rasterizer. Only the
                     // winning geometry gets export-exact coverage; the repaint
                     // guard below still accepts on that exact composite.
-                    let latency=rounds<crate::refine::ROUNDS&&self.width.max(self.height)>256;
+                    let latency=self.family!=ShapeKind::Mixed&&rounds<crate::refine::ROUNDS&&self.width.max(self.height)>256;
                     let exact_proposals=self.exact_coverage&&!latency;
-                    let evaluate=|shape:&Shape,work:&mut WorkerCtx<_>|fit(&self.layer_prefix_sums(coverage(shape,work,exact_proposals),base,&suffix,&transmission,&rows));
-                    let initial=if exact_proposals {fit(&self.layer_prefix_sums(&lines[i],base,&suffix,&transmission,&rows))}
+                    let evaluate=|shape:&Shape,work:&mut WorkerCtx<_>|fit(&self.layer_prefix_sums(coverage(shape,work,exact_proposals),base,&suffix,&transmission,rows,spare));
+                    let initial=if exact_proposals {fit(&self.layer_prefix_sums(&lines[i],base,&suffix,&transmission,rows,spare))}
                         else {evaluate(&self.layers[i],&mut worker)};
-                    let results:Vec<_>=(0..rounds).into_par_iter().map(|round|{
-                        let mut work=WorkerCtx::new(self.width as i32,self.height as i32,crate::rng::refine_rng(self.seed,pass,i as u64,round));
-                        let mut best=self.layers[i].clone();let mut scored=initial;let mut age=0;let mut scale=if round==0 {1.0_f64}else if round==1&&rounds>2{1.0/16.0}else{1.0/64.0};
+                    let results:Vec<_>=refiners.par_iter_mut().enumerate().map(|(round,cache)|{
+                        let round=round as u64;
+                        let mut fresh;
+                        let work=if let Some(work)=cache {work.rng=crate::rng::refine_rng(self.seed,pass,i as u64,round);work}else{fresh=WorkerCtx::new(self.width as i32,self.height as i32,crate::rng::refine_rng(self.seed,pass,i as u64,round));&mut fresh};
+                        let mut best=if self.family==ShapeKind::Mixed&&round>0{crate::mixed::replacement(&self.layers[i],crate::mixed::family((round-1)as usize)).unwrap_or_else(||self.layers[i].clone())}else{self.layers[i].clone()};let changed=best!=self.layers[i];let mut scored=if changed{evaluate(&best,work)}else{initial};let mut age=0;let mut scale=if changed||round==0 {1.0_f64}else if round==1&&rounds>2{1.0/16.0}else{1.0/64.0};
                         let minimum_gain=if latency {1e-6_f64.max(initial.0.abs()*1e-4)}else{1e-12};
                         let patience=if rounds<crate::refine::ROUNDS {if latency {12}else{25}}else{50};
                         while age<patience {
-                            let mut candidate=best.clone();let step=if matches!(&candidate,Shape::RotatedRectangle(_)){scale.max(1.0/16.0)}else{scale};candidate.mutate(&mut work,Step::Scaled(step));if self.family==ShapeKind::RotatedRectangle{Self::project_rectangle(&mut candidate);}let trial=evaluate(&candidate,&mut work);
+                            let mut candidate=best.clone();let step=if matches!(&candidate,Shape::RotatedRectangle(_)){scale.max(1.0/16.0)}else{scale};candidate.mutate(work,Step::Scaled(step));if matches!(self.family,ShapeKind::RotatedRectangle|ShapeKind::Mixed){Self::project_rectangle(&mut candidate);}let trial=evaluate(&candidate,work);
                             let kept=trial.0<scored.0-minimum_gain;scale=(scale*if kept{2.0}else{0.8408964152537145}).clamp(1.0/256.0,1.0);
                             if kept {best=candidate;scored=trial;age=0;}else{age+=1;}
                         }
@@ -467,6 +534,7 @@ impl RgbaModel {
                         let base=bases[i-bottom].as_ref().expect("color-fit layer has a base canvas");
                         self.shapes[i].color=fit(&self.layer_sums(&lines[i],base,&suffix,&transmission)).1;
                     }
+                    observer((pass as usize*count+count-i)as u32,(passes as usize*count)as u32,i,&self.shapes[i]);
                     let color=self.shapes[i].color;
                     let a=f64::from(color.a)/255.0;let rgb=[color.r,color.g,color.b].map(|v|f64::from(v)/255.0);
                     if color.a==0{continue;}
@@ -478,7 +546,7 @@ impl RgbaModel {
                     }}
                 }
             }
-            let mut actual=vec![[0.0_f32;4];n];
+            let mut actual=vec![self.background_pixel();n];
             for (i,drawn) in self.shapes.iter().enumerate(){Self::paint(&mut actual,self.width,&lines[i],drawn.color);}
             let actual:Vec<[f64;4]>=actual.into_iter().map(|p|p.map(f64::from)).collect();
             let score=self.loss(&actual);
@@ -491,7 +559,7 @@ impl RgbaModel {
     }
 
     fn loss(&self,canvas:&[[f64;4]])->f64 {
-        self.target.iter().zip(canvas).map(|(t,p)|(0..4).map(|c|(t[c]-p[c]).powi(2)*if c==3{alpha_weight(t[3])}else{1.0}).sum::<f64>()).sum()
+        self.target.iter().zip(canvas).map(|(t,p)|(0..4).map(|c|(t[c]-p[c]).powi(2)*if c==3{self.alpha_weight(t[3])}else{1.0}).sum::<f64>()).sum()
     }
 
     /// Reuse invisible controls for residual correction without raising the
@@ -499,7 +567,9 @@ impl RgbaModel {
     pub fn recycle_empty(&mut self,kind:ShapeKind,cancelled:impl FnMut()->bool)->bool {self.recycle_impl(kind,false,cancelled,||{})}
     /// Reuse invisible controls with localized residual proposals.
     pub fn recycle_fast(&mut self,kind:ShapeKind,cancelled:impl FnMut()->bool,placed:impl FnMut())->bool {self.recycle_impl(kind,true,cancelled,placed)}
-    fn recycle_impl(&mut self,kind:ShapeKind,fast:bool,mut cancelled:impl FnMut()->bool,mut placed:impl FnMut())->bool {
+    fn recycle_impl(&mut self,kind:ShapeKind,fast:bool,cancelled:impl FnMut()->bool,placed:impl FnMut())->bool {self.recycle_observed(kind,fast,cancelled,placed,|_,_,_,_|{})}
+    /// Observe residual replacement refinement without changing its schedule.
+    pub fn recycle_observed(&mut self,kind:ShapeKind,fast:bool,mut cancelled:impl FnMut()->bool,mut placed:impl FnMut(),observer:impl FnMut(u32,u32,usize,&DrawnShape))->bool {
         if self.score<1e-12{return true;}
         let total=self.shapes.len();
         let mut shapes=Vec::new();let mut layers=Vec::new();let mut frozen=Vec::new();
@@ -516,21 +586,23 @@ impl RgbaModel {
         self.exact_coverage=exact;
         self.fast_residual=false;
         if vacancies>0 {
-            let mut canvas=vec![[0.0_f32;4];self.target.len()];
-            let mut worker=WorkerCtx::new(self.width as i32,self.height as i32,crate::rng::round_rng(self.seed,0,19));
+            let mut canvas=vec![self.background_pixel();self.target.len()];
+            let mut worker=WorkerCtx::new(self.width as i32,self.height as i32,crate::rng::round_rng(self.seed,0,19));worker.rgba_reuse=self.optimized;
             for (shape,drawn) in self.layers.iter().zip(&self.shapes){Self::paint(&mut canvas,self.width,coverage(shape,&mut worker,self.exact_coverage),drawn.color);}
             self.current=canvas.into_iter().map(|p|p.map(f64::from)).collect();self.score=self.loss(&self.current);
             for y in 0..self.height as usize{self.update_row(y);}
         }
         placed();
-        if vacancies>0 {let ok=if fast{self.refine_fast(&mut cancelled)}else{self.refine(&mut cancelled)};if !ok{return false;}}
+        if vacancies>0 {let ok=self.refine_observed(if fast{1}else{12},if fast{2}else{crate::refine::ROUNDS},&mut cancelled,observer);if !ok{return false;}}
         true
     }
 
     /// Normalized RGBA error, including the alpha weight.
     pub fn score(&self)->f64 {(self.score/(self.target.len() as f64*(3.0+ALPHA_WEIGHT))).sqrt()}
     /// Final independent shapes. No source pixels or masks are required.
-    pub fn drawing(self)->Drawing {Drawing{width:self.width,height:self.height,background:Color::new(0,0,0,0),shapes:self.shapes}}
+    /// Intermediate primitive state for a throttled progress preview.
+    pub fn snapshot(&self)->Drawing {Drawing{width:self.width,height:self.height,background:self.background,shapes:self.shapes.clone()}}
+    pub fn drawing(self)->Drawing {Drawing{width:self.width,height:self.height,background:self.background,shapes:self.shapes}}
 }
 
 #[cfg(test)]
@@ -544,16 +616,36 @@ mod tests {
         let round=SearchRound{half_resolution:false,target:&model.proposal,current:&model.canvas,error_grid:&model.grid,score:0,coarse:None};
         let mut worker=WorkerCtx::new(32,32,crate::rng::create_rng(527));
         let mut other=WorkerCtx::new(32,32,crate::rng::create_rng(526));
+        let mut accelerated=WorkerCtx::new(32,32,crate::rng::create_rng(526));accelerated.rgba_reuse=true;
         for kind in [ShapeKind::Triangle,ShapeKind::RotatedEllipse,ShapeKind::RotatedRectangle] {
             for _ in 0..100 {
                 let shape=Shape::random(kind,&mut worker,&round);
                 let mask=coverage(&shape,&mut worker,true).to_vec();
                 assert_eq!(mask,coverage_rgba_reference(&shape,&mut other,true));
+                assert_eq!(mask,coverage(&shape,&mut accelerated,true));
                 let score=model.evaluate(&mask);
                 let bound=-2.0;let pruned=model.evaluate_shape(&shape,&mut worker,bound);
                 assert_eq!(score.0<bound,pruned.0<bound);
                 if score.0<bound {assert_eq!(score,pruned);}
             }
+        }
+    }
+    #[test]
+    fn exact_acceleration_preserves_search_and_refinement() {
+        let target:Vec<_>=(0..256).map(|i|if i%16>=3&&i%16<13&&i/16>=3&&i/16<13 {
+            let a=if i%16==3 {0.5}else{1.0};[0.7*a,(i%16) as f64/20.0*a,0.2*a,a]
+        }else{[0.0;4]}).collect();
+        for kind in [ShapeKind::Triangle,ShapeKind::RotatedEllipse,ShapeKind::RotatedRectangle] {
+            let mut original=RgbaModel::new(16,16,target.clone(),Some(42));original.exact_coverage=true;
+            let mut accelerated=RgbaModel::new(16,16,target.clone(),Some(42));accelerated.exact_coverage=true;accelerated.enable_exact_optimizations();
+            for _ in 0..4 {
+                assert_eq!(original.step(kind),accelerated.step(kind));
+                assert_eq!(original.current,accelerated.current);
+            }
+            assert!(original.refine(||false));assert!(accelerated.refine(||false));
+            assert_eq!(original.shapes,accelerated.shapes,"{kind:?}");
+            assert_eq!(original.current,accelerated.current,"{kind:?}");
+            assert_eq!(original.score,accelerated.score,"{kind:?}");
         }
     }
     #[test]
@@ -570,7 +662,7 @@ mod tests {
             let lines:Vec<_>=(0..4).map(|y|Scanline{y,x1:rng.random_range(0..8),x2:rng.random_range(8..16),alpha:rng.random_range(1..65536)}).collect();
             let rows:Vec<_>=(0..4).map(|_|OnceLock::new()).collect();
             let direct=model.layer_sums(&lines,&base,&suffix,&transmission);
-            let cached=model.layer_prefix_sums(&lines,&base,&suffix,&transmission,&rows);
+            let cached=model.layer_prefix_sums(&lines,&base,&suffix,&transmission,&rows,None);
             for c in 0..N {assert!((direct[c]-cached[c]).abs()<1e-10);}
             let new=fit(&direct);let old=quantized_fit(&direct,binary_alpha(&direct));
             assert!(new.0<=old.0+1e-9,"closed-form loss {} vs binary {}",new.0,old.0);
