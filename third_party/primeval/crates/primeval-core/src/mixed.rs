@@ -123,8 +123,9 @@ pub(crate) fn replacement(
             (0.0, 0.0),
         ]
     } else {
-        w = w.min(h * 8.0);
-        h = h.min(w * 8.0);
+        let cap = f64::from(crate::shapes::rect_aspect());
+        w = w.min(h * cap);
+        h = h.min(w * cap);
         [
             (-w / 2.0, -h / 2.0),
             (w / 2.0, -h / 2.0),

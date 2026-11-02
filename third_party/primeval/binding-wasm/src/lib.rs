@@ -57,6 +57,30 @@ pub fn approximate(
     let fast=js_sys::Reflect::get(&render,&JsValue::from_str("fast")).ok().and_then(|v|v.as_bool()).unwrap_or(false);
     let fastest=js_sys::Reflect::get(&render,&JsValue::from_str("fastest")).ok().and_then(|v|v.as_bool()).unwrap_or(false);
     let turbo=Reflect::get(&render,&JsValue::from_str("turbo")).ok().and_then(|v|v.as_bool()).unwrap_or(false);
+    // Experimental Turbo redistribution ranking; "energy" is the default.
+    let measured=match Reflect::get(&render,&"redistribution".into())?.as_string().as_deref(){None|Some("energy")=>false,Some("measured")=>true,Some(_)=>return Err(TypeError::new("Invalid redistribution").into())};
+    let aspect=Reflect::get(&render,&"rectAspect".into())?;
+    let aspect=if aspect.is_undefined(){None}else{Some(aspect.as_f64().filter(|v|v.fract()==0.0&&*v>=8.0&&*v<=1e6).ok_or_else(||TypeError::new("Invalid rectAspect"))? as u32)};
+    let trials=Reflect::get(&render,&"redistributionTrials".into())?;
+    let trials=if trials.is_undefined(){None}else{Some(trials.as_f64().filter(|v|v.fract()==0.0&&*v>=1.0&&*v<=1e6).ok_or_else(||TypeError::new("Invalid redistributionTrials"))? as usize)};
+    let importance=Reflect::get(&render,&"importance".into())?;
+    let attention=if importance.is_undefined(){None}else{
+        let number=|key:&str|->Result<f64,JsValue>{Reflect::get(&importance,&key.into())?.as_f64().ok_or_else(||TypeError::new("Invalid importance map").into())};
+        let width=number("width")?;let height=number("height")?;let strength=number("strength")?;
+        let optional=|key:&str,default:f64,max:f64|->Result<f64,JsValue>{let value=Reflect::get(&importance,&key.into())?;
+            if value.is_undefined(){Ok(default)}else{value.as_f64().filter(|v|v.is_finite()&&(0.0..=max).contains(v)).ok_or_else(||TypeError::new("Invalid importance map").into())}};
+        let additive=optional("additive",0.0,4.0)?;let refine=optional("refine",1.0,1.0)?;
+        let values=Reflect::get(&importance,&"values".into())?;
+        if !values.is_instance_of::<js_sys::Float32Array>() || !width.is_finite() || !height.is_finite() || width<1.0 || height<1.0 || width.fract()!=0.0 || height.fract()!=0.0 || width>u32::MAX as f64 || height>u32::MAX as f64 || !strength.is_finite() || !(0.0..=1.0).contains(&strength){return Err(TypeError::new("Invalid importance map").into());}
+        let values=js_sys::Float32Array::new(&values).to_vec();
+        if (width as usize).checked_mul(height as usize)!=Some(values.len()) || values.iter().any(|v|!v.is_finite() || !(0.0..=1.0).contains(v)){return Err(TypeError::new("Invalid importance map").into());}
+        let proposal_only=Reflect::get(&importance,&"proposalOnly".into())?;
+        let proposal_only=if proposal_only.is_undefined(){false}else{proposal_only.as_bool().ok_or_else(||TypeError::new("Invalid importance proposalOnly"))?};
+        // Experimental control; only valid together with proposalOnly.
+        let structural=Reflect::get(&importance,&"structuralProposals".into())?;
+        let structural=if structural.is_undefined(){false}else{structural.as_bool().filter(|v|!*v||proposal_only).ok_or_else(||TypeError::new("Invalid importance structuralProposals"))?};
+        Some((width as usize,height as usize,values,strength,additive,refine,proposal_only,structural))
+    };
     let render = read_render(&render)?;
     let request = normalize_request(input, &output, render).map_err(|error| js_error(&error))?;
 
@@ -84,7 +108,8 @@ pub fn approximate(
     };
     let timings=Array::new();let started=js_sys::Date::now();
     let mut phase=|name:&'static str|{let entry=Object::new();set(&entry,"phase",name.into());set(&entry,"elapsed_ms",(js_sys::Date::now()-started).into());timings.push(&entry);};
-    let execution = Execution::new().cancellation(&token).phases(&mut phase).fast(fast).fastest(fastest).turbo(turbo).live_progress(true);
+    let execution = Execution::new().cancellation(&token).phases(&mut phase).fast(fast).fastest(fastest).turbo(turbo).measured_redistribution(measured).redistribution_trials(trials).rect_aspect(aspect).live_progress(true);
+    let execution=if let Some((w,h,v,s,a,b,p,structural))=attention{execution.attention_terms(w,h,v,s,a,b).attention_proposals_only(p).structural_proposals_only(structural)}else{execution};
     let execution = if on_progress.is_some() {
         execution.progress(&mut on_step)
     } else {

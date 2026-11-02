@@ -11,6 +11,20 @@ preserving its bounding size, center, rotation, color and opacity. Shape changes
 update export asset references and Lua template fields. Existing property controls remain available. Background controls are not editable
 with gizmos. Pinching cancels the active transform gesture and navigates the view.
 
+Clicking again where the selected primitive is selects the next primitive below
+it under the pointer, cycling back to the topmost, so covered primitives stay
+selectable. Hover highlights the primitive a click would select. Pressing on any
+selected primitive under the pointer drags it, even when others cover it.
+Ctrl/Shift-click still toggles the topmost primitive. The canvas is positioned
+out of flow and sized from its wrapper; otherwise narrow layouts grew it by the
+wrapper padding on every render.
+
+The "Fitted result" and "Original" thumbnails under the canvas are a toggle that
+switches the main canvas, keeping zoom and pan for comparison. The active view is
+highlighted, and the canvas is outlined while the original is shown. The Original
+view is screen-only: nothing is pickable, gizmos are hidden, and exports always
+draw the fitted result.
+
 The full selection-box edges are draggable, not just their midpoint dots.
 Left/right resize only local X; top/bottom resize only local Y, anchored at the
 opposite edge. `js/gizmo-resize.js` owns rotated-edge hit testing and anchored
@@ -18,13 +32,16 @@ resize math. The visual box has a minimum screen size for thin primitives;
 their actual dimensions are not inflated. Gizmo drawing and hit testing use
 the same CSS-pixel scale, including high-DPI screens.
 
-Primeval edits use the native WASM rasterizer through `worker-native-render.js`.
-`native-edit.js` retains untouched native geometry and reconstructs edited asset
-geometry in the original working coordinates. Rendering is coalesced while
-dragging; the last native bitmap stays visible until a newer render completes.
-Edited PNG/SVG exports await the corresponding native render. Undo restores the
-original cached PNG/SVG. This avoids switching the whole drawing to Canvas 2D
-antialiasing on the first drag. Gizmos remain a screen-only overlay.
+The result canvas always draws the shapes as Canvas 2D vectors at the current
+zoom and device pixel ratio, for every engine, so they stay sharp at any zoom and
+edits show immediately. No native bitmap is resized for display; at fit scale the
+vector view differs from the native PNG only in edge antialiasing (mean 0.6/255
+on a 150-shape Turbo result). Gizmos remain a screen-only overlay.
+
+Primeval exports still use the native WASM rasterizer. Edited PNG/SVG exports
+render on demand through `worker-native-render.js`; `native-edit.js` retains
+untouched native geometry and reconstructs edited asset geometry in the original
+working coordinates. Undo restores the original cached PNG/SVG.
 
 Lua export uses one required Image Control Template index for all shapes, including
 background controls. Each instance calls SetImage with StaticReference: circle

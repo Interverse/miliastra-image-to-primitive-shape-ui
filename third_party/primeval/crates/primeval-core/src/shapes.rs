@@ -1686,10 +1686,36 @@ const TAN_MIN_ANGLE: f64 = 0.267_949_192_431_122_7;
 /// ones.
 pub(crate) const MAX_ASPECT: i32 = 8;
 
-/// Whether the longer of the sides `a` and `b` is at most [`MAX_ASPECT`]
+/// Site patch: the greedy search and Mixed replacements may use a larger
+/// rectangle cap, so a straight line can be one rectangle. It is process-wide
+/// (one fit per browser worker instance); [`RectAspect`] sets and restores it.
+static RECT_ASPECT: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(MAX_ASPECT);
+
+/// The rectangle aspect cap in effect, [`MAX_ASPECT`] unless a [`RectAspect`] is held.
+pub(crate) fn rect_aspect() -> i32 {
+    RECT_ASPECT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Experimental: raises the rectangle aspect cap until dropped.
+pub struct RectAspect(i32);
+impl RectAspect {
+    /// Sets the cap (at least [`MAX_ASPECT`]) and remembers the previous one.
+    #[must_use]
+    pub fn set(cap: u32) -> Self {
+        let cap = i32::try_from(cap).unwrap_or(i32::MAX).max(MAX_ASPECT);
+        Self(RECT_ASPECT.swap(cap, std::sync::atomic::Ordering::Relaxed))
+    }
+}
+impl Drop for RectAspect {
+    fn drop(&mut self) {
+        RECT_ASPECT.store(self.0, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Whether the longer of the sides `a` and `b` is at most [`rect_aspect`]
 /// times the shorter.
 fn within_aspect(a: i32, b: i32) -> bool {
-    a.max(b) <= MAX_ASPECT * a.min(b)
+    i64::from(a.max(b)) <= i64::from(rect_aspect()) * i64::from(a.min(b))
 }
 
 /// Whether the polygon through `vertices`, three or four of them in either

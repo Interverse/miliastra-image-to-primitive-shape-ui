@@ -49,8 +49,14 @@ def assemble(destination):
                 dependency(file, value, document=True)
         elif file.suffix == '.js':
             text = file.read_text(encoding='utf-8')
-            for value in re.findall(r'(?:\bfrom\s*|\bimport\s*(?:\(\s*)?|\bnew URL\(\s*)["\']([^"\']+)["\']', text):
-                dependency(file, value)
+            for value in re.findall(r'(?:\bfrom\s*|\bimport\s*(?:\(\s*)?)["\']([^"\']+)["\']', text):
+                # Bare specifiers ("module") are packages, never site files.
+                if value.startswith(('./', '../', '/')) or urlsplit(value).scheme:
+                    dependency(file, value)
+            for value in re.findall(r'\bnew URL\(\s*["\']([^"\']+)["\']', text):
+                # Directory URLs (".", "./", "dir/") name a base, not a file.
+                if value not in ('.', '..') and not value.endswith('/'):
+                    dependency(file, value)
             for args in re.findall(r'\bimportScripts\(([^)]*)\)', text):
                 for value in re.findall(r'["\']([^"\']+)["\']', args):
                     dependency(file, value)

@@ -1,0 +1,607 @@
+{
+ "purpose": "Second, untouched held-out set for automatic importance (round 2). Regions are evaluation-only, drawn from source previews before any fitting output existed, and are never passed to the fitter. The first held-out set (importance-heldout.json) became a tuning set in round 2. Images are fetched into ignored reference/automatic-importance/heldout2/images and are not redistributed.",
+ "regionFormat": "Normalized source-image boxes [x0, y0, x1, y1] in [0, 1].",
+ "licenses": {
+  "kodak": "Kodak Lossless True Color Image Suite. Commonly described as released by Eastman Kodak for unrestricted usage; no formal license file. Evaluation only, not redistributed.",
+  "cc0": "Creative Commons CC0 1.0 per Wikimedia Commons file metadata. Logos and mascots may carry trademark rights; evaluation only."
+ },
+ "images": [
+  {
+   "id": 1,
+   "file": "kodim17.png",
+   "category": "portrait",
+   "license": "kodak",
+   "url": "https://r0k.us/graphics/kodak/kodak/kodim17.png",
+   "sha256": "37afcc89fbdcb76d9518e04b2fc011027e2f4cd14b3b2f83cefd721641a47c5b",
+   "regions": {
+    "face": [
+     0.33,
+     0.17,
+     0.6,
+     0.34
+    ],
+    "hair ornament": [
+     0.29,
+     0.1,
+     0.73,
+     0.22
+    ],
+    "hand on orb": [
+     0.58,
+     0.82,
+     0.84,
+     0.99
+    ]
+   }
+  },
+  {
+   "id": 2,
+   "file": "kodim18.png",
+   "category": "portrait",
+   "license": "kodak",
+   "url": "https://r0k.us/graphics/kodak/kodak/kodim18.png",
+   "sha256": "1a9258c365988961d87a0598725b609139c303ad48a5aad6c503c3b1a87849aa",
+   "regions": {
+    "face": [
+     0.47,
+     0.19,
+     0.59,
+     0.31
+    ],
+    "pearls": [
+     0.5,
+     0.31,
+     0.63,
+     0.52
+    ],
+    "right hand": [
+     0.82,
+     0.51,
+     0.91,
+     0.61
+    ],
+    "left hand": [
+     0.17,
+     0.28,
+     0.25,
+     0.35
+    ]
+   }
+  },
+  {
+   "id": 3,
+   "file": "kodim06.png",
+   "category": "multiple",
+   "license": "kodak",
+   "url": "https://r0k.us/graphics/kodak/kodak/kodim06.png",
+   "sha256": "363510303b715d4cbc384e1ce227e466b613a09e1b71ae985882bf8e7fbd9b18",
+   "regions": {
+    "hull lettering": [
+     0.3,
+     0.63,
+     0.56,
+     0.75
+    ],
+    "deck and crew": [
+     0.17,
+     0.52,
+     0.72,
+     0.66
+    ],
+    "shoreline": [
+     0.0,
+     0.15,
+     0.38,
+     0.27
+    ]
+   }
+  },
+  {
+   "id": 4,
+   "file": "kodim09.png",
+   "category": "multiple",
+   "license": "kodak",
+   "url": "https://r0k.us/graphics/kodak/kodak/kodim09.png",
+   "sha256": "6a4361c2fc194feb4edaa9f9a4a0620fb9943e460ac7fdf037fb0f6dd6607a7d",
+   "regions": {
+    "sail number": [
+     0.76,
+     0.52,
+     0.88,
+     0.58
+    ],
+    "crews": [
+     0.14,
+     0.75,
+     0.47,
+     0.83
+    ],
+    "spinnaker stripes": [
+     0.5,
+     0.42,
+     0.88,
+     0.62
+    ]
+   }
+  },
+  {
+   "id": 5,
+   "file": "kodim11.png",
+   "category": "multiple",
+   "license": "kodak",
+   "url": "https://r0k.us/graphics/kodak/kodak/kodim11.png",
+   "sha256": "7936814b58b5387fce2e4e2488b4ec830dadd95fa9520f358ddb30990b50f2b6",
+   "regions": {
+    "boat": [
+     0.44,
+     0.45,
+     0.83,
+     0.78
+    ],
+    "pier detail": [
+     0.45,
+     0.18,
+     0.7,
+     0.5
+    ]
+   }
+  },
+  {
+   "id": 6,
+   "file": "kodim12.png",
+   "category": "multiple",
+   "license": "kodak",
+   "url": "https://r0k.us/graphics/kodak/kodak/kodim12.png",
+   "sha256": "d78c37c2f04f23761ed2367dd77e2db584ddd4c3950833fecf89f199a8126980",
+   "regions": {
+    "faces": [
+     0.32,
+     0.12,
+     0.48,
+     0.3
+    ],
+    "flippers": [
+     0.27,
+     0.52,
+     0.4,
+     0.73
+    ]
+   }
+  },
+  {
+   "id": 7,
+   "file": "kodim10.png",
+   "category": "text",
+   "license": "kodak",
+   "url": "https://r0k.us/graphics/kodak/kodak/kodim10.png",
+   "sha256": "9dfb70f5867c29ff9ed6313683f19b3d867849e40fbc0c4c54a4a89df341cf23",
+   "regions": {
+    "sail number 63455": [
+     0.28,
+     0.0,
+     0.6,
+     0.17
+    ],
+    "sail number 20042": [
+     0.71,
+     0.3,
+     0.87,
+     0.39
+    ],
+    "crew": [
+     0.5,
+     0.67,
+     0.68,
+     0.78
+    ],
+    "hull name": [
+     0.47,
+     0.83,
+     0.63,
+     0.88
+    ]
+   }
+  },
+  {
+   "id": 8,
+   "file": "jeonbuk-emblem.png",
+   "category": "text",
+   "license": "cc0",
+   "author": "Jeonbuk National University",
+   "transparent": true,
+   "url": "https://upload.wikimedia.org/wikipedia/commons/a/af/Emblem_of_Jeonbuk_National_University.png",
+   "sha256": "ca7720821556b1f6ad35119e6a0e1a844a47cce584c94a86f1b060cdc9cff64c",
+   "regions": {
+    "NATIONAL": [
+     0.28,
+     0.03,
+     0.66,
+     0.16
+    ],
+    "1947 KOREA": [
+     0.26,
+     0.86,
+     0.78,
+     0.99
+    ],
+    "central symbol": [
+     0.42,
+     0.48,
+     0.7,
+     0.62
+    ],
+    "left laurel": [
+     0.0,
+     0.53,
+     0.17,
+     0.85
+    ]
+   }
+  },
+  {
+   "id": 9,
+   "file": "kodim16.png",
+   "category": "landscape",
+   "license": "kodak",
+   "url": "https://r0k.us/graphics/kodak/kodak/kodim16.png",
+   "sha256": "a89c7268ccd4718ba424a99fc4643c572cf692ca6eae887185ceb4e9f11d2e54",
+   "regions": {
+    "palm island": [
+     0.29,
+     0.39,
+     0.79,
+     0.5
+    ],
+    "cloud": [
+     0.52,
+     0.02,
+     0.98,
+     0.38
+    ]
+   }
+  },
+  {
+   "id": 10,
+   "file": "kodim21.png",
+   "category": "landscape",
+   "license": "kodak",
+   "url": "https://r0k.us/graphics/kodak/kodak/kodim21.png",
+   "sha256": "ac958597c82073f6bb65129c68f72b651db5b9efd82e11547d07350214bc268b",
+   "regions": {
+    "lighthouse": [
+     0.4,
+     0.13,
+     0.5,
+     0.6
+    ],
+    "house": [
+     0.03,
+     0.36,
+     0.32,
+     0.58
+    ],
+    "surf": [
+     0.35,
+     0.82,
+     1.0,
+     0.95
+    ]
+   }
+  },
+  {
+   "id": 11,
+   "file": "kodim22.png",
+   "category": "landscape",
+   "license": "kodak",
+   "url": "https://r0k.us/graphics/kodak/kodak/kodim22.png",
+   "sha256": "1cee58eb1f2d9c7ebb254d208a03c783ce6cf2c4d8c2cf45e235dd23b4ce1b29",
+   "regions": {
+    "cupola": [
+     0.35,
+     0.09,
+     0.45,
+     0.18
+    ],
+    "side shed": [
+     0.15,
+     0.43,
+     0.4,
+     0.6
+    ]
+   }
+  },
+  {
+   "id": 12,
+   "file": "kodim07.png",
+   "category": "texture",
+   "license": "kodak",
+   "url": "https://r0k.us/graphics/kodak/kodak/kodim07.png",
+   "sha256": "b77d3f006f42414bb242222e0482e750c0fb9e5ee8d4bed2f6f11c5605fe54a4",
+   "regions": {
+    "pink hibiscus": [
+     0.42,
+     0.28,
+     0.64,
+     0.67
+    ],
+    "red hibiscus": [
+     0.68,
+     0.73,
+     0.86,
+     0.94
+    ],
+    "shutters": [
+     0.22,
+     0.1,
+     0.56,
+     0.78
+    ]
+   }
+  },
+  {
+   "id": 13,
+   "file": "kodim24.png",
+   "category": "texture",
+   "license": "kodak",
+   "url": "https://r0k.us/graphics/kodak/kodak/kodim24.png",
+   "sha256": "1071c68372cc5a01435c2c225a5cf7d4bb803846ec08bb6b3d6721b156d7cb96",
+   "regions": {
+    "round-window mural": [
+     0.5,
+     0.39,
+     0.7,
+     0.73
+    ],
+    "balcony flowers": [
+     0.21,
+     0.42,
+     0.5,
+     0.59
+    ],
+    "doorway": [
+     0.89,
+     0.7,
+     0.99,
+     0.92
+    ],
+    "upper murals": [
+     0.25,
+     0.2,
+     0.48,
+     0.42
+    ]
+   }
+  },
+  {
+   "id": 14,
+   "file": "kodim02.png",
+   "category": "object",
+   "license": "kodak",
+   "url": "https://r0k.us/graphics/kodak/kodak/kodim02.png",
+   "sha256": "4f4b74a79237e311d72cad958237b5f7088d8bce1c82305ebefe1a70e3022dfd",
+   "regions": {
+    "knob": [
+     0.28,
+     0.36,
+     0.4,
+     0.55
+    ],
+    "bolt latch": [
+     0.12,
+     0.29,
+     0.68,
+     0.4
+    ],
+    "keyhole": [
+     0.46,
+     0.43,
+     0.5,
+     0.53
+    ]
+   }
+  },
+  {
+   "id": 15,
+   "file": "spot-cow.png",
+   "category": "object",
+   "license": "cc0",
+   "author": "Keenan Crane",
+   "url": "https://upload.wikimedia.org/wikipedia/commons/e/ee/Spot_the_cow.png",
+   "sha256": "846504ede56fd617e4b2726413242c65784b631aeb8fd23186ebafcf48c9bac6",
+   "regions": {
+    "eyes": [
+     0.31,
+     0.19,
+     0.44,
+     0.32
+    ],
+    "muzzle": [
+     0.26,
+     0.31,
+     0.5,
+     0.48
+    ],
+    "horns": [
+     0.33,
+     0.04,
+     0.52,
+     0.13
+    ],
+    "spots": [
+     0.53,
+     0.33,
+     0.73,
+     0.62
+    ]
+   }
+  },
+  {
+   "id": 16,
+   "file": "cosmic-brownie.png",
+   "category": "object",
+   "license": "cc0",
+   "author": "31pkel",
+   "transparent": true,
+   "url": "https://upload.wikimedia.org/wikipedia/commons/2/24/Cosmic_Brownie_Clipart.png",
+   "sha256": "ae4c20c53b1989e8e6b46eeeac709806f0ef78f02b242ae6dff1256f69cdc2df",
+   "regions": {
+    "left candies": [
+     0.15,
+     0.06,
+     0.53,
+     0.48
+    ],
+    "right candies": [
+     0.6,
+     0.24,
+     0.86,
+     0.57
+    ]
+   }
+  },
+  {
+   "id": 17,
+   "file": "alien-unicycle.png",
+   "category": "illustration",
+   "license": "cc0",
+   "author": "Kurt Kaiser",
+   "transparent": true,
+   "url": "https://upload.wikimedia.org/wikipedia/commons/0/02/Alien_video_game_Sprite_clipart_with_wheel.png",
+   "sha256": "666c1219c5964771b8a2985f639be0bf44d1b4c0a2e9a5eee02795f80acf6571",
+   "regions": {
+    "eye": [
+     0.62,
+     0.16,
+     0.74,
+     0.26
+    ],
+    "mouth": [
+     0.6,
+     0.29,
+     0.74,
+     0.35
+    ],
+    "saucer bands": [
+     0.03,
+     0.5,
+     0.97,
+     0.6
+    ],
+    "wheel": [
+     0.38,
+     0.8,
+     0.62,
+     0.97
+    ]
+   }
+  },
+  {
+   "id": 18,
+   "file": "sambista.png",
+   "category": "illustration",
+   "license": "cc0",
+   "author": "dinh",
+   "transparent": true,
+   "url": "https://upload.wikimedia.org/wikipedia/commons/d/d3/Sambista_clipart.png",
+   "sha256": "5ba9eb9a986cb468003c03fdef8cfe1971a542a4fedb9ce68fd7c0454937dfba",
+   "regions": {
+    "face": [
+     0.26,
+     0.1,
+     0.56,
+     0.3
+    ],
+    "bow tie": [
+     0.37,
+     0.32,
+     0.52,
+     0.43
+    ],
+    "drum": [
+     0.37,
+     0.5,
+     0.66,
+     0.67
+    ],
+    "striped legs": [
+     0.29,
+     0.62,
+     0.62,
+     0.89
+    ]
+   }
+  },
+  {
+   "id": 19,
+   "file": "hornet-mascot.png",
+   "category": "illustration",
+   "license": "cc0",
+   "author": "CantXspline",
+   "transparent": true,
+   "url": "https://upload.wikimedia.org/wikipedia/commons/7/7f/Swim_Team_Hornet_Mascot.png",
+   "sha256": "440df5907d79e9a203d7b3e8e34ac921b9c1ef12bcbbcddd6426def63330aabe",
+   "regions": {
+    "goggles": [
+     0.56,
+     0.29,
+     0.92,
+     0.45
+    ],
+    "teeth": [
+     0.52,
+     0.41,
+     0.66,
+     0.52
+    ],
+    "left fist": [
+     0.32,
+     0.66,
+     0.44,
+     0.76
+    ],
+    "right fist": [
+     0.7,
+     0.67,
+     0.8,
+     0.76
+    ]
+   }
+  },
+  {
+   "id": 20,
+   "file": "tux.png",
+   "category": "illustration",
+   "license": "cc0",
+   "author": "OpenClipart-Vectors (Pixabay), after Larry Ewing",
+   "transparent": true,
+   "url": "https://upload.wikimedia.org/wikipedia/commons/d/d6/Linux_mascot_tux.png",
+   "sha256": "3bba034f87cd342ddf7c9201774aa3b68baca6056cf7bfe8c017dc241ff1d50a",
+   "regions": {
+    "eyes": [
+     0.35,
+     0.13,
+     0.6,
+     0.25
+    ],
+    "beak": [
+     0.36,
+     0.21,
+     0.62,
+     0.36
+    ],
+    "left foot": [
+     0.03,
+     0.69,
+     0.37,
+     0.97
+    ],
+    "right foot": [
+     0.66,
+     0.7,
+     0.98,
+     0.97
+    ]
+   }
+  }
+ ]
+}

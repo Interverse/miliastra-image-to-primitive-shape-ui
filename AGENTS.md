@@ -11,6 +11,8 @@ build. Serve the root over HTTP, usually port 8321. GitHub Pages uses
 
 - `js/app.js`: upload, queue, results, editing and export controller; presets are inline.
 - `js/worker-primeval.js`, `js/primeval-result.js`: pinned Rust/WASM fitting and asset conversion.
+- `js/focus.js`, `js/worker-importance.js`, `js/importance-analysis.js`: Focus detail
+  (automatic UNISAL map on CPU/WASM plus manually marked areas) for Primeval Turbo.
 - `js/worker-gaussian.js`, `js/worker-fill.js`, `js/worker-outline.js`: other fitting engines.
 - `js/gia.js`, `js/gia-export.js`, `js/lua-export.js`: export and conversion.
 - `js/locales/`: all 15 supported languages.

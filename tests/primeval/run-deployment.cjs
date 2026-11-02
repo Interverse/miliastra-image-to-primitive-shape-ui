@@ -25,7 +25,7 @@ const server=http.createServer((req,res)=>{
    page.on('pageerror',e=>failures.push(e.message));
    await page.goto('http://127.0.0.1:8362'+prefix+'index.html');
    const input=fs.readFileSync(path.join(__dirname,'fixtures/input.png')).toString('base64');
-   const records=await page.evaluate(async({input})=>{
+   const {records,focus}=await page.evaluate(async({input})=>{
     const records=[];
     for(const profile of ['quality','fast'])for(const shape of ['circle','triangle','rect']){
      const png=Uint8Array.from(atob(input),c=>c.charCodeAt(0)),decoded=await PNGDecode.decode(png);
@@ -42,12 +42,16 @@ const server=http.createServer((req,res)=>{
      const result=await new Promise((resolve,reject)=>{worker.onerror=e=>{worker.terminate();reject(Error(e.message));};worker.onmessage=({data})=>{if(data.type==='error'){worker.terminate();reject(Error(data.message));}if(data.type==='done'){worker.terminate();resolve(data.result);}};worker.postMessage({cmd:'process',rgba:decoded.rgba.buffer,width:64,height:64,config:{allowed_shapes:['mixed'],num_primitives:8,primeval_resolution:64,primeval_speed:profile}});});
      records.push({shape:'mixed',profile,count:result.elements.length,png:Array.from(new Uint8Array(result.primeval_png)),drawing:JSON.stringify(result.primeval_drawing)});
     }
-    return records;
+    // Automatic focus: module worker, CPU/WASM runtime and model from the artifact.
+    const image=await PNGDecode.decode(Uint8Array.from(atob(input),c=>c.charCodeAt(0)));
+    const map=await Focus.analyze({},image.rgba,64,64,{cancelled:false,abort:null});
+    return {records,focus:map&&{width:map.width,height:map.height,max:Math.max(...map.values)}};
    },{input});
    assert.deepEqual(failures,[]);
+   assert.ok(focus&&focus.width>0&&focus.height>0&&focus.max===1,'automatic focus runs from the artifact');
    const mixed=records.filter(r=>r.shape==='mixed');assert.equal(mixed[0].drawing,mixed[1].drawing);assert.deepEqual(mixed[0].png,mixed[1].png);
    for(const r of records){if(r.shape==='mixed'){assert.equal(r.count,9);continue;}assert.equal(r.backend,"wasm");assert.equal(r.count,41);assert.deepEqual(Buffer.from(r.png),fs.readFileSync(path.join(__dirname,'fixtures',r.shape+'.png')));}
-   console.log('PASS deployment artifact: project subpath, all three shapes, WASM, Mixed, and exact PNGs');
+   console.log('PASS deployment artifact: project subpath, all three shapes, WASM, Mixed, exact PNGs and automatic focus');
    await context.close();
   }
  }finally{await browser.close();}

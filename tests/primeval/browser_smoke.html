@@ -12,8 +12,8 @@ frame.addEventListener('load',async()=>{
   const change=(id,value)=>{$(id).value=value;$(id).dispatchEvent(new w.Event('change'));};
   check(Array.from($('fitMethod').options,o=>o.value).join(',')==='primeval,gaussian,legacy','three fitting methods, Primeval default');
   check($('fitMethod').value==='primeval','Primeval is the default');
-  check(Array.from($('primevalSpeed').options,o=>o.value).join(',')==='turbo,fastest,fast','optimization order');
-  check(Array.from($('retryPrimevalSpeed').options,o=>o.value).join(',')==='turbo,fastest,fast'&&$('retryPrimevalSpeed').value==='turbo','retry optimization order and default');
+  check(Array.from($('primevalSpeed').options,o=>o.value).join(',')==='turbo,fast','optimization order without Draft');
+  check(Array.from($('retryPrimevalSpeed').options,o=>o.value).join(',')==='turbo,fast'&&$('retryPrimevalSpeed').value==='turbo','retry optimization order and default');
   check($('primevalSpeed').value==='turbo'&&$('primevalSpeed').selectedOptions[0].textContent==='Turbo','Turbo is the default without experimental tag');
   change('primevalSpeed','fast');
   check($('shapeMixed').checked,'Mixed is the default shape');
@@ -25,7 +25,8 @@ frame.addEventListener('load',async()=>{
    check(cards.length===4&&cards.every(e=>e.scrollWidth<=e.clientWidth+1),'four shape cards fit '+lang);
    check($('primevalSpeed').options[0].textContent===w.LOCALES[lang]['fitting.turbo'],'localized optimization controls '+lang);
    check($('shapeMixed').parentElement.textContent.includes(w.LOCALES[lang]['shapes.mixed']),'localized Mixed '+lang);
-   check($('primevalSpeed').options[1].textContent===w.LOCALES[lang]['fitting.fastest']&&$('retryPrimevalSpeed').options[1].textContent===w.LOCALES[lang]['fitting.fastest'],'localized Fastest '+lang);
+   check(['focus.toggle','focus.hint','focus.thumbHint','focus.mark','focus.modeAuto','focus.modeManual','focus.modeOff','focus.drawAuto','focus.drawManual','focus.legendMine','focus.chip','focus.stateAuto','focus.stateOff','focus.removeArea','upload.remove','batch.phase.focus'].every(key=>w.LOCALES[lang][key]),'focus strings '+lang);
+   check($('primevalSpeed').options[1].textContent===w.LOCALES[lang]['fitting.maximumDetail']&&$('retryPrimevalSpeed').options[1].textContent===w.LOCALES[lang]['fitting.maximumDetail'],'localized Maximum Detail '+lang);
   }
   change('langSelect','en');
   check($('backgroundColorSettings').hidden,'custom background hidden in PNG mode');
@@ -55,6 +56,36 @@ frame.addEventListener('load',async()=>{
    const blob=await(await fetch('fixtures/input.png')).blob(),transfer=new w.DataTransfer();transfer.items.add(new w.File([blob],'golden.png',{type:'image/png'}));
    $('fileInput').files=transfer.files;$('fileInput').dispatchEvent(new w.Event('change'));
   }
+  // Focus detail defaults and thumbnail controls.
+  change('primevalSpeed','turbo');
+  check($('focusDetail').checked&&!$('focusSettings').hidden,'Focus detail is on by default for Turbo');
+  await upload();await upload();
+  check(d.querySelectorAll('.file-thumb').length===2&&[...d.querySelectorAll('.file-thumb-focus')].every(b=>!b.hidden),'thumbnails show focus and remove buttons');
+  d.querySelector('.file-thumb').scrollIntoView({block:'center'});
+  const removeBox=d.querySelector('.file-thumb-remove').getBoundingClientRect(),thumbBox=d.querySelector('.file-thumb img').getBoundingClientRect();
+  check(removeBox.right<=thumbBox.right+1&&removeBox.top>=thumbBox.top-1&&removeBox.left>thumbBox.left+thumbBox.width/2&&d.elementFromPoint(removeBox.left+removeBox.width/2,removeBox.top+removeBox.height/2)?.closest('.file-thumb-remove'),'remove button sits on top at the top right');
+  let pickerOpened=0;const openPicker=$('fileInput').click;$('fileInput').click=()=>pickerOpened++;
+  d.querySelector('.file-thumb-remove').click();
+  $('fileInput').click=openPicker;
+  check(d.querySelectorAll('.file-thumb').length===1&&!pickerOpened,'remove button removes one image without opening the picker');
+  const pill=d.querySelector('.file-thumb-focus');
+  check(pill.textContent.includes(w.LOCALES.en['focus.chip'])&&pill.textContent.includes(w.LOCALES.en['focus.stateAuto'])&&pill.getBoundingClientRect().bottom>=pill.closest('.file-thumb').querySelector('img').getBoundingClientRect().bottom-12,'Focus pill is labelled and sits along the image bottom');
+  pill.click();
+  check(!$('focusEditor').hidden&&Number(w.getComputedStyle($('focusEditor')).zIndex)>20,'focus editor opens above the page');
+  check($('focusModeAuto').checked&&!$('focusModeManual').checked,'editor starts in Automatic mode');
+  $('focusModeManual').click();check($('focusStatus').textContent===w.LOCALES.en['focus.needArea'],'Only my areas asks for an area');
+  $('focusDone').click();check($('focusEditor').hidden&&pill.textContent.includes(w.LOCALES.en['focus.stateNone']),'focus editor saves the mode');
+  pill.click();check($('focusInstruction').textContent===w.LOCALES.en['focus.drawManual']&&$('focusClear').disabled,'manual mode explains drawing; Clear needs an area');
+  $('focusModeAuto').click();check($('focusInstruction').textContent===w.LOCALES.en['focus.drawAuto'],'Automatic mode explains adding areas on top');
+  $('focusModeOff').click();check($('focusStatus').textContent===w.LOCALES.en['focus.offStatus']&&$('focusInstruction').textContent==='','Off mode says focus is off');
+  $('focusDone').click();check(pill.textContent.includes(w.LOCALES.en['focus.stateOff']),'per-image Off shows on the pill');
+  pill.click();$('focusModeAuto').click();$('focusDone').click();check(pill.textContent.includes(w.LOCALES.en['focus.stateAuto']),'Automatic mode restored');
+  const focusSwitch=$('focusDetail');check(focusSwitch.getAttribute('role')==='switch'&&$('focusSettings').closest('#shapeTypeSection')===null,'Focus detail is a one-click switch beside the images');
+  focusSwitch.click();check(!focusSwitch.checked&&pill.hidden&&$('focusThumbHint').hidden&&!$('focusSettings').hidden,'switch turns focus off for all images in one click');
+  focusSwitch.click();check(focusSwitch.checked&&!pill.hidden,'switch turns focus back on');
+  change('primevalSpeed','fast');check($('focusSettings').hidden&&d.querySelector('.file-thumb-focus').hidden,'Focus detail hidden for Maximum Detail');
+  d.querySelector('.file-thumb-remove').click();check(!d.querySelector('.file-thumb'),'last image removed');
+  // The golden comparisons below use Maximum Detail, as chosen before this block.
   let latestNative;const captureNative=w.Worker.prototype.postMessage;
   w.Worker.prototype.postMessage=function(message,...args){if(message.cmd==='process')this.addEventListener('message',({data})=>{if(data.type==='done')latestNative=data.result;});return captureNative.call(this,message,...args);};
   let done=0;
@@ -78,6 +109,15 @@ frame.addEventListener('load',async()=>{
     const element=json.elements.findLast(e=>e.center.x>8&&e.center.x<56&&-e.center.y>8&&-e.center.y<56),canvas=$('mainCanvas'),wrap=$('canvasWrap'),rect=canvas.getBoundingClientRect();
     canvas.dispatchEvent(new w.MouseEvent('click',{bubbles:true,clientX:rect.left+(wrap.clientWidth-64)/2+element.center.x,clientY:rect.top+(wrap.clientHeight-64)/2-element.center.y}));
     check(!$('btnDeleteSel').disabled,'fitted triangle can be selected');
+    const at={bubbles:true,clientX:rect.left+(wrap.clientWidth-64)/2+element.center.x,clientY:rect.top+(wrap.clientHeight-64)/2-element.center.y},picked=()=>Number($('infoId').textContent),cycle=[picked()];
+    for(let k=0;k<json.elements.length;k++){canvas.dispatchEvent(new w.MouseEvent('click',at));if(picked()===cycle[0])break;cycle.push(picked());}
+    check(cycle.length>1&&picked()===cycle[0]&&cycle.every((id,k)=>!k||id<cycle[k-1]),'repeat clicks select one layer lower, then cycle back to the top');
+    const after=canvas.getBoundingClientRect();check(after.width===rect.width&&after.height===rect.height,'canvas size stays fixed while selecting');
+    $('viewOriginal').click();
+    check($('viewOriginal').getAttribute('aria-pressed')==='true'&&$('viewFitted').getAttribute('aria-pressed')==='false','Original view is highlighted');
+    const originalPng=new Uint8Array(await(await download('btnExportPNG')).arrayBuffer());
+    check(originalPng.length===golden.length&&originalPng.every((v,i)=>v===golden[i]),'Original view does not change the exported PNG');
+    $('viewFitted').click();check($('viewFitted').getAttribute('aria-pressed')==='true'&&picked()===cycle[0],'Fitted view restored with the selection kept');
     const beforeTransform=JSON.parse(await(await download('btnExportJSON')).text());
     const a=-(typeof element.rotation==='object'?element.rotation.z:element.rotation||0)*Math.PI/180;
     const ox=rect.left+(wrap.clientWidth-64)/2,oy=rect.top+(wrap.clientHeight-64)/2;
@@ -134,13 +174,14 @@ frame.addEventListener('load',async()=>{
    check($('retryPrimevalSpeed').value==='fast','retry retains Maximum Detail');
    check($('retryFitMethod').value==='primeval'&&$('retryShape'+{circle:'Circle',triangle:'Triangle',rect:'Rect'}[shape]).checked,'retry preserves shape '+shape);
   }
-  change('retryPrimevalSpeed','fastest');$('retryNumPrims').value='12';$('btnRetryFill').click();
+  change('retryPrimevalSpeed','turbo');$('retryNumPrims').value='12';$('btnRetryFill').click();
   done++;await wait(()=>d.querySelectorAll('.job-status.done').length===done||errors.length||d.querySelector('.job-error'));
-  check(!errors.length&&!d.querySelector('.job-error'),'Fastest re-process completes');
+  check(!errors.length&&!d.querySelector('.job-error'),'Turbo re-process completes');
   d.querySelectorAll('.job-card')[done-1].querySelector('.job-actions button').click();
-  const fastest=JSON.parse(await(await download('btnExportJSON')).text());
-  check(fastest.config.primeval_speed==='fastest'&&!fastest.config.primeval_exact&&fastest.elements.length===13,'Fastest re-process retains profile and count');
-  check($('retryPrimevalSpeed').value==='fastest','retry retains Fastest selection');
+  const turboRetry=JSON.parse(await(await download('btnExportJSON')).text());
+  check(turboRetry.config.primeval_turbo===true&&turboRetry.elements.length===13,'Turbo re-process retains profile and count');
+  check(turboRetry.config.focus?.enabled===true&&turboRetry.config.focus_result?.automatic==='used'&&turboRetry.config.focus_result.additive===3,'Turbo re-process uses automatic focus');
+  check($('retryPrimevalSpeed').value==='turbo','retry retains Turbo selection');
   change('retryFitMethod','gaussian');check($('retryShapeChecks').hidden&&!$('retryGaussianSettings').hidden,'retry Gaussian has no solid-shape options');
   $('retryNumPrims').value='12';$('retryGaussianIterations').value='2';$('retryGaussianResolution').value='64';$('btnRetryFill').click();
   done++;await wait(()=>d.querySelectorAll('.job-status.done').length===done||errors.length||d.querySelector('.job-error'));

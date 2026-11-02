@@ -10,6 +10,7 @@ use rayon::prelude::*;
 use std::sync::{OnceLock,Mutex};
 
 mod turbo;
+mod structure;
 
 const N: usize = 11;
 const ALPHA_WEIGHT: f64 = 4.0;
@@ -172,13 +173,82 @@ pub struct RgbaModel {
     width:u32, height:u32, target:Vec<[f64;4]>, current:Vec<[f64;4]>,
     prefix:Vec<Sums>, error_prefix:Vec<f64>, proposal:Buffer, canvas:Buffer, grid:ErrorGrid,
     background:Color,
-    optimized:bool, turbo:bool, clear_alpha_weight:f64,
+    optimized:bool, turbo:bool, clear_alpha_weight:f64, detail_weights:Vec<f64>, refine_weights:Vec<f64>, alpha_gains:Vec<f64>, refine_alpha_gains:Vec<f64>, proposal_weights:Vec<f64>, measured_redistribution:bool, redistribution_trials:usize,
     step_workers:Vec<WorkerCtx<rand_chacha::ChaCha8Rng>>,
     seed:u64, shapes:Vec<DrawnShape>, layers:Vec<Shape>, score:f64,family:ShapeKind,exact_coverage:bool,frozen:Vec<bool>,fast_residual:bool,
 }
 
 impl RgbaModel {
-    fn alpha_weight(&self,alpha:f64)->f64 {if alpha==0.0{self.clear_alpha_weight}else{ALPHA_WEIGHT}}
+    /// Install a normalized attention prior before fitting. Invalid maps leave the model untouched.
+    pub fn set_attention(&mut self, width:usize, height:usize, values:&[f32], strength:f64)->Result<(), &'static str>{
+        self.set_attention_terms(width,height,values,strength,0.0,1.0)
+    }
+    /// `strength` amplifies structural weights inside attended regions; `additive`
+    /// (0 to 4) adds up to `3 * additive` weight units by attention alone, reaching
+    /// low-contrast detail, and multiplies attended opacity error, including paint
+    /// on transparent pixels, by up to `1 + 3 * additive`.
+    /// `refine` is the share of that attention emphasis kept after shape search: 1 keeps
+    /// it for refinement, 0 refines placed shapes against structural weights only.
+    pub fn set_attention_terms(&mut self, width:usize, height:usize, values:&[f32], strength:f64, additive:f64, refine:f64)->Result<(), &'static str>{
+        if width==0 || height==0 || width.checked_mul(height)!=Some(values.len()) || [strength,refine].iter().any(|v|!v.is_finite() || !(0.0..=1.0).contains(v)) || !additive.is_finite() || !(0.0..=4.0).contains(&additive) || values.iter().any(|v|!v.is_finite() || !(0.0..=1.0).contains(v)){return Err("Invalid importance map");}
+        if !self.shapes.is_empty(){return Err("Importance must be installed before fitting");}
+        if (strength==0.0 && additive==0.0) || values.iter().all(|v|*v==values[0]){return Ok(());}
+        let w=self.width as usize;let h=self.height as usize;
+        let structural=structure::analyze(w,h,&self.target);let mut weights=structural.clone();let mut gains=vec![1.0;w*h];
+        for y in 0..h{for x in 0..w{
+            let sx=((x as f64+0.5)*width as f64/w as f64-0.5).clamp(0.0,(width-1)as f64);
+            let sy=((y as f64+0.5)*height as f64/h as f64-0.5).clamp(0.0,(height-1)as f64);
+            let x0=sx.floor()as usize;let y0=sy.floor()as usize;let x1=(x0+1).min(width-1);let y1=(y0+1).min(height-1);
+            let fx=sx-x0 as f64;let fy=sy-y0 as f64;
+            let top=values[y0*width+x0]as f64*(1.0-fx)+values[y0*width+x1]as f64*fx;
+            let bottom=values[y1*width+x0]as f64*(1.0-fx)+values[y1*width+x1]as f64*fx;
+            let sampled=top*(1.0-fy)+bottom*fy;
+            // The additive term scales opacity error with the colour emphasis: an
+            // attended hole (an eye, a gap between letters) cannot be reopened once
+            // painted, and partly transparent detail keeps its colour/opacity balance.
+            gains[y*w+x]=1.0+3.0*additive*sampled;
+            if self.target[y*w+x][3]==0.0{continue;}
+            weights[y*w+x]=1.0+(weights[y*w+x]-1.0)*(1.0+strength*sampled)+3.0*additive*sampled;
+        }}
+        self.refine_weights=if refine<1.0{structural.iter().zip(&weights).map(|(s,a)|s+refine*(a-s)).collect()}else{Vec::new()};
+        let attended=gains.iter().any(|g|*g>1.0);
+        self.refine_alpha_gains=if refine<1.0&&attended{gains.iter().map(|g|1.0+refine*(g-1.0)).collect()}else{Vec::new()};
+        self.alpha_gains=if attended{gains}else{Vec::new()};
+        self.detail_weights=weights;self.score=self.loss(&self.current);for y in 0..h{self.update_row(y);}Ok(())
+    }
+    /// Use the installed attention weights only for extra candidate proposals.
+    /// Scoring, refinement and layer ranking retain structural weights.
+    pub fn attention_proposals_only(&mut self)->Result<(), &'static str>{
+        if !self.shapes.is_empty(){return Err("Importance must be installed before fitting");}
+        if self.detail_weights.is_empty(){return Ok(());}
+        self.proposal_weights=std::mem::take(&mut self.detail_weights);
+        self.install_structural_scoring();Ok(())
+    }
+    /// Experimental control: extra connected-patch proposals from structural
+    /// weights alone, ignoring any attention map. Scoring is unchanged.
+    pub fn structural_proposals_only(&mut self)->Result<(), &'static str>{
+        if !self.shapes.is_empty(){return Err("Importance must be installed before fitting");}
+        self.proposal_weights=structure::analyze(self.width as usize,self.height as usize,&self.target);
+        self.install_structural_scoring();Ok(())
+    }
+    fn install_structural_scoring(&mut self){
+        self.detail_weights=structure::analyze(self.width as usize,self.height as usize,&self.target);
+        self.refine_weights.clear();self.alpha_gains.clear();self.refine_alpha_gains.clear();
+        self.score=self.loss(&self.current);
+        for y in 0..self.height as usize{self.update_row(y);}
+    }
+    /// Switch to the refinement weights chosen by `set_attention_terms`, if any.
+    fn begin_attention_refinement(&mut self){
+        if self.refine_weights.is_empty(){return;}
+        self.detail_weights=std::mem::take(&mut self.refine_weights);
+        if !self.alpha_gains.is_empty(){self.alpha_gains=std::mem::take(&mut self.refine_alpha_gains);}
+        for y in 0..self.height as usize{self.update_row(y);}
+    }
+    fn detail_weight(&self,i:usize)->f64{self.detail_weights.get(i).copied().unwrap_or(1.0)}
+    fn alpha_weight(&self,i:usize)->f64 {
+        let base=if self.target[i][3]==0.0{self.clear_alpha_weight}else{ALPHA_WEIGHT*if self.detail_weights.is_empty(){1.0}else{2.0}};
+        base*self.alpha_gains.get(i).copied().unwrap_or(1.0)
+    }
     /// Target pixels are normalized premultiplied RGBA, resampled before entry.
     pub fn new(width:u32,height:u32,target:Vec<[f64;4]>,seed:Option<u64>) -> Self {
         assert!(width>=2 && height>=2 && target.len()==width as usize*height as usize);
@@ -191,7 +261,7 @@ impl RgbaModel {
         let proposal=Buffer::from_rgb(width,height,proxy(&target)).unwrap();
         let canvas=Buffer::from_rgb(width,height,proxy(&current)).unwrap();
         let score=target.iter().map(|p|p[0]*p[0]+p[1]*p[1]+p[2]*p[2]+ALPHA_WEIGHT*p[3]*p[3]).sum();
-        let mut model=Self{background:Color::new(0,0,0,0),optimized:false,turbo:false,clear_alpha_weight:16.0,step_workers:Vec::new(),width,height,target,current,prefix:vec![[0.0;N];(width as usize+1)*height as usize],error_prefix:vec![0.0;(width as usize+1)*height as usize],proposal,canvas,grid:ErrorGrid::new(width,height,16,16),seed:seed.unwrap_or_else(crate::util::entropy_seed),shapes:Vec::new(),layers:Vec::new(),score,family:ShapeKind::Any,exact_coverage:false,frozen:Vec::new(),fast_residual:false};
+        let mut model=Self{background:Color::new(0,0,0,0),optimized:false,turbo:false,clear_alpha_weight:16.0,detail_weights:Vec::new(),refine_weights:Vec::new(),alpha_gains:Vec::new(),refine_alpha_gains:Vec::new(),proposal_weights:Vec::new(),measured_redistribution:false,redistribution_trials:8,step_workers:Vec::new(),width,height,target,current,prefix:vec![[0.0;N];(width as usize+1)*height as usize],error_prefix:vec![0.0;(width as usize+1)*height as usize],proposal,canvas,grid:ErrorGrid::new(width,height,16,16),seed:seed.unwrap_or_else(crate::util::entropy_seed),shapes:Vec::new(),layers:Vec::new(),score,family:ShapeKind::Any,exact_coverage:false,frozen:Vec::new(),fast_residual:false};
         for y in 0..height as usize {model.update_row(y);}
         model
     }
@@ -250,9 +320,10 @@ impl RgbaModel {
         for x in 0..w {
             let i=y*w+x;let t=self.target[i];let c=self.current[i];
             let mut v=[0.0;N];v[0]=1.0;
-            self.error_prefix[base+x+1]=self.error_prefix[base+x]+(0..4).map(|k|(t[k]-c[k]).powi(2)*if k==3{self.alpha_weight(t[3])}else{1.0}).sum::<f64>();
+            self.error_prefix[base+x+1]=self.error_prefix[base+x]+(0..4).map(|k|(t[k]-c[k]).powi(2)*if k==3{self.alpha_weight(i)}else{self.detail_weight(i)}).sum::<f64>();
             for k in 0..3 {let d=t[k]-c[k];v[1+k]=d;v[4+k]=c[k];v[7]+=c[k]*c[k];v[8]+=c[k]*d;}
-            v[9]=self.alpha_weight(t[3])*(1.0-c[3])*(t[3]-c[3]);v[10]=self.alpha_weight(t[3])*(1.0-c[3]).powi(2);
+            v[9]=self.alpha_weight(i)*(1.0-c[3])*(t[3]-c[3]);v[10]=self.alpha_weight(i)*(1.0-c[3]).powi(2);
+            for value in &mut v[..9]{*value*=self.detail_weight(i);}
             for k in 0..N {self.prefix[base+x+1][k]=self.prefix[base+x][k]+v[k];}
             self.canvas.pixels_mut()[i*3]=(c[3]*255.0).round() as u8;
             self.canvas.pixels_mut()[i*3+1]=((c[0]+c[1]+c[2])/3.0*255.0).round() as u8;
@@ -410,14 +481,14 @@ impl RgbaModel {
             let pixel=line.y as usize*self.width as usize+x as usize;
             if transmission[pixel]==0.0 {continue;}
             let b=base[pixel].map(f64::from);
-            let coverage=line.coverage()*transmission[pixel];let square=coverage*coverage;
-            sums[0]+=square;
+            let coverage=line.coverage()*transmission[pixel];let square=coverage*coverage;let detail=self.detail_weight(pixel);
+            sums[0]+=square*detail;
             for c in 0..3 {
                 let residual=self.target[pixel][c]-suffix[pixel][c]-transmission[pixel]*b[c];
-                sums[1+c]+=coverage*residual;sums[4+c]+=square*b[c];sums[7]+=square*b[c]*b[c];sums[8]+=coverage*b[c]*residual;
+                sums[1+c]+=detail*coverage*residual;sums[4+c]+=detail*square*b[c];sums[7]+=detail*square*b[c]*b[c];sums[8]+=detail*coverage*b[c]*residual;
             }
             let residual=self.target[pixel][3]-suffix[pixel][3]-transmission[pixel]*b[3];
-            let weight=self.alpha_weight(self.target[pixel][3]);
+            let weight=self.alpha_weight(pixel);
             sums[9]+=weight*coverage*(1.0-b[3])*residual;sums[10]+=weight*square*(1.0-b[3]).powi(2);
         }}
         sums
@@ -435,8 +506,9 @@ impl RgbaModel {
                     let b=base[pixel].map(f64::from);let square=t*t;
                     let mut v=[0.0;N];v[0]=square;
                     for c in 0..3 {let residual=self.target[pixel][c]-suffix[pixel][c]-t*b[c];v[1+c]=t*residual;v[4+c]=square*b[c];v[7]+=square*b[c]*b[c];v[8]+=t*b[c]*residual;}
-                    let residual=self.target[pixel][3]-suffix[pixel][3]-t*b[3];let weight=self.alpha_weight(self.target[pixel][3]);
+                    let residual=self.target[pixel][3]-suffix[pixel][3]-t*b[3];let weight=self.alpha_weight(pixel);
                     v[9]=weight*t*(1.0-b[3])*residual;v[10]=weight*square*(1.0-b[3]).powi(2);
+                    for value in &mut v[..9]{*value*=self.detail_weight(pixel);}
                     for k in 0..N {prefix[x+1][k]=prefix[x][k]+v[k];}
                 }
                 prefix
@@ -559,7 +631,7 @@ impl RgbaModel {
     }
 
     fn loss(&self,canvas:&[[f64;4]])->f64 {
-        self.target.iter().zip(canvas).map(|(t,p)|(0..4).map(|c|(t[c]-p[c]).powi(2)*if c==3{self.alpha_weight(t[3])}else{1.0}).sum::<f64>()).sum()
+        self.target.iter().zip(canvas).enumerate().map(|(i,(t,p))|(0..4).map(|c|(t[c]-p[c]).powi(2)*if c==3{self.alpha_weight(i)}else{self.detail_weight(i)}).sum::<f64>()).sum()
     }
 
     /// Reuse invisible controls for residual correction without raising the
@@ -658,7 +730,8 @@ mod tests {
             let base:Vec<_>=(0..64).map(|_|pixel().map(|v|v as f32)).collect();
             let suffix:Vec<_>=(0..64).map(|_|pixel()).collect();
             let transmission:Vec<_>=suffix.iter().map(|p|1.0-p[3]).collect();
-            let model=RgbaModel::new(16,4,target,Some(42));
+            let mut model=RgbaModel::new(16,4,target,Some(42));
+            if rng.random::<bool>(){model.detail_weights=(0..64).map(|_|rng.random_range(1.0..4.0)).collect();}
             let lines:Vec<_>=(0..4).map(|y|Scanline{y,x1:rng.random_range(0..8),x2:rng.random_range(8..16),alpha:rng.random_range(1..65536)}).collect();
             let rows:Vec<_>=(0..4).map(|_|OnceLock::new()).collect();
             let direct=model.layer_sums(&lines,&base,&suffix,&transmission);

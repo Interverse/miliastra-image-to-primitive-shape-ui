@@ -27,6 +27,9 @@ if optimizers:
  shutil.copy2(optimized,wasm)
 # Publish finished files atomically. In-place truncation can fail on Windows
 # while a browser/editor holds a read-only memory mapping of the old WASM.
+if '--stage-only' in sys.argv:
+ print('Staged',variant,staged)
+ sys.exit(0)
 for generated in staged.rglob('*'):
  if generated.is_file():
   destination=output/generated.relative_to(staged);destination.parent.mkdir(parents=True,exist_ok=True)

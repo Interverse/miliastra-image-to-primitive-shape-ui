@@ -9,8 +9,20 @@ pub(super) fn fit(request:ApproximateRequest,mut execution:Execution<'_>)->Resul
     let h=(u64::from(image.height())*u64::from(size)/longest).max(2)as u32;
     let pixels=mixed::target(&request.input,w,h)?;
     let background=if pixels.iter().all(|p|p[3]>=1.0){Some(prepare_target(image,request.render.background,request.render.resize_input).1)}else{None};
+    // Held for the whole fit and restored on return, error or cancellation.
+    let _aspect=execution.rect_aspect.map(primeval_core::RectAspect::set);
     let mut model=primeval_core::rgba::RgbaModel::new(w,h,pixels,request.render.seed);
     model.enable_exact_optimizations();
+    if let Some((width,height,values,strength,additive,refine,proposal_only))=execution.attention.take(){
+        model.set_attention_terms(width,height,&values,strength,additive,refine).map_err(ApproximateError::internal)?;
+        match proposal_only {
+            Proposals::Scoring=>{},
+            Proposals::Attention=>model.attention_proposals_only().map_err(ApproximateError::internal)?,
+            Proposals::Structure=>model.structural_proposals_only().map_err(ApproximateError::internal)?,
+        }
+    }
+    if execution.measured_redistribution{model.enable_measured_redistribution();}
+    if let Some(trials)=execution.redistribution_trials{model.set_redistribution_trials(trials).map_err(ApproximateError::internal)?;}
     if let Some(background)=background {model.seed_mixed(&Drawing{width:w,height:h,background,shapes:Vec::new()});}
     execution.mark("turbo-search-start");
     for step in 0..request.render.count {
@@ -28,6 +40,42 @@ pub(super) fn fit(request:ApproximateRequest,mut execution:Execution<'_>)->Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Lab replay of one benchmark fit with per-phase snapshots. Inputs come from
+    /// PRIMEVAL_DEBUG_* variables; run with --features lab -- --ignored --nocapture.
+    #[cfg(feature="lab")]
+    #[test]
+    #[ignore]
+    fn lab_replay_phases(){
+        let var=|k:&str|std::env::var(format!("PRIMEVAL_DEBUG_{k}")).unwrap();
+        let input=std::fs::read(var("SOURCE")).unwrap();let out=std::path::PathBuf::from(var("OUT"));
+        let (count,detail,seed):(usize,u32,u64)=(var("COUNT").parse().unwrap(),var("DETAIL").parse().unwrap(),var("SEED").parse().unwrap());
+        // Map file: "width height strength additive refine" then all values.
+        let map=std::fs::read_to_string(var("MAP")).unwrap();let mut numbers=map.split_whitespace().map(|v|v.parse::<f64>().unwrap());
+        let (mw,mh,strength,additive,refine)=(numbers.next().unwrap() as usize,numbers.next().unwrap() as usize,numbers.next().unwrap(),numbers.next().unwrap(),numbers.next().unwrap());
+        let values:Vec<f32>=numbers.map(|v|v as f32).collect();
+        let region:Vec<f64>=var("REGION").split(',').map(|v|v.parse().unwrap()).collect();
+        let image=decode_input(&input).unwrap();
+        let size=detail.min(image.width().max(image.height()));let longest=u64::from(image.width().max(image.height()));
+        let w=(u64::from(image.width())*u64::from(size)/longest).max(2)as u32;let h=(u64::from(image.height())*u64::from(size)/longest).max(2)as u32;
+        let pixels=mixed::target(&input,w,h).unwrap();let target=pixels.clone();
+        let mut model=primeval_core::rgba::RgbaModel::new(w,h,pixels,Some(seed));model.enable_exact_optimizations();
+        if strength>0.0||additive>0.0{model.set_attention_terms(mw,mh,&values,strength,additive,refine).unwrap();}
+        let report=|name:&str,model:&primeval_core::rgba::RgbaModel|{
+            let current=model.current_pixels();let (x0,y0,x1,y1)=((region[0]*w as f64)as usize,(region[1]*h as f64)as usize,(region[2]*w as f64).ceil()as usize,(region[3]*h as f64).ceil()as usize);
+            let mut error=0.0;let mut n=0.0;
+            for y in y0..y1.min(h as usize){for x in x0..x1.min(w as usize){let i=y*w as usize+x;for bg in [0.0,1.0]{for k in 0..3{
+                let t=target[i][k]+bg*(1.0-target[i][3]);let c=current[i][k]+bg*(1.0-current[i][3]);error+=(t-c).powi(2);n+=1.0;}}}}
+            let mut png=image::RgbaImage::new(w,h);
+            for (p,c) in png.pixels_mut().zip(current){let a=c[3].clamp(0.0,1.0);let un=|v:f64|if a>0.0{(v/a*255.0).round().clamp(0.0,255.0)as u8}else{0};*p=image::Rgba([un(c[0]),un(c[1]),un(c[2]),(a*255.0).round()as u8]);}
+            png.save(out.join(format!("{name}.png"))).unwrap();
+            println!("{name}: region rmse {:.3} score {:.6} shapes {}",255.0*(error/n).sqrt(),model.score(),model.snapshot().shapes.len());
+        };
+        for step in 0..count{
+            model.step_turbo(ShapeKind::Mixed);
+            if (step+1)%50==0{report(&format!("search-{:04}",step+1),&model);}
+        }
+        model.refine_turbo_phases(|name,model|report(name,model));
+    }
     #[test]
     fn count_palette_determinism_and_cancel() {
         let image=image::RgbaImage::from_fn(32,32,|x,y|image::Rgba([200,80,30,if x>7&&x<25&&y>7&&y<25{255}else{0}]));

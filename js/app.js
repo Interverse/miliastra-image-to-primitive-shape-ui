@@ -206,6 +206,8 @@
     $("gaussianHint").hidden=!gaussian;
     $("shapeHint").hidden=method!=="legacy";
     $("mixedShapeHint").hidden=!(primeval&&$("shapeMixed").checked&&$("primevalSpeed").value!=="turbo");
+    $("focusSettings").hidden=!(primeval&&$("primevalSpeed").value==="turbo");
+    syncFocusButtons();
     $("gaussianSettings").hidden=!gaussian;
     $("enhancedMode").disabled=method!=="legacy";
     $("enhancedSettings").hidden=method!=="legacy";
@@ -217,6 +219,7 @@
   $("fitMethod").addEventListener("change",()=>{syncShapeLabels();updateSubtitle();});
   fillShapeInputs.forEach(input=>input.addEventListener("change",syncShapeLabels));
   $("primevalSpeed").addEventListener("change",syncShapeLabels);
+  $("focusDetail").addEventListener("change",syncFocusButtons);
   function syncBackgroundColor(){
     const active=$("fitMethod").value==="primeval"&&!$("enablePngMode").checked;
     $("backgroundColorSettings").hidden=!active;
@@ -456,7 +459,24 @@
 
   const dropZone = $("dropZone");
   const fileInput = $("fileInput");
-  let pendingFiles = [];   // [{file, url}]
+  let pendingFiles = [];   // [{file, url, focus:{automatic, areas}}]
+
+  /* Focus detail applies to Primeval Turbo; manual areas are per image. */
+  function focusApplies() {
+    return $("fitMethod").value==="primeval"&&$("primevalSpeed").value==="turbo"&&$("focusDetail").checked;
+  }
+  function focusState(focus) {
+    const n = focus.areas.length;
+    if (focus.enabled === false) return t("focus.stateOff");
+    if (focus.automatic) return n ? t("focus.stateAutoPlus", { n }) : t("focus.stateAuto");
+    return n ? t("focus.stateManual", { n }) : t("focus.stateNone");
+  }
+  function syncFocusButtons() {
+    const visible=focusApplies(),thumbs=$("fileThumbs");
+    document.querySelectorAll("#fileThumbs .file-thumb-focus").forEach(button=>{button.hidden=!visible;});
+    thumbs.classList.toggle("focusable",visible);
+    $("focusThumbHint").hidden=!(visible&&thumbs.children.length);
+  }
 
   /* Adaptive columns for the preview grid: one large preview for a single
    * image, then progressively denser grids. */
@@ -473,30 +493,51 @@
     if (!pendingFiles.length) {
       thumbs.innerHTML = "";
       thumbs.removeAttribute("data-count");
+      $("focusThumbHint").hidden = true;
       ready.hidden = true;
       dropZone.classList.remove("ready");
       $("uploadWarning").hidden = true;
       return;
     }
 
-    // Incremental update: keep existing <img> nodes (object URLs stable) so
+    // Incremental update: keep existing thumbnail nodes (object URLs stable) so
     // batch additions only append and re-flow — no full layout refresh.
     const existing = thumbs.children.length;
     for (let i = existing - 1; i >= pendingFiles.length; i--) {
       thumbs.children[i].remove();
     }
+    const showFocus = focusApplies();
     pendingFiles.forEach((entry, i) => {
-      let img = thumbs.children[i];
-      if (!img) {
-        img = document.createElement("img");
-        thumbs.appendChild(img);
+      let item = thumbs.children[i];
+      if (!item) {
+        item = document.createElement("div");
+        item.className = "file-thumb";
+        item.innerHTML = '<img alt=""><button type="button" class="file-thumb-btn file-thumb-focus">' +
+          '<span aria-hidden="true">\u25ce</span><span class="file-thumb-label"><span class="file-thumb-prefix"></span>' +
+          '<span class="file-thumb-state"></span></span></button>' +
+          '<button type="button" class="file-thumb-btn file-thumb-remove">\u00d7</button>';
+        thumbs.appendChild(item);
       }
+      item.dataset.index = String(i);
+      const img = item.querySelector("img");
       if (!img.src || !img.src.endsWith(entry.url)) img.src = entry.url;
       img.alt = entry.file.name;
-      img.title = entry.file.name;
+      img.title = showFocus ? t("focus.mark") + ": " + entry.file.name : entry.file.name;
+      // A labelled pill, so the control and the image's focus state are visible at once.
+      const state = focusState(entry.focus);
+      const focusButton = item.querySelector(".file-thumb-focus");
+      focusButton.hidden = !showFocus;
+      focusButton.querySelector(".file-thumb-prefix").textContent = t("focus.chip") + ": ";
+      focusButton.querySelector(".file-thumb-state").textContent = state;
+      focusButton.title = t("focus.mark") + ": " + state;
+      focusButton.setAttribute("aria-label", t("focus.mark") + ": " + state + ", " + entry.file.name);
+      const removeButton = item.querySelector(".file-thumb-remove");
+      removeButton.title = t("upload.remove");
+      removeButton.setAttribute("aria-label", t("upload.remove") + ": " + entry.file.name);
     });
     thumbs.dataset.count = String(pendingFiles.length);
     thumbs.style.setProperty("--thumb-cols", String(thumbColumns(pendingFiles.length)));
+    syncFocusButtons();
 
     ready.hidden = false;
     ready.textContent = t("upload.selected", { n: pendingFiles.length });
@@ -507,7 +548,7 @@
   function addFiles(files) {
     for (const file of files) {
       if (!file || !file.type.startsWith("image/")) continue;
-      const entry = { file, url: URL.createObjectURL(file) };
+      const entry = { file, url: URL.createObjectURL(file), focus: { enabled: true, automatic: true, areas: [] } };
       pendingFiles.push(entry);
       decodeToRGBA(file).then(decoded => {
         entry.hasTransparency = hasTransparentPixels(decoded.data.data);
@@ -526,8 +567,35 @@
     return false;
   }
 
+  function removePendingFile(entry) {
+    const index = pendingFiles.indexOf(entry);
+    if (index < 0) return;
+    pendingFiles.splice(index, 1);
+    URL.revokeObjectURL(entry.url);
+    if (pendingFiles.length) {
+      $("enablePngMode").checked = pendingFiles.some(item => item.hasTransparency);
+      syncBackgroundColor();
+    }
+    updateUploadReady();
+  }
+
+  // Thumbnail buttons act on their image and never open the file picker.
+  // Clicking an image (or its Focus pill) opens its focus editor when Focus detail applies.
+  $("fileThumbs").addEventListener("click", (event) => {
+    const button = event.target.closest(".file-thumb-btn");
+    const image = !button && focusApplies() && event.target.closest(".file-thumb img");
+    if (!button && !image) return;
+    event.stopPropagation();
+    const entry = pendingFiles[Number(event.target.closest(".file-thumb").dataset.index)];
+    if (!entry) return;
+    if (button && button.classList.contains("file-thumb-remove")) removePendingFile(entry);
+    else openFocusEditor(entry);
+  });
+  I18N.onChange(() => updateUploadReady());
+
   dropZone.addEventListener("click", () => fileInput.click());
   dropZone.addEventListener("keydown", (event) => {
+    if (event.target !== dropZone) return;
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       fileInput.click();
@@ -554,6 +622,175 @@
     if (files.length) addFiles(files);
   });
 
+  /* ════════════════════ focus editor ════════════════════ */
+
+  let focusEntry = null, focusDraft = null, focusReturn = null, focusPreview = null;
+  const focusEditor = $("focusEditor"), focusStage = $("focusStage"), focusAreasLayer = $("focusAreas");
+
+  function renderFocusAreas() {
+    focusAreasLayer.innerHTML = "";
+    focusDraft.areas.forEach((area, index) => {
+      const box = document.createElement("div");
+      box.className = "focus-area";
+      box.style.left = area[0] * 100 + "%";
+      box.style.top = area[1] * 100 + "%";
+      box.style.width = (area[2] - area[0]) * 100 + "%";
+      box.style.height = (area[3] - area[1]) * 100 + "%";
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "\u00d7";
+      remove.title = t("focus.removeArea");
+      remove.setAttribute("aria-label", t("focus.removeArea"));
+      remove.addEventListener("pointerdown", (event) => event.stopPropagation());
+      remove.addEventListener("click", () => { focusDraft.areas.splice(index, 1); renderFocusAreas(); });
+      box.appendChild(remove);
+      focusAreasLayer.appendChild(box);
+    });
+    drawFocusShade();
+    updateFocusStatus();
+  }
+
+  // Automatic focus preview: parts the model ranks low are dimmed.
+  // Drawn areas are shown undimmed too: they count as focus on top of the automatic map.
+  function drawFocusShade() {
+    const map = focusPreview && focusPreview.map, canvas = $("focusShade");
+    canvas.width = map ? map.width : 1;
+    canvas.height = map ? map.height : 1;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!map) return;
+    const combined = Focus.combine(map, focusDraft ? focusDraft.areas : [], map.width, map.height);
+    const image = ctx.createImageData(map.width, map.height);
+    for (let i = 0; i < combined.values.length; i++) image.data[i * 4 + 3] = Math.round(160 * (1 - combined.values[i]));
+    ctx.putImageData(image, 0, 0);
+  }
+
+  function focusMode() {
+    return $("focusModeOff").checked ? "off" : $("focusModeManual").checked ? "manual" : "auto";
+  }
+
+  // Everything below the mode choice follows it: instruction, preview, legend and status.
+  function updateFocusStatus() {
+    if (!focusDraft) return;
+    const mode = focusMode(), state = focusPreview && focusPreview.state, count = focusDraft.areas.length;
+    const autoShown = mode === "auto" && state === "ready";
+    $("focusInstruction").textContent = mode === "auto" ? t("focus.drawAuto") : mode === "manual" ? t("focus.drawManual") : "";
+    focusStage.classList.toggle("off", mode === "off");
+    $("focusShade").hidden = !autoShown;
+    $("focusLegendAuto").hidden = !autoShown;
+    $("focusLegendMine").hidden = mode === "off" || !count;
+    $("focusLegend").hidden = $("focusLegendAuto").hidden && $("focusLegendMine").hidden;
+    $("focusLegendAutoText").textContent = t("focus.legend");
+    $("focusLegendMineText").textContent = t("focus.legendMine", { n: count });
+    let text = "";
+    if (mode === "auto") {
+      text = state === "loading" ? t("batch.phase.focus") + "\u2026" : state === "flat" ? t("focus.flat") :
+        state === "failed" ? t("focus.unavailable") : "";
+    } else if (mode === "manual") {
+      text = count ? "" : t("focus.needArea");
+    } else {
+      text = t("focus.offStatus");
+    }
+    $("focusStatus").textContent = text;
+    $("focusClear").disabled = !count;
+    $("focusClear").textContent = t("focus.clear") + (count ? " (" + count + ")" : "");
+  }
+
+  async function loadFocusPreview(entry) {
+    const preview = { state: "loading" };
+    focusPreview = preview;
+    drawFocusShade();
+    updateFocusStatus();
+    let map = null;
+    try {
+      const decoded = await decodeToRGBA(entry.file);
+      // Cached per image, so the fit reuses this analysis.
+      map = await Focus.analyze(entry.file, decoded.data.data, decoded.width, decoded.height, { cancelled: false, abort: null });
+      preview.map = map;
+      preview.state = map ? "ready" : "flat";
+    } catch (_error) {
+      preview.state = "failed";
+    }
+    if (focusPreview !== preview) return;
+    drawFocusShade();
+    updateFocusStatus();
+  }
+
+  function openFocusEditor(entry) {
+    focusEntry = entry;
+    focusDraft = { areas: entry.focus.areas.map(area => area.slice()) };
+    focusReturn = document.activeElement;
+    $("focusImage").src = entry.url;
+    $("focusImage").alt = entry.file.name;
+    $(entry.focus.enabled === false ? "focusModeOff" : entry.focus.automatic ? "focusModeAuto" : "focusModeManual").checked = true;
+    renderFocusAreas();
+    focusEditor.hidden = false;
+    loadFocusPreview(entry);
+    $("focusDone").focus();
+  }
+
+  function closeFocusEditor(save) {
+    if (save && focusEntry) {
+      // Off keeps the drawn areas and the last choice, so switching back restores them.
+      const mode = focusMode();
+      focusEntry.focus = { enabled: mode !== "off", automatic: mode === "off" ? focusEntry.focus.automatic : mode === "auto", areas: focusDraft.areas };
+    }
+    focusEditor.hidden = true;
+    focusEntry = null;
+    focusPreview = null;
+    updateUploadReady();
+    if (focusReturn && focusReturn.isConnected) focusReturn.focus();
+  }
+
+  // Drag on the image to add an area; coordinates are fractions of the image.
+  let focusDrag = null;
+  function focusPoint(event) {
+    const rect = $("focusImage").getBoundingClientRect();
+    return [Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
+            Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height))];
+  }
+  focusStage.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || focusMode() === "off") return;
+    focusDrag = { start: focusPoint(event), box: document.createElement("div") };
+    focusDrag.box.className = "focus-area";
+    focusAreasLayer.appendChild(focusDrag.box);
+    focusStage.setPointerCapture(event.pointerId);
+  });
+  focusStage.addEventListener("pointermove", (event) => {
+    if (!focusDrag) return;
+    const [x, y] = focusPoint(event), [sx, sy] = focusDrag.start;
+    Object.assign(focusDrag.box.style, {
+      left: Math.min(x, sx) * 100 + "%", top: Math.min(y, sy) * 100 + "%",
+      width: Math.abs(x - sx) * 100 + "%", height: Math.abs(y - sy) * 100 + "%",
+    });
+  });
+  function finishFocusDrag(event, keep) {
+    if (!focusDrag) return;
+    const [x, y] = focusPoint(event), [sx, sy] = focusDrag.start;
+    focusDrag = null;
+    if (keep && Math.abs(x - sx) > 0.01 && Math.abs(y - sy) > 0.01) {
+      focusDraft.areas.push([Math.min(x, sx), Math.min(y, sy), Math.max(x, sx), Math.max(y, sy)]);
+    }
+    renderFocusAreas();
+  }
+  focusStage.addEventListener("pointerup", (event) => finishFocusDrag(event, true));
+  focusStage.addEventListener("pointercancel", (event) => finishFocusDrag(event, false));
+  $("focusClear").addEventListener("click", () => { focusDraft.areas = []; renderFocusAreas(); });
+  document.querySelectorAll('input[name="focusMode"]').forEach(input => input.addEventListener("change", updateFocusStatus));
+  I18N.onChange(() => { if (!focusEditor.hidden) renderFocusAreas(); });
+  $("focusDone").addEventListener("click", () => closeFocusEditor(true));
+  focusEditor.addEventListener("click", (event) => { if (event.target === focusEditor) closeFocusEditor(false); });
+  focusEditor.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); closeFocusEditor(false); }
+    if (event.key === "Tab") {
+      // Keep keyboard focus inside the dialog.
+      const items = Array.from(focusEditor.querySelectorAll("button, input")).filter(item => !item.disabled);
+      const first = items[0], last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+  });
+
   /* ════════════════════ config capture ════════════════════ */
 
   function readOriginConfig() {
@@ -565,7 +802,7 @@
     };
   }
 
-  function captureConfig(file) {
+  function captureConfig(file, entry) {
     const ext = "." + (file.name.split(".").pop() || "").toLowerCase();
     const cfg = {
       mode: currentMode,
@@ -592,6 +829,8 @@
         cfg.primeval_speed=cfg.primeval_turbo?"fast":$("primevalSpeed").value;
         cfg.primeval_resolution=Number($("primevalResolution").value)||512;
         cfg.primeval_seed=42;
+        const focus=entry&&entry.focus||{enabled:true,automatic:true,areas:[]};
+        cfg.focus={enabled:cfg.primeval_turbo&&$("focusDetail").checked&&focus.enabled!==false,automatic:focus.automatic,areas:focus.areas.map(area=>area.slice())};
       }
       if(method==="gaussian"){
         cfg.gaussian_algorithm=$("gaussianAlgorithm").value;
@@ -797,11 +1036,42 @@
     // Decide per image, including mixed opaque/transparent upload batches.
     job.config.enable_png_mode = hasTransparentPixels(decoded.data.data);
 
-    let workerFile = job.config.mode === "outline" ? "js/worker-outline.js?v=cpu-runtime-3" :
-      job.config.fit_method === "primeval" ? "js/worker-primeval.js?v=cpu-runtime-3" :
+    // Focus detail: automatic map (cached per image) plus marked areas.
+    let importance = null;
+    const focus = job.config.focus;
+    delete job.config.focus_result;
+    if (job.config.fit_method === "primeval" && job.config.primeval_turbo && focus && focus.enabled) {
+      job.phase = "focus";
+      renderJobs();
+      let automatic = null, status = focus.automatic ? "used" : "off";
+      if (focus.automatic) {
+        const token = { cancelled: false, abort: null };
+        job.focusToken = token;
+        try {
+          automatic = await Focus.analyze(job.file, decoded.data.data, decoded.width, decoded.height, token);
+          if (!automatic) status = "flat";
+        } catch (error) {
+          if (error.message === Focus.CANCELLED || job.status !== "processing") return;
+          status = "failed";
+        } finally {
+          job.focusToken = null;
+        }
+        if (job.status !== "processing") return;
+      }
+      const areas = focus.areas || [];
+      importance = Focus.combine(automatic, areas, decoded.width, decoded.height);
+      job.config.focus_result = {
+        automatic: status, areas: areas.length, applied: !!importance,
+        model: focus.automatic ? Focus.MODEL : null, strength: Focus.STRENGTH, additive: Focus.ADDITIVE,
+      };
+      job.phase = "";
+    }
+
+    let workerFile = job.config.mode === "outline" ? "js/worker-outline.js?v=structure-priority-6" :
+      job.config.fit_method === "primeval" ? "js/worker-primeval.js?v=structure-priority-6" :
       job.config.fit_method === "compression" ? "js/worker-compress.js?v=3" :
       (job.config.allowed_shapes || []).includes("blurred_circle") ?
-        "js/worker-gaussian.js?v=cpu-runtime-3" : "js/worker-fill.js?v=cpu-runtime-3";
+        "js/worker-gaussian.js?v=structure-priority-6" : "js/worker-fill.js?v=structure-priority-6";
     // Separate pooled instances by thread budget: a reused WASM pool cannot resize.
     if(job.config.fit_method==='primeval')workerFile+='&poolThreads='+job.config.primeval_threads;
     const worker = acquireWorker(workerFile);
@@ -851,13 +1121,15 @@
       width: decoded.width,
       height: decoded.height,
       config: job.config,
-    }, [buffer]);
+      importance,
+    }, importance ? [buffer, importance.values.buffer] : [buffer]);
   }
 
   function cancelJob(job) {
     if (job.status === "queued") {
       job.status = "cancelled";
     } else if (job.status === "processing") {
+      if (job.focusToken) { job.focusToken.cancelled = true; if (job.focusToken.abort) job.focusToken.abort(); }
       if (job.worker) { job.worker.terminate(); job.worker = null; }
       job.status = "cancelled";
     }
@@ -872,7 +1144,7 @@
     if(currentMode==="fill"&&!validControlCount(numPrimsManual))return;
     if(currentMode==="fill"&&$("fitMethod").value==="primeval"&&!$("primevalResolution").reportValidity())return;
     for (const entry of pendingFiles) {
-      jobs.push(createJob(entry.file, entry.url, captureConfig(entry.file)));
+      jobs.push(createJob(entry.file, entry.url, captureConfig(entry.file, entry)));
     }
     pendingFiles = [];
     updateUploadReady();
@@ -1012,7 +1284,8 @@
       status.classList.toggle("quality-failed",job.result?.config?.quality?.classification === "quality-regression");
       status.textContent = job.status === "done" && job.result?.config?.quality?.classification === "quality-regression" ? t("compression.failed") :
         job.status === "processing" && ["native","lossless","partition","fit","refine"].includes(job.phase) ? t("compression.phase."+job.phase) :
-        job.status==="processing"&&job.phase==="model" ? t("batch.phase.model") : statusLabel(job.status);
+        job.status==="processing"&&job.phase==="model" ? t("batch.phase.model") :
+        job.status==="processing"&&job.phase==="focus" ? t("batch.phase.focus") : statusLabel(job.status);
       statusRow.appendChild(status);
       if (job.status === "done" && job.result) {
         const info = document.createElement("span");
@@ -1303,7 +1576,7 @@
     ctx.rect(-width / 2, -height / 2, width, height);
   }
 
-  function drawElement(element, index, reference=false) {
+  function drawElement(element, index) {
     const center = imagePointToElementCenter(element);
     const selected = !isBackgroundElement(element) && (R.selectedSet.has(index) || index === R.selected);
     const highlighted = !isBackgroundElement(element) && !selected && index === R.hovered;
@@ -1316,7 +1589,7 @@
     ctx.beginPath();
     drawElementPath(element);
 
-    if ($("showFill").checked && (!reference || selected || highlighted)) {
+    if ($("showFill").checked) {
       if (selected) ctx.fillStyle = "rgba(37, 99, 235, 0.42)";
       else if (highlighted) ctx.fillStyle = "rgba(59, 130, 246, 0.28)";
       else ctx.fillStyle = cssColor(element.color, fillAlpha);
@@ -1380,8 +1653,10 @@
     }
 
     const assets = ensureJobAssets(R.job);
-    if ($("showImage").checked && assets.base) ctx.drawImage(assets.base, 0, 0, imageWidth, imageHeight);
-    if ($("showMask").checked && assets.mask) {
+    // The Original view swaps the on-screen canvas only; exports always draw the fitted shapes.
+    const original = targetCtx === screenCtx && R.view === "original";
+    if ((original || $("showImage").checked) && assets.base) ctx.drawImage(assets.base, 0, 0, imageWidth, imageHeight);
+    if (!original && $("showMask").checked && assets.mask) {
       ctx.save();
       ctx.globalAlpha = 0.22;
       ctx.drawImage(assets.mask, 0, 0, imageWidth, imageHeight);
@@ -1394,7 +1669,7 @@
     // painter order, and an earlier Client sibling renders first), so with
     // this clip the preview composites exactly like the exported file.
     const clientMaskEl = $("showClientMask");
-    const clientMask = clientMaskEl && clientMaskEl.checked ? currentClientMaskRect() : null;
+    const clientMask = !original && clientMaskEl && clientMaskEl.checked ? currentClientMaskRect() : null;
     if (clientMask) {
       ctx.save();
       ctx.beginPath();
@@ -1410,13 +1685,14 @@
       }
       ctx.clip();
     }
-    const reference=nativeEditable() && $("showFill").checked;
-    if(reference&&assets.preview)ctx.drawImage(R.job.primevalEdited?(R.job.nativeEditCanvas||assets.preview):assets.preview,0,0,imageWidth,imageHeight);
-    const elementIndices = new Map();
-    data.elements.forEach((element,index)=>{if(!elementIndices.has(element))elementIndices.set(element,index);});
-    renderOrderedElements(data).forEach((element) => {
-      drawElement(element, elementIndices.get(element),reference);
-    });
+    // Shapes are always drawn as vectors at the current zoom, never as a resized bitmap.
+    if (!original) {
+      const elementIndices = new Map();
+      data.elements.forEach((element,index)=>{if(!elementIndices.has(element))elementIndices.set(element,index);});
+      renderOrderedElements(data).forEach((element) => {
+        drawElement(element, elementIndices.get(element));
+      });
+    }
     if (clientMask) {
       ctx.restore();
       // Outline the mask so its position and dimensions are verifiable.
@@ -1460,7 +1736,6 @@
     canvas.style.width = cssW + "px";
     canvas.style.height = cssH + "px";
 
-    if(nativeEditable()&&R.job.primevalEdited&&!R.job.nativeEditError){const job=R.job;ensureNativeEdit(job,R.data).catch(error=>{job.nativeEditError=error;console.error(error);});}
     const { s, offX, offY } = viewTransform();
     canvas.dataset.viewScale=s;canvas.dataset.viewOffsetX=offX;canvas.dataset.viewOffsetY=offY;
     R.scale = s; // hit-testing / tooltip stroke logic reads this
@@ -1526,13 +1801,26 @@
     return Math.abs(dx) <= width / 2 && Math.abs(dy) <= height / 2;
   }
 
-  function hitTest(x, y) {
-    const data = R.data;
+  // Every shape under the point, topmost first. Nothing is pickable while the original is shown.
+  function hitStack(x, y) {
+    const data = R.data, stack = [];
+    if (R.view === "original") return stack;
     for (let i = data.elements.length - 1; i >= 0; i--) {
-      if (isBackgroundElement(data.elements[i])) continue;
-      if (pointInElement(data.elements[i], x, y)) return i;
+      if (!isBackgroundElement(data.elements[i]) && pointInElement(data.elements[i], x, y)) stack.push(i);
     }
-    return null;
+    return stack;
+  }
+
+  function hitTest(x, y) {
+    const stack = hitStack(x, y);
+    return stack.length ? stack[0] : null;
+  }
+
+  // Clicking on the selected shape picks the one below it, cycling back to the top,
+  // so shapes covered by others can still be selected.
+  function cycleHit(x, y) {
+    const stack = hitStack(x, y), at = R.selectedSet.size === 1 ? stack.indexOf(R.selected) : -1;
+    return stack.length ? stack[(at + 1) % stack.length] : null;
   }
 
   function relativePosition(element) {
@@ -1579,8 +1867,8 @@
     if(job.nativeEditPending){await job.nativeEditPending;return ensureNativeEdit(job,data);}
     const snapshot={config:{image_scale:data.config.image_scale},image_size:{...data.image_size},elements:JSON.parse(key)};
     job.nativeOriginalElements??=JSON.parse(job.primevalOriginalElements);
-    job.nativeEditPending=(async()=>{const rendered=await NativeEdit.render(snapshot,job.result.primeval_drawing,job.nativeOriginalElements);const decoded=await PNGDecode.decode(rendered.data);job.nativeEditCanvas=rgbaToCanvas(decoded.rgba.buffer,decoded.width,decoded.height);job.nativeEditPng=rendered.data;job.nativeEditSvg=rendered.svg;job.nativeEditKey=key;})().finally(()=>{job.nativeEditPending=null;});
-    await job.nativeEditPending;if(R?.job===job)scheduleRender();
+    job.nativeEditPending=(async()=>{const rendered=await NativeEdit.render(snapshot,job.result.primeval_drawing,job.nativeOriginalElements);job.nativeEditPng=rendered.data;job.nativeEditSvg=rendered.svg;job.nativeEditKey=key;})().finally(()=>{job.nativeEditPending=null;});
+    await job.nativeEditPending;
   }
   function primevalCurrent(){
     return Boolean(R?.job?.result?.primeval_png&&R.data.config?.primeval_reference&&!R.job.primevalEdited);
@@ -1649,6 +1937,8 @@
 
     const compare = $("previewCompare");
     compare.hidden = mode !== "fill";
+    if (mode !== "fill") R.view = "fitted";
+    syncResultView();
     if (mode === "fill") {
       const assets = ensureJobAssets(R.job);
       if (assets.preview) $("previewImg").src = assets.preview.toDataURL("image/png");
@@ -1673,8 +1963,9 @@
       $("retryImageScale").value=cfg.image_scale ?? 1;
       $("retryOutputAlpha").value=Math.round((cfg.output_alpha ?? 1)*100);
       for(const [id,shape] of shapePairs)$("retryShape"+id).checked=shape===(allowed.find(s=>["circle","rect","triangle","mixed"].includes(s)) || "mixed");
-      $("retryPrimevalSpeed").value=cfg.primeval_turbo?"turbo":cfg.primeval_speed === "fastest" ? "fastest" : "fast";
+      $("retryPrimevalSpeed").value=cfg.primeval_turbo?"turbo":"fast";
       $("retryPrimevalResolution").value=cfg.primeval_resolution || 512;
+      $("retryFocusDetail").checked=cfg.focus?cfg.focus.enabled!==false||!cfg.primeval_turbo:true;
       $("retryGaussianAlgorithm").value=cfg.gaussian_algorithm || "gaussianimage";
       $("retryGaussianIterations").value=cfg.gaussian_iterations || 600;
       $("retryGaussianResolution").value=cfg.gaussian_resolution || 512;
@@ -1703,6 +1994,7 @@
     $("retryGaussianSettings").hidden=method!=="gaussian";
     $("retryPrimevalSettings").hidden=method!=="primeval";
     $("retryMixedShapeHint").hidden=!(method==="primeval"&&$("retryShapeMixed").checked&&$("retryPrimevalSpeed").value!=="turbo");
+    $("retryFocusSettings").hidden=!(method==="primeval"&&$("retryPrimevalSpeed").value==="turbo");
     retryShapeInputs.forEach(input=>input.closest(".shape-check").classList.toggle("active",input.checked));
   }
   $("retryFitMethod").addEventListener("change",syncRetryShapeLabels);
@@ -1713,7 +2005,10 @@
     const method=$("retryFitMethod").value;
     if(method==="primeval"&&!$("retryPrimevalResolution").reportValidity())return;
     const shapes=method==="gaussian"?["blurred_circle"]:[selectedFitShape("retry")];
+    const previousFocus=R.job.config.focus||{automatic:true,areas:[]};
+    const turbo=method==="primeval"&&$("retryPrimevalSpeed").value==="turbo";
     retryJob(R.job,{
+      focus:{enabled:turbo&&$("retryFocusDetail").checked,automatic:previousFocus.automatic!==false,areas:(previousFocus.areas||[]).map(area=>area.slice())},
       fit_method:method,num_primitives:Number($("retryNumPrims").value),allowed_shapes:shapes,
       image_scale:Number($("retryImageScale").value)||1,
       output_alpha:Math.max(0,Math.min(100,Number($("retryOutputAlpha").value)))/100,
@@ -1748,6 +2043,7 @@
       hovered: null,
       selected: keepState && R && R.job === job ? R.selected : null,
       selectedSet: keepState && R && R.job === job ? R.selectedSet : new Set(),
+      view: keepState && R && R.job === job ? R.view : "fitted",
       outputHasTransparency: Boolean(data.config && data.config.output_has_transparency),
     };
     if (!job.editUndo) { job.editUndo = []; job.editRedo = []; }
@@ -1772,6 +2068,25 @@
     $(id).addEventListener("change", renderCanvas);
   });
 
+  /* Fitted result / Original: swaps the main canvas so the two can be compared at the same zoom. */
+  function syncResultView() {
+    const original = Boolean(R && R.view === "original");
+    $("viewFitted").setAttribute("aria-pressed", String(!original));
+    $("viewOriginal").setAttribute("aria-pressed", String(original));
+    $("canvasWrap").classList.toggle("showing-original", original);
+  }
+
+  function setResultView(view) {
+    if (!R || R.view === view) return;
+    R.view = view;
+    R.hovered = null;
+    $("tooltip").hidden = true;
+    syncResultView();
+    renderCanvas();
+  }
+  $("viewFitted").addEventListener("click", () => setResultView("fitted"));
+  $("viewOriginal").addEventListener("click", () => setResultView("original"));
+
   /* ── zoom / pan / pinch interactions ── */
 
   $("btnResetView").addEventListener("click", resetView);
@@ -1793,7 +2108,7 @@
 
   let gizmoDrag=null;
   function gizmoPoints(){
-    if(!R||R.selected===null||R.selected<0)return null;
+    if(!R||R.selected===null||R.selected<0||R.view==="original")return null;
     const el=R.data.elements[R.selected];if(!el||isBackgroundElement(el))return null;
     const c=imagePointToElementCenter(el),a=elementRotationRad(el),actualW=(el.size.width||el.size.rx*2||1)*R.ppu/2,actualH=(el.size.height||el.size.ry*2||1)*R.ppu/2,w=Math.max(actualW,12/R.scale),h=Math.max(actualH,12/R.scale);
     const point=(x,y)=>({x:c.x+x*Math.cos(a)-y*Math.sin(a),y:c.y+x*Math.sin(a)+y*Math.cos(a)});
@@ -1827,7 +2142,9 @@
     // grabbing an element starts a move gesture instead of a pan
     if (!originArmed && pointers.size === 1) {
       const point = canvasToImagePoint(event);
-      const hit = g&&Math.hypot(point.x-g.c.x,point.y-g.c.y)<12/R.scale?R.selected:hitTest(point.x, point.y);
+      // a selected shape under the pointer is grabbed even when others cover it
+      const stack = hitStack(point.x, point.y), grabbed = stack.find((i) => R.selectedSet.has(i));
+      const hit = g&&Math.hypot(point.x-g.c.x,point.y-g.c.y)<12/R.scale?R.selected:grabbed ?? (stack.length ? stack[0] : null);
       if (hit !== null) {
         if (!R.selectedSet.has(hit)) {
           if (event.ctrlKey || event.metaKey || event.shiftKey) R.selectedSet.add(hit);
@@ -1926,7 +2243,7 @@
     const worldY = -point.y / R.ppu;
     $("coordsDisplay").textContent = t("result.canvas.coords", { coords: `(${worldX.toFixed(2)}, ${worldY.toFixed(2)})` });
 
-    const nextHovered = hitTest(point.x, point.y);
+    const nextHovered = cycleHit(point.x, point.y); // highlight what a click would select
     if (nextHovered !== R.hovered) {
       R.hovered = nextHovered;
       renderCanvas();
@@ -1972,8 +2289,8 @@
       disarmOriginPick();
       return;
     }
-    const hit = hitTest(point.x, point.y);
     const multi = event.ctrlKey || event.metaKey || event.shiftKey;
+    const hit = multi ? hitTest(point.x, point.y) : cycleHit(point.x, point.y);
     if (multi && hit !== null) {
       if (R.selectedSet.has(hit)) {
         R.selectedSet.delete(hit);

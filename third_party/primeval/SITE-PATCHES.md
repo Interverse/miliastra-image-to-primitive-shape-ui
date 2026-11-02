@@ -82,3 +82,13 @@ Direct source-RGBA fitting, residual moment proposals and unified shape-family
 competition are isolated in `primeval-core/src/rgba/turbo.rs` and
 `primeval-render/src/turbo.rs`. Opt-in only; output differs and quality/runtime
 gates remain unmet. See `docs/development/primeval-turbo.md` in the site root.
+
+13. Research options for automatic importance, all off by default, keep the
+    default output byte-identical: attention fusion terms (`strength`,
+    `additive` up to 4, `refine`, attended transparent-pixel penalty),
+    proposal-only and structural proposals, measured redistribution ranking and
+    trial count (`rgba.rs`, `rgba/turbo.rs`, `primeval-render/src/turbo.rs`).
+    `rectAspect` raises the rectangle aspect cap (default 8, upstream's "reads as a
+    rectangle" choice; the game has no aspect limit) through a process-wide value
+    held for one Turbo fit (`shapes.rs` `RectAspect`, `mixed.rs` replacement).
+    Triangles stay isosceles. See `docs/development/automatic-importance-*.md`.

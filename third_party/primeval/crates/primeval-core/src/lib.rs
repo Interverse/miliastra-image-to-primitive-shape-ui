@@ -60,5 +60,5 @@ pub use error::ParseError;
 #[cfg(feature = "lab")]
 pub use model::Search;
 pub use model::{Model, ModelOptions};
-pub use shapes::ShapeKind;
+pub use shapes::{RectAspect, ShapeKind};
 pub use util::sin_cos_degrees;

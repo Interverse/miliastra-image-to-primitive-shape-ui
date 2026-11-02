@@ -32,6 +32,16 @@ class DeploymentChecks(unittest.TestCase):
                 pages.assemble(Path(output))
 
 
+    def test_bare_module_specifier_is_not_a_site_file(self):
+        original = Path.read_text
+        def read_text(path, *args, **kwargs):
+            if path.name == 'browser-runtime.js':
+                return 'if (node) { await import("module"); } import "./gone.js";'
+            return original(path, *args, **kwargs)
+        with tempfile.TemporaryDirectory() as output, patch.object(Path, 'read_text', read_text):
+            with self.assertRaisesRegex(ValueError, 'gone.js'):
+                pages.assemble(Path(output))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -232,6 +232,16 @@ function __wbg_get_imports(memory) {
             const ret = arg0[arg1 >>> 0];
             return ret;
         },
+        __wbg_instanceof_Float32Array_595afb0f28b828c9: function(arg0) {
+            let result;
+            try {
+                result = arg0 instanceof Float32Array;
+            } catch (_) {
+                result = false;
+            }
+            const ret = result;
+            return ret;
+        },
         __wbg_instanceof_Window_82d71df4eddf88bc: function(arg0) {
             let result;
             try {
@@ -240,6 +250,10 @@ function __wbg_get_imports(memory) {
                 result = false;
             }
             const ret = result;
+            return ret;
+        },
+        __wbg_length_58572db4c38f3c3e: function(arg0) {
+            const ret = arg0.length;
             return ret;
         },
         __wbg_length_7f3c00c40364105e: function(arg0) {
@@ -262,6 +276,10 @@ function __wbg_get_imports(memory) {
             const ret = new Object();
             return ret;
         },
+        __wbg_new_63c4c65d2534e5d3: function(arg0) {
+            const ret = new Float32Array(arg0);
+            return ret;
+        },
         __wbg_new_ee2291f50781bf1d: function() {
             const ret = new Array();
             return ret;
@@ -277,6 +295,9 @@ function __wbg_get_imports(memory) {
         __wbg_now_aa4ccb83129e9e55: function() {
             const ret = Date.now();
             return ret;
+        },
+        __wbg_prototypesetcall_8b03c01e2c0f8066: function(arg0, arg1, arg2) {
+            Float32Array.prototype.set.call(getArrayF32FromWasm0(arg0, arg1), arg2);
         },
         __wbg_prototypesetcall_bc27214492979395: function(arg0, arg1, arg2) {
             Uint8Array.prototype.set.call(getArrayU8FromWasm0(arg0, arg1), arg2);
@@ -351,6 +372,11 @@ function addToExternrefTable0(obj) {
     return idx;
 }
 
+function getArrayF32FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getFloat32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
+}
+
 function getArrayU8FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
@@ -362,6 +388,14 @@ function getDataViewMemory0() {
         cachedDataViewMemory0 = new DataView(wasm.memory.buffer);
     }
     return cachedDataViewMemory0;
+}
+
+let cachedFloat32ArrayMemory0 = null;
+function getFloat32ArrayMemory0() {
+    if (cachedFloat32ArrayMemory0 === null || cachedFloat32ArrayMemory0.buffer !== wasm.memory.buffer) {
+        cachedFloat32ArrayMemory0 = new Float32Array(wasm.memory.buffer);
+    }
+    return cachedFloat32ArrayMemory0;
 }
 
 function getStringFromWasm0(ptr, len) {
@@ -475,6 +509,7 @@ function __wbg_finalize_init(instance, module, thread_stack_size) {
     wasm = instance.exports;
     wasmModule = module;
     cachedDataViewMemory0 = null;
+    cachedFloat32ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     if (typeof thread_stack_size !== 'undefined' && (typeof thread_stack_size !== 'number' || thread_stack_size === 0 || thread_stack_size % 65536 !== 0)) {
         throw new Error('invalid stack size');

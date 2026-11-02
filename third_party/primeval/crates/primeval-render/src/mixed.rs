@@ -126,6 +126,7 @@ pub(super) fn fit(
             }
         };
         let child = Execution {
+            attention: None,
             progress: Some(&mut progress),
             cancel,
             phase: None,
@@ -133,6 +134,9 @@ pub(super) fn fit(
             fastest,
             turbo: false,
             live_progress:execution.live_progress,
+            measured_redistribution: false,
+            redistribution_trials: None,
+            rect_aspect: None,
         };
         let drawing = match approximate_drawing_inner(
             ApproximateRequest {

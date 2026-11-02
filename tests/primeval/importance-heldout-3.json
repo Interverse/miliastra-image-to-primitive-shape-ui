@@ -1,0 +1,763 @@
+{
+ "purpose": "Third held-out set for automatic importance (round 3, after the transparent-hole fix). Regions are evaluation-only, drawn from source previews before any fitting output existed, and are never passed to the fitter. Images are 1024px Wikimedia Commons thumbnails (CC0), fetched into ignored reference/automatic-importance/heldout3/images and not redistributed. importance-heldout.json and importance-heldout-2.json are tuning data by now.",
+ "regionFormat": "Normalized source-image boxes [x0, y0, x1, y1] in [0, 1].",
+ "licenses": {
+  "cc0": "Creative Commons CC0 1.0 per Wikimedia Commons file metadata. Logos and mascots may carry trademark rights; evaluation only."
+ },
+ "images": [
+  {
+   "id": 1,
+   "file": "bearded-man.jpg",
+   "category": "portrait",
+   "license": "cc0",
+   "author": "ThuyHaBich",
+   "title": "Bearded man smoking pipe-3013924.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/49/Bearded_man_smoking_pipe-3013924.jpg/1280px-Bearded_man_smoking_pipe-3013924.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "d7d3384af5f2cc2f70903cf366b987d8b7ab89d072d960388be581c4fad9992b",
+   "regions": {
+    "eyes": [
+     0.35,
+     0.27,
+     0.52,
+     0.38
+    ],
+    "mouth and pipe": [
+     0.38,
+     0.44,
+     0.56,
+     0.56
+    ],
+    "hand": [
+     0.65,
+     0.6,
+     0.82,
+     0.95
+    ]
+   }
+  },
+  {
+   "id": 2,
+   "file": "hals-elderly-lady.jpg",
+   "category": "portrait",
+   "license": "cc0",
+   "author": "Frans Hals",
+   "title": "Frans Hals, Portrait of an Elderly Lady, 1633, NGA 74.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/b9/Frans_Hals%2C_Portrait_of_an_Elderly_Lady%2C_1633%2C_NGA_74.jpg/1280px-Frans_Hals%2C_Portrait_of_an_Elderly_Lady%2C_1633%2C_NGA_74.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "694ac83ff0634af91e94363ef58990eae2dea832ccca80b10a8156df74189806",
+   "regions": {
+    "face": [
+     0.39,
+     0.13,
+     0.6,
+     0.28
+    ],
+    "ruff": [
+     0.31,
+     0.25,
+     0.74,
+     0.41
+    ],
+    "inscription": [
+     0.11,
+     0.24,
+     0.29,
+     0.3
+    ],
+    "hands": [
+     0.12,
+     0.6,
+     0.66,
+     0.81
+    ]
+   }
+  },
+  {
+   "id": 3,
+   "file": "fishmonger.jpg",
+   "category": "portrait",
+   "license": "cc0",
+   "author": "Wilfredor",
+   "title": "Fishmonger smiling, Maracaibo street market, Venezuela.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/b4/Fishmonger_smiling%2C_Maracaibo_street_market%2C_Venezuela.jpg/1280px-Fishmonger_smiling%2C_Maracaibo_street_market%2C_Venezuela.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "06e394008039bb616e8e68ca71706f3fa8217ab62c0dd9b6ddae5b66426f59fd",
+   "regions": {
+    "eyes": [
+     0.36,
+     0.3,
+     0.6,
+     0.42
+    ],
+    "smile": [
+     0.42,
+     0.43,
+     0.6,
+     0.52
+    ],
+    "cap": [
+     0.31,
+     0.06,
+     0.62,
+     0.22
+    ]
+   }
+  },
+  {
+   "id": 4,
+   "file": "eagle-owl.jpg",
+   "category": "animal",
+   "license": "cc0",
+   "author": "Sangyam adventurer",
+   "title": "Eagle owl Portrait.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/a9/Eagle_owl_Portrait.jpg/1280px-Eagle_owl_Portrait.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "94d62a42bf32b2d7661d05058755938f954d1add2587e8ec00fa68cfba6b0e52",
+   "regions": {
+    "eyes": [
+     0.4,
+     0.34,
+     0.62,
+     0.4
+    ],
+    "beak": [
+     0.48,
+     0.38,
+     0.55,
+     0.45
+    ],
+    "talons": [
+     0.38,
+     0.79,
+     0.63,
+     0.85
+    ]
+   }
+  },
+  {
+   "id": 5,
+   "file": "ocicat.jpg",
+   "category": "animal",
+   "license": "cc0",
+   "author": "Ljhlusko",
+   "title": "Upclose photo of a female ocicat's face.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c3/Upclose_photo_of_a_female_ocicat%27s_face.jpg/1280px-Upclose_photo_of_a_female_ocicat%27s_face.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "09c9e810bb4716762a199bf34e9aca2d12573a0d31f9865f899583f98d451e42",
+   "regions": {
+    "left eye": [
+     0.1,
+     0.15,
+     0.25,
+     0.31
+    ],
+    "right eye": [
+     0.52,
+     0.12,
+     0.7,
+     0.3
+    ],
+    "nose": [
+     0.21,
+     0.48,
+     0.42,
+     0.67
+    ]
+   }
+  },
+  {
+   "id": 6,
+   "file": "shiba-yawn.jpg",
+   "category": "animal",
+   "license": "cc0",
+   "author": "Picography",
+   "title": "Picography-dog-yawning-1.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e4/Picography-dog-yawning-1.jpg/1280px-Picography-dog-yawning-1.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "d4c95c69190c1d5744b25f034f54b2a940021fb263e8247cd899be8f9f108772",
+   "regions": {
+    "eye and face": [
+     0.45,
+     0.38,
+     0.73,
+     0.62
+    ],
+    "open mouth": [
+     0.5,
+     0.62,
+     0.66,
+     0.9
+    ],
+    "harness": [
+     0.05,
+     0.75,
+     0.3,
+     1.0
+    ]
+   }
+  },
+  {
+   "id": 7,
+   "file": "bakery-sign.jpg",
+   "category": "text",
+   "license": "cc0",
+   "author": "Andy Li",
+   "title": "Sang Lung Bakery shop sign.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/f0/Sang_Lung_Bakery_shop_sign.jpg/1280px-Sang_Lung_Bakery_shop_sign.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "6743cd28b0e514f9c11fe8fb2455ea8f3f4e868c68f8a81d2be9fc2b16102f0c",
+   "regions": {
+    "characters": [
+     0.0,
+     0.22,
+     0.95,
+     0.46
+    ],
+    "66": [
+     0.88,
+     0.4,
+     0.98,
+     0.47
+    ],
+    "hanging signs": [
+     0.15,
+     0.57,
+     0.8,
+     0.7
+    ],
+    "people": [
+     0.15,
+     0.79,
+     0.65,
+     1.0
+    ]
+   }
+  },
+  {
+   "id": 8,
+   "file": "karakol-sign.jpg",
+   "category": "text",
+   "license": "cc0",
+   "author": "Bgag",
+   "title": "Street sign in Karakol.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/26/Street_sign_in_Karakol.jpg/1280px-Street_sign_in_Karakol.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "d1f69aeba6bf08bf023fed20ac4962a8db8df02bee7a7a4528a3d1298c9d0a74",
+   "regions": {
+    "upper word": [
+     0.25,
+     0.36,
+     0.74,
+     0.5
+    ],
+    "lower word": [
+     0.37,
+     0.52,
+     0.62,
+     0.61
+    ],
+    "hook": [
+     0.17,
+     0.17,
+     0.3,
+     0.27
+    ]
+   }
+  },
+  {
+   "id": 9,
+   "file": "kidston-sign.jpg",
+   "category": "text",
+   "license": "cc0",
+   "author": "Malcolmxl5",
+   "title": "Cath Kidston shop sign Stonegate York Apr25 01.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/bc/Cath_Kidston_shop_sign_Stonegate_York_Apr25_01.jpg/1280px-Cath_Kidston_shop_sign_Stonegate_York_Apr25_01.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "bb58d10e287084eb19dd2f247c02c2d3cc32f6ae5fc575661f3c33a24534248c",
+   "regions": {
+    "lettering": [
+     0.39,
+     0.57,
+     0.67,
+     0.72
+    ],
+    "ironwork": [
+     0.29,
+     0.15,
+     0.8,
+     0.42
+    ],
+    "lamp": [
+     0.7,
+     0.0,
+     0.82,
+     0.2
+    ],
+    "plaque": [
+     0.21,
+     0.58,
+     0.3,
+     0.77
+    ]
+   }
+  },
+  {
+   "id": 10,
+   "file": "barras-market.jpg",
+   "category": "multiple",
+   "license": "cc0",
+   "author": "Caitymay",
+   "title": "Barras Market, Glasgow.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/0d/Barras_Market%2C_Glasgow.jpg/1280px-Barras_Market%2C_Glasgow.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "f19b474376110dd737bb8872e1ac3ddddd41f5cb6386ea0e88226167c45e9e5d",
+   "regions": {
+    "banner number": [
+     0.0,
+     0.62,
+     0.3,
+     0.71
+    ],
+    "front people": [
+     0.27,
+     0.6,
+     0.47,
+     0.97
+    ],
+    "right man": [
+     0.62,
+     0.6,
+     0.7,
+     0.85
+    ],
+    "tent": [
+     0.0,
+     0.42,
+     0.38,
+     0.6
+    ]
+   }
+  },
+  {
+   "id": 11,
+   "file": "crowd-hungary.jpg",
+   "category": "multiple",
+   "license": "cc0",
+   "author": "Keymeulen",
+   "title": "Crowd crossing the street, Hungary 2011.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/08/Crowd_crossing_the_street%2C_Hungary_2011.jpg/1280px-Crowd_crossing_the_street%2C_Hungary_2011.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "c864236a6de095efd5af626b1d11b2aec6e1c263a0f2a4dcda4ea826fcb96b38",
+   "regions": {
+    "faces": [
+     0.0,
+     0.28,
+     1.0,
+     0.5
+    ],
+    "centre women": [
+     0.37,
+     0.33,
+     0.68,
+     0.92
+    ],
+    "menu boards": [
+     0.2,
+     0.07,
+     0.84,
+     0.28
+    ],
+    "shop sign": [
+     0.39,
+     0.01,
+     0.62,
+     0.07
+    ]
+   }
+  },
+  {
+   "id": 12,
+   "file": "mountain-lake.jpg",
+   "category": "landscape",
+   "license": "cc0",
+   "author": "Aleksandra Boguslawska aleksandraboguslawska",
+   "title": "Mountain lake (Unsplash).jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/5b/Mountain_lake_%28Unsplash%29.jpg/1280px-Mountain_lake_%28Unsplash%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "97dc4578efcee98f62876a6f5cb8c728d98ee5cd5d931ce9f858b08b45854545",
+   "regions": {
+    "main peak": [
+     0.12,
+     0.08,
+     0.45,
+     0.3
+    ],
+    "distant peaks": [
+     0.5,
+     0.15,
+     1.0,
+     0.3
+    ],
+    "hotel": [
+     0.5,
+     0.36,
+     0.65,
+     0.45
+    ],
+    "treeline": [
+     0.0,
+     0.35,
+     1.0,
+     0.5
+    ]
+   }
+  },
+  {
+   "id": 13,
+   "file": "picton-harbor.jpg",
+   "category": "landscape",
+   "license": "cc0",
+   "author": "Daderot",
+   "title": "Boats in harbor - Picton, NZ - DSC00341.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/07/Boats_in_harbor_-_Picton%2C_NZ_-_DSC00341.jpg/1280px-Boats_in_harbor_-_Picton%2C_NZ_-_DSC00341.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "dfd2212b1d89c5fc2fe7e7027b8f12bddf39e2b0d1334365209437d770d91057",
+   "regions": {
+    "central boat": [
+     0.33,
+     0.29,
+     0.52,
+     0.52
+    ],
+    "left boats": [
+     0.08,
+     0.35,
+     0.33,
+     0.5
+    ],
+    "gangway": [
+     0.78,
+     0.56,
+     1.0,
+     0.7
+    ]
+   }
+  },
+  {
+   "id": 14,
+   "file": "graffiti-wall.jpg",
+   "category": "texture",
+   "license": "cc0",
+   "author": "Fons Heijnsbroek",
+   "title": "Brick wall with graffiti tags and textures in the old city; free photo Amsterdam city, Fons Heijnsbroek 01-2022.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/28/Brick_wall_with_graffiti_tags_and_textures_in_the_old_city%3B_free_photo_Amsterdam_city%2C_Fons_Heijnsbroek_01-2022.jpg/1280px-Brick_wall_with_graffiti_tags_and_textures_in_the_old_city%3B_free_photo_Amsterdam_city%2C_Fons_Heijnsbroek_01-2022.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "afbc92cb20e0ceb30eec2a3f5104c5db014eacc24b255d61af9493a85f827085",
+   "regions": {
+    "SHOWX tag": [
+     0.26,
+     0.51,
+     0.66,
+     0.69
+    ],
+    "KTRS CHK tag": [
+     0.65,
+     0.38,
+     0.95,
+     0.6
+    ],
+    "poster figure": [
+     0.07,
+     0.6,
+     0.2,
+     0.92
+    ],
+    "door stickers": [
+     0.02,
+     0.3,
+     0.25,
+     0.6
+    ]
+   }
+  },
+  {
+   "id": 15,
+   "file": "madras-fabric.jpg",
+   "category": "texture",
+   "license": "cc0",
+   "author": "Shweta Venkateswaran",
+   "title": "Colourful Madras Checks Fabric 2.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/45/Colourful_Madras_Checks_Fabric_2.jpg/1280px-Colourful_Madras_Checks_Fabric_2.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "3d404763eadc82cf23cae6aee54ae0aa796b6f2e769510afa79c606637b7cff4",
+   "regions": {
+    "plaid band": [
+     0.22,
+     0.0,
+     0.71,
+     0.5
+    ],
+    "folded edges": [
+     0.71,
+     0.3,
+     1.0,
+     0.6
+    ]
+   }
+  },
+  {
+   "id": 16,
+   "file": "fruit-bowl.jpg",
+   "category": "object",
+   "license": "cc0",
+   "author": "Alabama Extension",
+   "title": "Bowl of Fruit.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c8/Bowl_of_Fruit.jpg/1280px-Bowl_of_Fruit.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "24e8a9136d854c40253642a093f91437f0c254baab053f3944afdb15b7236ceb",
+   "regions": {
+    "front orange": [
+     0.37,
+     0.35,
+     0.62,
+     0.69
+    ],
+    "mango": [
+     0.6,
+     0.27,
+     0.8,
+     0.65
+    ],
+    "bowl ribs": [
+     0.2,
+     0.5,
+     0.85,
+     0.95
+    ],
+    "jug sunflower": [
+     0.1,
+     0.16,
+     0.25,
+     0.44
+    ]
+   }
+  },
+  {
+   "id": 17,
+   "file": "morris-car.jpg",
+   "category": "object",
+   "license": "cc0",
+   "author": "Lkabs",
+   "title": "Morris 8 Series II Two Seater.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/d6/Morris_8_Series_II_Two_Seater.jpg/1280px-Morris_8_Series_II_Two_Seater.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "913364860429c9a910c9ede14d14a064f424908b2cc54c8ba8ec35a35d6f0fc5",
+   "regions": {
+    "grille and lamps": [
+     0.55,
+     0.39,
+     0.8,
+     0.65
+    ],
+    "front wheel": [
+     0.42,
+     0.57,
+     0.56,
+     0.86
+    ],
+    "windscreen": [
+     0.33,
+     0.27,
+     0.58,
+     0.4
+    ],
+    "tent sign": [
+     0.75,
+     0.27,
+     0.95,
+     0.33
+    ]
+   }
+  },
+  {
+   "id": 18,
+   "file": "robot-wheels.png",
+   "category": "illustration",
+   "license": "cc0",
+   "author": "Jfcby",
+   "transparent": true,
+   "title": "SVG Robot With Wheels (Cropped).png",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/ec/SVG_Robot_With_Wheels_%28Cropped%29.png/1280px-SVG_Robot_With_Wheels_%28Cropped%29.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "83822a68a0cb6a318c2a3b08a5b4c1fea3ec5a58e2b1b78da6b127e7570fa73f",
+   "regions": {
+    "eyes": [
+     0.26,
+     0.21,
+     0.73,
+     0.31
+    ],
+    "mouth": [
+     0.29,
+     0.36,
+     0.69,
+     0.43
+    ],
+    "bandage": [
+     0.52,
+     0.68,
+     0.7,
+     0.8
+    ],
+    "patch": [
+     0.31,
+     0.52,
+     0.45,
+     0.62
+    ],
+    "leg gap": [
+     0.3,
+     0.9,
+     0.7,
+     1.0
+    ]
+   }
+  },
+  {
+   "id": 19,
+   "file": "ev-car-icon.png",
+   "category": "illustration",
+   "license": "cc0",
+   "author": "OpenClipart-Vectors (pixabay.com)",
+   "transparent": true,
+   "title": "Car-159269 1280.png",
+   "url": "https://upload.wikimedia.org/wikipedia/commons/6/6f/Car-159269_1280.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+   "sha256": "06fd4371b5b67078c85e5ce03d8c0beb33432fd53900f012a36f1748a37af90f",
+   "regions": {
+    "plug": [
+     0.3,
+     0.4,
+     0.62,
+     0.6
+    ],
+    "left wheel": [
+     0.11,
+     0.57,
+     0.3,
+     0.77
+    ],
+    "right wheel": [
+     0.69,
+     0.57,
+     0.89,
+     0.77
+    ],
+    "roof line": [
+     0.15,
+     0.33,
+     0.75,
+     0.45
+    ]
+   }
+  },
+  {
+   "id": 20,
+   "file": "pink-owl.png",
+   "category": "illustration",
+   "license": "cc0",
+   "author": "https://pixabay.com/pl/users/kropekk_pl-114936/",
+   "transparent": true,
+   "title": "Sowa-356552.png",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/a9/Sowa-356552.png/1280px-Sowa-356552.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "e2c24b99c32bbd32834f8594cbfc9cb8cedda23eea31dd5a2aa4735123b390fc",
+   "regions": {
+    "eyes": [
+     0.18,
+     0.17,
+     0.82,
+     0.38
+    ],
+    "beak": [
+     0.43,
+     0.37,
+     0.58,
+     0.48
+    ],
+    "feet": [
+     0.35,
+     0.91,
+     0.7,
+     1.0
+    ],
+    "belly edge": [
+     0.15,
+     0.49,
+     0.9,
+     0.55
+    ]
+   }
+  },
+  {
+   "id": 21,
+   "file": "cartoon-fish.png",
+   "category": "illustration",
+   "license": "cc0",
+   "author": "Kurtkaiser",
+   "transparent": true,
+   "title": "Cartoon fish yellow and pink.png",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/b4/Cartoon_fish_yellow_and_pink.png/1280px-Cartoon_fish_yellow_and_pink.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "9ea77688921354a778f3b4aa1ba220421f335bfaa4fdb6f1ee191eb301c3bca9",
+   "regions": {
+    "eye": [
+     0.63,
+     0.24,
+     0.7,
+     0.38
+    ],
+    "stripes": [
+     0.3,
+     0.18,
+     0.53,
+     0.75
+    ],
+    "mouth": [
+     0.75,
+     0.42,
+     0.84,
+     0.58
+    ],
+    "dorsal fin": [
+     0.48,
+     0.08,
+     0.66,
+     0.24
+    ]
+   }
+  },
+  {
+   "id": 22,
+   "file": "robot-red.png",
+   "category": "illustration",
+   "license": "cc0",
+   "author": "Meks01",
+   "title": "Robot rosso progetto.png",
+   "url": "https://upload.wikimedia.org/wikipedia/commons/9/9f/Robot_rosso_progetto.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+   "sha256": "3f874e069ccc10c67fb95b59ade2671a89b51ff20390e84dc7ea9c1bfd4f47c1",
+   "regions": {
+    "eye": [
+     0.35,
+     0.19,
+     0.5,
+     0.32
+    ],
+    "mouth slot": [
+     0.33,
+     0.39,
+     0.67,
+     0.47
+    ],
+    "springs": [
+     0.34,
+     0.59,
+     0.68,
+     0.66
+    ],
+    "claws": [
+     0.08,
+     0.62,
+     0.92,
+     0.72
+    ],
+    "antenna": [
+     0.64,
+     0.04,
+     0.7,
+     0.3
+    ]
+   }
+  }
+ ]
+}

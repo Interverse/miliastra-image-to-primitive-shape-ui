@@ -1,0 +1,685 @@
+{
+ "purpose": "Fourth held-out set for automatic importance (round 4, strengthened candidate). Regions are evaluation-only, drawn from source previews before any fitting output existed, and never passed to the fitter. Wikimedia Commons CC0 images (1024px thumbnails where available), fetched into ignored reference/automatic-importance/heldout4/images and not redistributed. Earlier held-out sets are tuning data by now.",
+ "regionFormat": "Normalized source-image boxes [x0, y0, x1, y1] in [0, 1].",
+ "licenses": {
+  "cc0": "Creative Commons CC0 1.0 per Wikimedia Commons file metadata. Logos and mascots may carry trademark rights; evaluation only."
+ },
+ "images": [
+  {
+   "id": 1,
+   "file": "old-woman-selling.jpg",
+   "category": "portrait",
+   "license": "cc0",
+   "author": "Wilfredor",
+   "title": "Old woman selling.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/1e/Old_woman_selling.jpg/1280px-Old_woman_selling.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "d6b3a552421ebe60846e9c8c066181c97e83db9eba177316f272d67708b01ffe",
+   "regions": {
+    "eyes": [
+     0.35,
+     0.37,
+     0.55,
+     0.48
+    ],
+    "smile": [
+     0.38,
+     0.5,
+     0.55,
+     0.6
+    ],
+    "bandana": [
+     0.3,
+     0.2,
+     0.56,
+     0.38
+    ],
+    "ball logo": [
+     0.08,
+     0.27,
+     0.3,
+     0.6
+    ]
+   }
+  },
+  {
+   "id": 2,
+   "file": "old-woman-san-juan.jpg",
+   "category": "portrait",
+   "license": "cc0",
+   "author": "Wilfredor",
+   "title": "Old Woman of San Juan Baut\u00edsta.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/80/Old_Woman_of_San_Juan_Baut%C3%ADsta.jpg/1280px-Old_Woman_of_San_Juan_Baut%C3%ADsta.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "a7114ca5c23f0181a24fdc2a99551a49bea21dbf0b296deb53393f4eaa2e4ff4",
+   "regions": {
+    "eyes": [
+     0.3,
+     0.3,
+     0.68,
+     0.41
+    ],
+    "mouth": [
+     0.4,
+     0.5,
+     0.6,
+     0.6
+    ],
+    "earring": [
+     0.6,
+     0.58,
+     0.68,
+     0.7
+    ]
+   }
+  },
+  {
+   "id": 3,
+   "file": "child-portrait.jpg",
+   "category": "portrait",
+   "license": "cc0",
+   "author": "Jean-Baptiste Camille Corot",
+   "title": "Portrait of a Child MET DT872.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e2/Portrait_of_a_Child_MET_DT872.jpg/1280px-Portrait_of_a_Child_MET_DT872.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "5b2f0a8288baa4ed41585e9b4f503b7dcecfbbe29f658227bbc8254feb57dd95",
+   "regions": {
+    "face": [
+     0.38,
+     0.2,
+     0.55,
+     0.34
+    ],
+    "hat": [
+     0.3,
+     0.09,
+     0.72,
+     0.22
+    ],
+    "right hand": [
+     0.7,
+     0.53,
+     0.82,
+     0.67
+    ],
+    "left hand": [
+     0.24,
+     0.76,
+     0.37,
+     0.88
+    ]
+   }
+  },
+  {
+   "id": 4,
+   "file": "piebald-horse.jpg",
+   "category": "animal",
+   "license": "cc0",
+   "author": "Br\u00fccke-Osteuropa",
+   "title": "Piebald Mongolian horse head - Gorkhi-Terelj National Park.jpg",
+   "url": "https://upload.wikimedia.org/wikipedia/commons/8/8f/Piebald_Mongolian_horse_head_-_Gorkhi-Terelj_National_Park.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+   "sha256": "49e61b4769c69941b132080559b09aaf9849542e997450804cdea9bdb8841fbc",
+   "regions": {
+    "eye": [
+     0.48,
+     0.3,
+     0.62,
+     0.4
+    ],
+    "muzzle": [
+     0.08,
+     0.49,
+     0.35,
+     0.67
+    ],
+    "halter": [
+     0.27,
+     0.36,
+     0.56,
+     0.55
+    ],
+    "buckle": [
+     0.38,
+     0.58,
+     0.55,
+     0.7
+    ]
+   }
+  },
+  {
+   "id": 5,
+   "file": "monarch-butterfly.jpg",
+   "category": "animal",
+   "license": "cc0",
+   "author": "Shocksingularity",
+   "title": "Monarch butterfly on butterfly bush flower.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/3d/Monarch_butterfly_on_butterfly_bush_flower.jpg/1280px-Monarch_butterfly_on_butterfly_bush_flower.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "e453e9ebce375d7e0b06483036118b68977100f522af268c6abcdefeb5ba6604",
+   "regions": {
+    "wings": [
+     0.37,
+     0.42,
+     0.72,
+     0.88
+    ],
+    "head and body": [
+     0.48,
+     0.45,
+     0.58,
+     0.6
+    ],
+    "flowers": [
+     0.35,
+     0.0,
+     0.9,
+     0.4
+    ]
+   }
+  },
+  {
+   "id": 6,
+   "file": "jezebel-butterfly.jpg",
+   "category": "animal",
+   "license": "cc0",
+   "author": "Jeevan Jose, Kerala, India",
+   "title": "Common Jezebel Delias eucharis by kadavoor 3.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/96/Common_Jezebel_Delias_eucharis_by_kadavoor_3.jpg/1280px-Common_Jezebel_Delias_eucharis_by_kadavoor_3.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "4ace668a1b7d64377db1977c57049ec8e94f4c343843cc2681128adeec43b0ad",
+   "regions": {
+    "wing spots": [
+     0.12,
+     0.49,
+     0.38,
+     0.88
+    ],
+    "head and antennae": [
+     0.5,
+     0.24,
+     0.66,
+     0.56
+    ],
+    "wing veins": [
+     0.07,
+     0.25,
+     0.5,
+     0.5
+    ],
+    "flower": [
+     0.48,
+     0.55,
+     0.85,
+     0.75
+    ]
+   }
+  },
+  {
+   "id": 7,
+   "file": "maximilien-neon.jpg",
+   "category": "text",
+   "license": "cc0",
+   "author": "Julian Lupyan",
+   "title": "Maximilien Restaurant Sign in Pike Place Market, Seattle, Washington, 2025.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/35/Maximilien_Restaurant_Sign_in_Pike_Place_Market%2C_Seattle%2C_Washington%2C_2025.jpg/1280px-Maximilien_Restaurant_Sign_in_Pike_Place_Market%2C_Seattle%2C_Washington%2C_2025.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "fae3a0f275e4a2b03c3b2212fb9b0ae9d5a0b7dbbc90765adffa8c6a48456d03",
+   "regions": {
+    "Maximilien": [
+     0.2,
+     0.18,
+     0.7,
+     0.37
+    ],
+    "RESTAURANT": [
+     0.27,
+     0.34,
+     0.67,
+     0.46
+    ],
+    "seating lines": [
+     0.24,
+     0.45,
+     0.67,
+     0.64
+    ],
+    "menu board": [
+     0.4,
+     0.62,
+     0.9,
+     0.88
+    ]
+   }
+  },
+  {
+   "id": 8,
+   "file": "sky-galley-sign.jpg",
+   "category": "text",
+   "license": "cc0",
+   "author": "Room237",
+   "title": "Sky Galley Restaurant Neon Sign.jpg",
+   "url": "https://upload.wikimedia.org/wikipedia/commons/8/8d/Sky_Galley_Restaurant_Neon_Sign.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+   "sha256": "67ee7555f5f8ae8a6a4cae18a7e732f6145fe885c7c78dc33504a6dc345aefe7",
+   "regions": {
+    "Sky Galley": [
+     0.12,
+     0.37,
+     0.75,
+     0.56
+    ],
+    "Restaurant": [
+     0.12,
+     0.55,
+     0.39,
+     0.63
+    ],
+    "bracket": [
+     0.02,
+     0.18,
+     0.95,
+     0.24
+    ]
+   }
+  },
+  {
+   "id": 9,
+   "file": "hk-license-plates.jpg",
+   "category": "text",
+   "license": "cc0",
+   "author": "Anthony Ivanoff",
+   "title": "Hong Kong car with three license plates.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/d3/Hong_Kong_car_with_three_license_plates.jpg/1280px-Hong_Kong_car_with_three_license_plates.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "5f04b442e8a7e34e21d4f02281b11fbbddff6a02b34d83360d4cecd38a865aad",
+   "regions": {
+    "plates": [
+     0.42,
+     0.52,
+     0.65,
+     0.71
+    ],
+    "badge": [
+     0.5,
+     0.43,
+     0.56,
+     0.49
+    ],
+    "truck": [
+     0.73,
+     0.2,
+     1.0,
+     0.48
+    ],
+    "poster": [
+     0.18,
+     0.28,
+     0.3,
+     0.41
+    ]
+   }
+  },
+  {
+   "id": 10,
+   "file": "park-musicians.jpg",
+   "category": "multiple",
+   "license": "cc0",
+   "author": "DimiTalen",
+   "title": "Street musicians in Washington Square Park, New York, 2007.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/04/Street_musicians_in_Washington_Square_Park%2C_New_York%2C_2007.jpg/1280px-Street_musicians_in_Washington_Square_Park%2C_New_York%2C_2007.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "2f43538c3e8d9e7d0e2b818b9faeba7dee3d57e3e0322fdfe6a901956c2881b3",
+   "regions": {
+    "left face": [
+     0.2,
+     0.12,
+     0.33,
+     0.4
+    ],
+    "sunglasses face": [
+     0.3,
+     0.08,
+     0.45,
+     0.3
+    ],
+    "right face": [
+     0.82,
+     0.0,
+     0.95,
+     0.2
+    ],
+    "guitar stickers": [
+     0.18,
+     0.5,
+     0.4,
+     0.9
+    ]
+   }
+  },
+  {
+   "id": 11,
+   "file": "naadam-musicians.jpg",
+   "category": "multiple",
+   "license": "cc0",
+   "author": "Bernard Gagnon",
+   "title": "Musicians at Naadam 2023.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/fe/Musicians_at_Naadam_2023.jpg/1280px-Musicians_at_Naadam_2023.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "fd6b40800667c880e6705fa178504372b0c019fe99783f60acc9616fd8031104",
+   "regions": {
+    "performers": [
+     0.03,
+     0.46,
+     0.98,
+     0.79
+    ],
+    "heads": [
+     0.05,
+     0.48,
+     0.97,
+     0.58
+    ],
+    "emblem": [
+     0.4,
+     0.25,
+     0.65,
+     0.48
+    ]
+   }
+  },
+  {
+   "id": 12,
+   "file": "forest-waterfall.jpg",
+   "category": "landscape",
+   "license": "cc0",
+   "author": "Martin Eklund",
+   "title": "Waterfall in forest.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/8b/Waterfall_in_forest.jpg/1280px-Waterfall_in_forest.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "d932d6704d7ce36b65747971cbc1782b6b1708591ceb5f0e67e0a0f51c231ec1",
+   "regions": {
+    "upper cascade": [
+     0.38,
+     0.2,
+     0.68,
+     0.5
+    ],
+    "lower falls": [
+     0.3,
+     0.5,
+     0.6,
+     0.95
+    ]
+   }
+  },
+  {
+   "id": 13,
+   "file": "shuvolong-waterfall.jpg",
+   "category": "landscape",
+   "license": "cc0",
+   "author": "Manna Barua",
+   "title": "Rangamati Shuvolong Waterfall natural Bangladesh.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/4f/Rangamati_Shuvolong_Waterfall_natural_Bangladesh.jpg/1280px-Rangamati_Shuvolong_Waterfall_natural_Bangladesh.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "098d1ef8fbfa312656b2cb170e6e3d0ba97eb6d6a47c24779e9dee77477f43d8",
+   "regions": {
+    "stream": [
+     0.43,
+     0.13,
+     0.52,
+     0.77
+    ],
+    "splash": [
+     0.05,
+     0.78,
+     0.6,
+     1.0
+    ],
+    "cliff strata": [
+     0.6,
+     0.1,
+     1.0,
+     0.4
+    ]
+   }
+  },
+  {
+   "id": 14,
+   "file": "pagoda-mosaic.jpg",
+   "category": "texture",
+   "license": "cc0",
+   "author": "Deepak-nsk",
+   "title": "Colourful tiles floral pattern Mosaic on Pagoda.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/14/Colourful_tiles_floral_pattern_Mosaic_on_Pagoda.jpg/1280px-Colourful_tiles_floral_pattern_Mosaic_on_Pagoda.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "2984cf0da909ba5a47823a9641cd48638c7343d918db01d09ea11b2641d6f3bb",
+   "regions": {
+    "cat": [
+     0.62,
+     0.52,
+     0.82,
+     0.84
+    ],
+    "mosaic flowers": [
+     0.35,
+     0.35,
+     0.6,
+     0.7
+    ],
+    "top band": [
+     0.1,
+     0.0,
+     0.85,
+     0.2
+    ]
+   }
+  },
+  {
+   "id": 15,
+   "file": "maracaibo-mosaic.jpg",
+   "category": "texture",
+   "license": "cc0",
+   "author": "Wilfredor",
+   "title": "Mosaic floor in a colonial Maracaibo Center.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/fa/Mosaic_floor_in_a_colonial_Maracaibo_Center.jpg/1280px-Mosaic_floor_in_a_colonial_Maracaibo_Center.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "26f9f4ac9cad76505b5aaeb6b393ecf23bf13940fdfc7ec94548fe7c5d2b45d3",
+   "regions": {
+    "central star": [
+     0.5,
+     0.13,
+     0.8,
+     0.45
+    ],
+    "lower-left star": [
+     0.15,
+     0.55,
+     0.48,
+     0.95
+    ]
+   }
+  },
+  {
+   "id": 16,
+   "file": "bicycle.jpg",
+   "category": "object",
+   "license": "cc0",
+   "author": "Shams948",
+   "title": "Bicycle 02.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/21/Bicycle_02.jpg/1280px-Bicycle_02.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "938a96e9736e9cda0d331f6752dd084add8932c53e1446cf984a659bb0b5cc72",
+   "regions": {
+    "front wheel": [
+     0.03,
+     0.45,
+     0.42,
+     0.9
+    ],
+    "handlebar": [
+     0.36,
+     0.2,
+     0.6,
+     0.33
+    ],
+    "saddle and helmet": [
+     0.8,
+     0.33,
+     0.94,
+     0.45
+    ],
+    "chain area": [
+     0.48,
+     0.6,
+     0.7,
+     0.75
+    ]
+   }
+  },
+  {
+   "id": 17,
+   "file": "bronze-horse-head.jpg",
+   "category": "object",
+   "license": "cc0",
+   "author": "Gary Todd",
+   "title": "Western Han Bronze Horse Head.jpg",
+   "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/d5/Western_Han_Bronze_Horse_Head.jpg/1280px-Western_Han_Bronze_Horse_Head.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+   "sha256": "5319e05957b33d020685be9503c100609ab0794513a516065ec5c34177fda92c",
+   "regions": {
+    "mouth and teeth": [
+     0.3,
+     0.38,
+     0.55,
+     0.62
+    ],
+    "eye ornament": [
+     0.22,
+     0.25,
+     0.45,
+     0.42
+    ],
+    "ears": [
+     0.55,
+     0.08,
+     0.7,
+     0.25
+    ]
+   }
+  },
+  {
+   "id": 18,
+   "file": "good-dragon.png",
+   "category": "illustration",
+   "license": "cc0",
+   "author": "OpenClipart-Vectors",
+   "transparent": true,
+   "title": "Good dragon.png",
+   "url": "https://upload.wikimedia.org/wikipedia/commons/8/88/Good_dragon.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+   "sha256": "13f236c44426c806075767cc8eaf6a3e960932eb39dd8042885304c51cc13e79",
+   "regions": {
+    "eye": [
+     0.4,
+     0.08,
+     0.48,
+     0.16
+    ],
+    "flower": [
+     0.0,
+     0.27,
+     0.2,
+     0.4
+    ],
+    "mouth": [
+     0.37,
+     0.22,
+     0.5,
+     0.32
+    ],
+    "feet": [
+     0.2,
+     0.82,
+     0.55,
+     0.99
+    ]
+   }
+  },
+  {
+   "id": 19,
+   "file": "ferris-crab.png",
+   "category": "illustration",
+   "license": "cc0",
+   "author": "Karen Rustad T\u00f6lva",
+   "transparent": true,
+   "title": "File:Ferris.png",
+   "url": "https://upload.wikimedia.org/wikipedia/commons/f/fd/Ferris.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+   "sha256": "b64500c829882b4abed9d768dbb396569ff1d5e6baf7d274460ab372fe53aadb",
+   "regions": {
+    "eyes": [
+     0.37,
+     0.47,
+     0.66,
+     0.67
+    ],
+    "mouth": [
+     0.3,
+     0.68,
+     0.7,
+     0.82
+    ],
+    "top spikes": [
+     0.25,
+     0.03,
+     0.85,
+     0.2
+    ]
+   }
+  },
+  {
+   "id": 20,
+   "file": "wp-bivalves.png",
+   "category": "illustration",
+   "license": "cc0",
+   "author": "RealGatba",
+   "transparent": true,
+   "title": "File:WPbival.png",
+   "url": "https://upload.wikimedia.org/wikipedia/commons/5/58/WPbival.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+   "sha256": "9b43dcd91580e907bb20435f49f407b8523ab1f1088d02c9719b2f2fdab6abd7",
+   "regions": {
+    "lettering": [
+     0.18,
+     0.71,
+     1.0,
+     0.79
+    ],
+    "hand and pen": [
+     0.18,
+     0.12,
+     0.33,
+     0.32
+    ],
+    "shell stripes": [
+     0.4,
+     0.33,
+     1.0,
+     0.62
+    ]
+   }
+  },
+  {
+   "id": 21,
+   "file": "apple-cartoon.png",
+   "category": "illustration",
+   "license": "cc0",
+   "author": "<a href=\"//commons.wikimedia.org/w/index.php?title=User:Toby8991&amp;action=edit&amp;redlink=1\" class=\"new\" title=\"User:",
+   "transparent": true,
+   "title": "File:Hi definition apple cartoon with transparent background.png",
+   "url": "https://upload.wikimedia.org/wikipedia/commons/0/0b/Hi_definition_apple_cartoon_with_transparent_background.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+   "sha256": "becc5a0117c570313a17f98628d10b75f4cec6d6378c016ae435c1dcad536c9b",
+   "regions": {
+    "stem": [
+     0.42,
+     0.03,
+     0.58,
+     0.32
+    ],
+    "leaf": [
+     0.65,
+     0.0,
+     0.82,
+     0.1
+    ],
+    "highlight": [
+     0.1,
+     0.28,
+     0.27,
+     0.54
+    ]
+   }
+  }
+ ]
+}

@@ -272,7 +272,7 @@ body {
 .panel-section:last-child { margin-bottom: 0; }
 .panel-section > :is(.hint, .field-label, .config-row, .param-item,
   .export-name-field, .export-action, .btn-sm, .gia-export-group,
-  .outline-intro, .primitive-toolbar, .m3-notice) { margin: 0; }
+  .outline-intro, .primitive-toolbar) { margin: 0; }
 .panel-section > .hint:empty { display: none; }
 
 /* The upload panel is split into a scrolling content region and a fixed
@@ -633,7 +633,16 @@ body {
   padding-right: 2px;
 }
 .file-thumbs:empty { display: none; }
-.file-thumbs img {
+/* Each thumbnail is its own stacking context, so its buttons stay above the
+   image but never above the header, menus or the focus editor. */
+.file-thumb {
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+  container-type: inline-size;
+}
+.file-thumb img {
+  display: block;
   width: 100%;
   aspect-ratio: 1;
   object-fit: contain;
@@ -646,15 +655,230 @@ body {
 .file-thumbs[data-count="1"] {
   grid-template-columns: 1fr;
 }
-.file-thumbs[data-count="1"] img {
+.file-thumbs[data-count="1"] .file-thumb img {
   aspect-ratio: auto;
   max-height: 260px;
 }
-.file-thumbs[data-count="2"] img,
-.file-thumbs[data-count="3"] img,
-.file-thumbs[data-count="4"] img {
+.file-thumbs[data-count="2"] .file-thumb img,
+.file-thumbs[data-count="3"] .file-thumb img,
+.file-thumbs[data-count="4"] .file-thumb img {
   aspect-ratio: 4 / 3;
 }
+.file-thumb-btn {
+  position: absolute;
+  top: 4px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-shape-full);
+  background: var(--md-surface-container-lowest);
+  color: var(--md-on-surface);
+  font: 600 13px/1 inherit;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .3);
+}
+.file-thumb-btn[hidden] { display: none; }
+.file-thumb-btn:hover, .file-thumb-btn:focus-visible {
+  background: var(--md-primary-container);
+  color: var(--md-on-primary-container);
+}
+.file-thumb-remove { right: 4px; }
+.file-thumb-remove:hover, .file-thumb-remove:focus-visible {
+  background: var(--md-error-container);
+  color: var(--md-on-error-container);
+}
+.file-thumb-focus {
+  top: auto;
+  bottom: 4px;
+  left: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: calc(100% - 8px);
+  padding: 0 10px 0 8px;
+  border-color: var(--md-primary);
+  background: var(--md-primary);
+  color: var(--md-on-primary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.file-thumb-focus:hover, .file-thumb-focus:focus-visible {
+  background: var(--md-primary-container);
+  color: var(--md-on-primary-container);
+}
+.file-thumb-label { overflow: hidden; text-overflow: ellipsis; }
+/* Small thumbnails drop the "Focus:" prefix but keep the state; tiny ones keep the icon. */
+@container (max-width: 110px) {
+  .file-thumb-prefix { display: none; }
+  .file-thumb-focus { padding: 0 6px; font-size: 11px; }
+}
+@container (max-width: 52px) {
+  .file-thumb-label { display: none; }
+}
+.file-thumbs.focusable .file-thumb img { cursor: pointer; }
+.file-thumbs.focusable .file-thumb img:hover { border-color: var(--md-primary); }
+.focus-thumb-hint { margin-top: 6px; }
+
+.focus-settings { display: grid; gap: 4px; }
+.focus-settings[hidden] { display: none; }
+/* One-click switch for Focus detail, next to the images it affects. */
+/* Settings row: text on the left, switch on the right, centered vertically. */
+.focus-switch {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-shape-md);
+  background: var(--md-surface-container);
+  cursor: pointer;
+}
+.focus-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+.focus-switch-track {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1;
+  width: 36px;
+  height: 20px;
+  border-radius: var(--md-shape-full);
+  background: var(--md-outline);
+  transition: background .15s;
+}
+.focus-switch-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--md-surface-container-lowest);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .3);
+  transition: transform .15s;
+}
+.focus-switch input:checked + .focus-switch-track { background: var(--md-primary); }
+.focus-switch input:checked + .focus-switch-track::after { transform: translateX(16px); }
+.focus-switch input:focus-visible + .focus-switch-track { outline: 2px solid var(--md-primary); outline-offset: 2px; }
+.focus-switch-text { grid-column: 1; grid-row: 1; display: grid; gap: 2px; min-width: 0; }
+.focus-switch-text strong { font-size: 13px; }
+.focus-switch-text small { font-size: 12px; line-height: 1.4; color: var(--md-on-surface-variant); }
+
+/* Focus editor: a modal above every page layer. */
+.focus-editor {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, .5);
+}
+.focus-editor[hidden] { display: none; }
+.focus-editor-panel {
+  display: grid;
+  gap: var(--space-sm, 8px);
+  width: min(760px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 16px;
+  border-radius: var(--md-shape-lg);
+  background: var(--md-surface-container-low);
+  color: var(--md-on-surface);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, .35);
+}
+.focus-stage {
+  position: relative;
+  justify-self: center;
+  max-width: 100%;
+  line-height: 0;
+  touch-action: none;
+  user-select: none;
+  cursor: crosshair;
+  border-radius: var(--md-shape-xs);
+  background:
+    repeating-conic-gradient(#eceaf2 0 25%, #ffffff 0 50%) 0 0/14px 14px;
+}
+.focus-stage img {
+  display: block;
+  max-width: 100%;
+  max-height: 60vh;
+  pointer-events: none;
+}
+.focus-shade {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.focus-shade[hidden] { display: none; }
+.focus-areas { position: absolute; inset: 0; }
+.focus-modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-sm, 8px); }
+.focus-stage.off { cursor: default; }
+.focus-stage.off .focus-areas { opacity: .35; }
+.focus-mode {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-shape-md);
+  background: var(--md-surface-container);
+  cursor: pointer;
+}
+.focus-mode:has(input:checked) { border-color: var(--md-primary); background: var(--md-primary-container); color: var(--md-on-primary-container); }
+.focus-mode input { margin-top: 3px; accent-color: var(--md-primary); }
+.focus-mode span { display: grid; gap: 2px; min-width: 0; }
+.focus-mode strong { font-size: 14px; }
+.focus-mode small { font-size: 12px; line-height: 1.35; opacity: .85; }
+@media (max-width: 520px) { .focus-modes { grid-template-columns: 1fr; } }
+.focus-instruction { margin: 0; font-size: 13px; font-weight: 600; color: var(--md-on-surface); }
+.focus-instruction:empty { display: none; }
+.focus-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--md-on-surface-variant); }
+.focus-legend[hidden], .focus-legend-item[hidden] { display: none; }
+.focus-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.focus-swatch { width: 18px; height: 12px; border-radius: 2px; flex: 0 0 auto; }
+.focus-swatch-auto { background: linear-gradient(90deg, rgba(0, 0, 0, .63), #fff); border: 1px solid var(--md-outline-variant); }
+.focus-swatch-mine { border: 2px solid var(--md-primary); background: color-mix(in srgb, var(--md-primary) 20%, transparent); }
+.focus-editor-actions .btn-text:disabled { opacity: .45; cursor: default; background: transparent; }
+.focus-status { min-height: 1.4em; margin: 0; }
+.focus-status:empty { min-height: 0; }
+.focus-area {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid var(--md-primary);
+  background: color-mix(in srgb, var(--md-primary) 20%, transparent);
+}
+.focus-area button {
+  position: absolute;
+  top: -12px;
+  right: -12px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-shape-full);
+  background: var(--md-surface-container-lowest);
+  color: var(--md-on-surface);
+  font: 600 13px/1 inherit;
+  cursor: pointer;
+}
+.focus-area button:hover, .focus-area button:focus-visible {
+  background: var(--md-error-container);
+  color: var(--md-on-error-container);
+}
+.focus-editor-actions { display: flex; justify-content: flex-end; align-items: center; gap: var(--space-sm, 8px); }
+.focus-editor-actions .btn-primary, .focus-editor-actions .btn-text { width: auto; white-space: nowrap; overflow-wrap: normal; }
+.focus-editor-actions .btn-primary { padding: 10px 28px; }
 
 /* ============================================================
    Shape checks / params
@@ -1063,34 +1287,6 @@ input[type="range"]::-webkit-slider-thumb {
   gap: 4px;
 }
 
-.m3-notice {
-  display: flex;
-  gap: 10px;
-  border-radius: var(--md-shape-md);
-  padding: 12px;
-  margin-bottom: 12px;
-}
-.m3-notice.notice-info {
-  background: var(--md-primary-container);
-  color: var(--md-on-primary-container);
-}
-.notice-icon {
-  width: 22px; height: 22px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: var(--md-primary);
-  color: var(--md-on-primary);
-  font-weight: 700;
-  font-size: 12px;
-  font-style: normal;
-}
-.notice-title { display: block; font-size: 13px; margin-bottom: 2px; }
-.notice-text { font-size: 12px; line-height: 1.55; }
-.notice-text a { color: inherit; font-weight: 600; }
-
 .tips {
   list-style: disc;
   margin-left: 18px;
@@ -1124,7 +1320,12 @@ input[type="range"]::-webkit-slider-thumb {
   padding: 16px;
 }
 
+/* Out of flow: the canvas is sized from the wrap, so it must not size the wrap
+   (on narrow layouts that made the canvas grow on every render). */
 #mainCanvas {
+  position: absolute;
+  top: 0;
+  left: 0;
   border-radius: var(--md-shape-sm);
   touch-action: none;   /* wheel zoom + pointer pan/pinch handled in JS */
   cursor: grab;
@@ -1186,6 +1387,25 @@ input[type="range"]::-webkit-slider-thumb {
   gap: 4px;
 }
 .preview-label { font-size: 11px; color: var(--md-on-surface-variant); font-weight: 600; }
+.preview-hint { flex-basis: 100%; margin: 0; text-align: center; }
+.preview-toggle {
+  appearance: none;
+  padding: 6px;
+  border: 2px solid transparent;
+  border-radius: var(--md-shape-md);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.preview-toggle:hover { background: var(--md-surface-container-high); }
+.preview-toggle:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
+.preview-toggle[aria-pressed="true"] {
+  border-color: var(--md-primary);
+  background: color-mix(in srgb, var(--md-primary) 14%, transparent);
+}
+.preview-toggle[aria-pressed="true"] .preview-label { color: var(--md-primary); }
+.canvas-wrap.showing-original { outline: 2px solid var(--md-primary); outline-offset: -2px; }
 .preview-thumb {
   width: auto;
   max-inline-size: 100%;

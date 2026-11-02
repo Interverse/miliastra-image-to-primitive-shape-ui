@@ -368,6 +368,7 @@ impl CancellationToken {
 /// `Execution::new()` reports nothing and cannot be cancelled.
 #[derive(Default)]
 pub struct Execution<'a> {
+    attention: Option<(usize,usize,Vec<f32>,f64,f64,f64,Proposals)>,
     progress: Option<&'a mut dyn FnMut(ProgressInfo)>,
     cancel: Option<&'a CancellationToken>,
     phase: Option<&'a mut dyn FnMut(&'static str)>,
@@ -375,15 +376,43 @@ pub struct Execution<'a> {
     fastest: bool,
     turbo: bool,
     live_progress: bool,
+    measured_redistribution: bool,
+    redistribution_trials: Option<usize>,
+    rect_aspect: Option<u32>,
+}
+
+/// How an installed attention map is used by Turbo.
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub enum Proposals {
+    /// Attention weights change scoring (default).
+    Scoring,
+    /// Attention only adds candidate proposals; scoring stays structural.
+    Attention,
+    /// Experimental control: structural proposals, attention map ignored.
+    Structure,
 }
 
 impl<'a> Execution<'a> {
+    /// Optional normalized visual-attention prior, used only by Turbo.
+    pub fn attention(mut self,width:usize,height:usize,values:Vec<f32>,strength:f64)->Self{self.attention=Some((width,height,values,strength,0.0,1.0,Proposals::Scoring));self}
+    /// Attention prior with an attention-only weight term and the share kept during refinement, both in [0, 1].
+    pub fn attention_terms(mut self,width:usize,height:usize,values:Vec<f32>,strength:f64,additive:f64,refine:f64)->Self{self.attention=Some((width,height,values,strength,additive,refine,Proposals::Scoring));self}
+    /// Restrict installed attention to additional Turbo proposals.
+    pub fn attention_proposals_only(mut self,enabled:bool)->Self{if let Some(a)=self.attention.as_mut(){if enabled{a.6=Proposals::Attention;}}self}
+    /// Experimental control: extra Turbo proposals from structure, ignoring the map.
+    pub fn structural_proposals_only(mut self,enabled:bool)->Self{if let Some(a)=self.attention.as_mut(){if enabled{a.6=Proposals::Structure;}}self}
     /// Enable equivalent implementation optimizations for the full search.
     pub fn fast(mut self,enabled:bool)->Self{self.fast=enabled;self}
     /// Select the earlier reduced-effort search without changing the shape count.
     pub fn fastest(mut self,enabled:bool)->Self{self.fastest=enabled;self}
     /// Experimental direct source-RGBA fitting with structured proposals.
     pub fn turbo(mut self,enabled:bool)->Self{self.turbo=enabled;self}
+    /// Experimental: rank Turbo redistribution trials by measured removal loss.
+    pub fn measured_redistribution(mut self,enabled:bool)->Self{self.measured_redistribution=enabled;self}
+    /// Experimental: Turbo redistribution trial count; `None` keeps the default.
+    pub fn redistribution_trials(mut self,trials:Option<usize>)->Self{self.redistribution_trials=trials;self}
+    /// Experimental: Turbo rectangle aspect cap above the default 8; `None` keeps it.
+    pub fn rect_aspect(mut self,cap:Option<u32>)->Self{self.rect_aspect=cap;self}
     /// Include browser-only refinement and layer updates in progress.
     pub fn live_progress(mut self,enabled:bool)->Self{self.live_progress=enabled;self}
     /// Observe stage boundaries for performance diagnostics.
@@ -597,7 +626,7 @@ fn approximate_decoded(
             }
             let live=execution.live_progress;
             let mut reference_progress=|mut info:ProgressInfo|{if live{info.preview=None;info.preview_index=None;info.shape.clear();}if let Some(observer)=execution.progress.as_mut(){observer(info);}};
-            let drawing=approximate_decoded(ApproximateRequest{input:Vec::new(),output:OutputFormat::Png,render:options},Execution{progress:Some(&mut reference_progress),cancel:execution.cancel,phase:None,fast:execution.fast,fastest:execution.fastest,turbo:false,live_progress:live},Some(DynamicImage::ImageRgb8(rgb)))?;
+            let drawing=approximate_decoded(ApproximateRequest{input:Vec::new(),output:OutputFormat::Png,render:options},Execution{attention:None,progress:Some(&mut reference_progress),cancel:execution.cancel,phase:None,fast:execution.fast,fastest:execution.fastest,turbo:false,live_progress:live,measured_redistribution:false,redistribution_trials:None,rect_aspect:None},Some(DynamicImage::ImageRgb8(rgb)))?;
             execution.mark("reference-end");Some(drawing)
         }else{None};
         // Resample premultiplied channels: invisible RGB cannot bleed into edges.
