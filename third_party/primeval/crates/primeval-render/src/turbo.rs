@@ -1,16 +1,26 @@
 //! Experimental source-RGBA solver. No RGB reference or three-fit portfolio.
 use crate::*;
-pub(super) fn fit(request:ApproximateRequest,mut execution:Execution<'_>)->Result<Drawing,ApproximateError>{
+pub(super) fn fit(request:ApproximateRequest,execution:Execution<'_>)->Result<Drawing,ApproximateError>{fit_traced(request,execution,None)}
+
+/// Lab trace: the model every `every` search steps and after each refinement phase.
+pub(crate) type Trace<'t>=(usize,&'t mut dyn FnMut(&str,usize,&primeval_core::rgba::RgbaModel));
+
+/// The Turbo fit; `trace` (lab only, `None` in the product) observes the model.
+pub(crate) fn fit_traced(request:ApproximateRequest,mut execution:Execution<'_>,mut trace:Option<Trace<'_>>)->Result<Drawing,ApproximateError>{
     validate_options(&request.render)?;execution.check_cancelled()?;
     let image=decode_input(&request.input)?;
-    let size=request.render.resize_input.min(image.width().max(image.height()));
-    let longest=u64::from(image.width().max(image.height()));
-    let w=(u64::from(image.width())*u64::from(size)/longest).max(2)as u32;
-    let h=(u64::from(image.height())*u64::from(size)/longest).max(2)as u32;
+    let (w,h)=working_size(&image,request.render.resize_input);
     let pixels=mixed::target(&request.input,w,h)?;
     let background=if pixels.iter().all(|p|p[3]>=1.0){Some(prepare_target(image,request.render.background,request.render.resize_input).1)}else{None};
-    // Held for the whole fit and restored on return, error or cancellation.
-    let _aspect=execution.rect_aspect.map(primeval_core::RectAspect::set);
+    // Held for the whole fit and restored on return, error or cancellation. The
+    // game scales sprites freely: rectangles have no aspect limit and isosceles
+    // triangles may be thin, so a straight line or a tapering stroke can be one
+    // shape. Turbo lifts Primeval's 8:1 cap and 15.5 degree minimum angle.
+    let _aspect=primeval_core::RectAspect::set(execution.rect_aspect.unwrap_or(RECT_ASPECT));
+    #[cfg(feature="asset-triangle")]
+    let _angle=primeval_core::TriangleAngle::set(execution.triangle_angle.unwrap_or(TRIANGLE_ANGLE));
+    #[cfg(not(feature="asset-triangle"))]
+    let _=execution.triangle_angle;
     let mut model=primeval_core::rgba::RgbaModel::new(w,h,pixels,request.render.seed);
     model.enable_exact_optimizations();
     if let Some((width,height,values,strength,additive,refine,proposal_only))=execution.attention.take(){
@@ -22,19 +32,48 @@ pub(super) fn fit(request:ApproximateRequest,mut execution:Execution<'_>)->Resul
         }
     }
     if execution.measured_redistribution{model.enable_measured_redistribution();}
+    if execution.line_proposals!=0{model.set_line_proposals(execution.line_proposals);}
+    if !execution.lab_params.is_empty(){model.set_lab_params(std::mem::take(&mut execution.lab_params));}
+    if let Some((extra,share))=execution.extra_rounds{model.set_extra_rounds(extra,(f64::from(request.render.count)*share.clamp(0.0,1.0)).round()as usize);}
     if let Some(trials)=execution.redistribution_trials{model.set_redistribution_trials(trials).map_err(ApproximateError::internal)?;}
     if let Some(background)=background {model.seed_mixed(&Drawing{width:w,height:h,background,shapes:Vec::new()});}
     execution.mark("turbo-search-start");
     for step in 0..request.render.count {
         execution.check_cancelled()?;
         let shape=model.step_turbo(request.render.shape).clone();
+        if let Some((every,observe))=trace.as_mut(){if (step as usize+1)%*every==0{observe("search",step as usize+1,&model);}}
         if let Some(observer)=execution.progress.as_mut(){observer(ProgressInfo{refinement:None,preview_index:Some(step),preview:if step==0 || (step+1)%((request.render.count/40).max(32))==0{preview_svg(&model.snapshot())}else{None},step:step+1,total:request.render.count,score:model.score(),shape:svg::shape_element(&shape.geometry,shape.color)});}
     }
     execution.mark("turbo-search-end");execution.mark("turbo-refine-start");
+    #[cfg(feature="lab")]
+    if let Some((_,observe))=trace.as_mut(){
+        let count=request.render.count as usize;
+        model.refine_turbo_phases(|name,m|observe(name,count,m));
+        return Ok(model.drawing());
+    }
     let cancel=execution.cancel;
     if !model.refine_turbo_observed(||cancel.is_some_and(CancellationToken::is_cancelled),|done,total,index,shape|refinement_update(&mut execution,request.render.count,done,total,index,shape)){return Err(ApproximateError::Aborted);}
     execution.mark("turbo-refine-end");
     Ok(model.drawing())
+}
+
+/// Turbo's rectangle aspect cap and triangle minimum angle (degrees), chosen on
+/// the development images (docs/development/primeval-turbo.md, lines and curves).
+const RECT_ASPECT:u32=64;
+const TRIANGLE_ANGLE:f64=5.0;
+
+/// Working size: the longer side becomes `detail`, never enlarged.
+fn working_size(image:&DynamicImage,detail:u32)->(u32,u32){
+    let size=detail.min(image.width().max(image.height()));
+    let longest=u64::from(image.width().max(image.height()));
+    ((u64::from(image.width())*u64::from(size)/longest).max(2)as u32,(u64::from(image.height())*u64::from(size)/longest).max(2)as u32)
+}
+
+/// Lab: the premultiplied working target Turbo fits for `input` at `detail`.
+#[cfg(any(test,feature="lab"))]
+pub(crate) fn working_target(input:&[u8],detail:u32)->Result<(u32,u32,Vec<[f64;4]>),ApproximateError>{
+    let (w,h)=working_size(&decode_input(input)?,detail);
+    Ok((w,h,mixed::target(input,w,h)?))
 }
 
 #[cfg(test)]

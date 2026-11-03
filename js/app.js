@@ -191,12 +191,34 @@
     const mixed=$(prefix ? "retryShapeMixed" : "shapeMixed");
     mixed.closest(".shape-check").hidden=method!=="primeval";
     if(method!=="primeval"&&mixed.checked)$(prefix ? "retryShapeTriangle" : "shapeTriangle").checked=true;
-    const order = method === "primeval" ? ["Triangle", "Circle", "Rect", "Mixed"] : ["Circle", "Rect", "Triangle"];
+    const order = method === "primeval" ? ["Mixed", "Triangle", "Circle", "Rect"] : ["Circle", "Rect", "Triangle"];
     order.forEach((id, index) => {
       const label = $(prefix ? "retryShape" + id : "shape" + id).closest(".shape-check");
       if (container.children[index] !== label) container.insertBefore(label, container.children[index] || null);
     });
   }
+  /* Experimental Turbo options (research; any combination, all off by default).
+   * The worker maps each key to engine options. */
+  const EXPERIMENT_KEYS=["features","featureProposals","edges","extraRounds","spillReorder","merge","gaps","measured"];
+  function buildExperiments(prefix){
+    const list=$(prefix?"retryExperimentalList":"experimentalList");
+    list.innerHTML=EXPERIMENT_KEYS.map(key=>`<label class="check-label"><input type="checkbox" data-experiment="${key}"><span data-i18n="experimental.${key}">${t("experimental."+key)}</span></label>`).join("");
+    list.addEventListener("change",()=>syncExperimentCount(prefix));
+  }
+  function readExperiments(prefix){
+    return [...$(prefix?"retryExperimentalList":"experimentalList").querySelectorAll("input[data-experiment]:checked")].map(input=>input.dataset.experiment);
+  }
+  function setExperiments(prefix,keys){
+    const chosen=new Set(Array.isArray(keys)?keys:[]);
+    $(prefix?"retryExperimentalList":"experimentalList").querySelectorAll("input[data-experiment]").forEach(input=>{input.checked=chosen.has(input.dataset.experiment);});
+    syncExperimentCount(prefix);
+  }
+  function syncExperimentCount(prefix){
+    const badge=$(prefix?"retryExperimentalCount":"experimentalCount"),n=readExperiments(prefix).length;
+    badge.textContent=String(n);badge.hidden=n===0;
+  }
+  buildExperiments("");buildExperiments("retry");
+
   function syncShapeLabels() {
     const method=$("fitMethod").value, gaussian=method==="gaussian", primeval=method==="primeval";
     orderFitShapes("", method);
@@ -207,6 +229,7 @@
     $("shapeHint").hidden=method!=="legacy";
     $("mixedShapeHint").hidden=!(primeval&&$("shapeMixed").checked&&$("primevalSpeed").value!=="turbo");
     $("focusSettings").hidden=!(primeval&&$("primevalSpeed").value==="turbo");
+    $("experimentalSettings").hidden=$("focusSettings").hidden;
     syncFocusButtons();
     $("gaussianSettings").hidden=!gaussian;
     $("enhancedMode").disabled=method!=="legacy";
@@ -831,6 +854,7 @@
         cfg.primeval_seed=42;
         const focus=entry&&entry.focus||{enabled:true,automatic:true,areas:[]};
         cfg.focus={enabled:cfg.primeval_turbo&&$("focusDetail").checked&&focus.enabled!==false,automatic:focus.automatic,areas:focus.areas.map(area=>area.slice())};
+        cfg.primeval_experiments=cfg.primeval_turbo?readExperiments(""):[];
       }
       if(method==="gaussian"){
         cfg.gaussian_algorithm=$("gaussianAlgorithm").value;
@@ -1067,11 +1091,11 @@
       job.phase = "";
     }
 
-    let workerFile = job.config.mode === "outline" ? "js/worker-outline.js?v=structure-priority-6" :
-      job.config.fit_method === "primeval" ? "js/worker-primeval.js?v=structure-priority-6" :
+    let workerFile = job.config.mode === "outline" ? "js/worker-outline.js?v=structure-priority-7" :
+      job.config.fit_method === "primeval" ? "js/worker-primeval.js?v=structure-priority-7" :
       job.config.fit_method === "compression" ? "js/worker-compress.js?v=3" :
       (job.config.allowed_shapes || []).includes("blurred_circle") ?
-        "js/worker-gaussian.js?v=structure-priority-6" : "js/worker-fill.js?v=structure-priority-6";
+        "js/worker-gaussian.js?v=structure-priority-7" : "js/worker-fill.js?v=structure-priority-7";
     // Separate pooled instances by thread budget: a reused WASM pool cannot resize.
     if(job.config.fit_method==='primeval')workerFile+='&poolThreads='+job.config.primeval_threads;
     const worker = acquireWorker(workerFile);
@@ -1576,10 +1600,13 @@
     ctx.rect(-width / 2, -height / 2, width, height);
   }
 
+  // True while drawScene renders the clean "Fitted result" thumbnail.
+  let thumbTimer = 0, thumbRendering = false;
+
   function drawElement(element, index) {
     const center = imagePointToElementCenter(element);
-    const selected = !isBackgroundElement(element) && (R.selectedSet.has(index) || index === R.selected);
-    const highlighted = !isBackgroundElement(element) && !selected && index === R.hovered;
+    const selected = !thumbRendering && !isBackgroundElement(element) && (R.selectedSet.has(index) || index === R.selected);
+    const highlighted = !thumbRendering && !isBackgroundElement(element) && !selected && index === R.hovered;
     const rawAlpha = Number(element.alpha);
     const fillAlpha = Number.isFinite(rawAlpha) ? Math.max(0, rawAlpha) : 0.5;
 
@@ -1589,14 +1616,14 @@
     ctx.beginPath();
     drawElementPath(element);
 
-    if ($("showFill").checked) {
+    if (thumbRendering || $("showFill").checked) {
       if (selected) ctx.fillStyle = "rgba(37, 99, 235, 0.42)";
       else if (highlighted) ctx.fillStyle = "rgba(59, 130, 246, 0.28)";
       else ctx.fillStyle = cssColor(element.color, fillAlpha);
       if (Gaussian.isGaussian(element) && !selected && !highlighted) Gaussian.draw(ctx, element, R.ppu);
       else ctx.fill();
     }
-    if ($("showBorder").checked) {
+    if (!thumbRendering && $("showBorder").checked) {
       if (selected) { ctx.strokeStyle = "#1d4ed8"; ctx.lineWidth = 2 / R.scale; }
       else if (highlighted) { ctx.strokeStyle = "#3b82f6"; ctx.lineWidth = 1.5 / R.scale; }
       else { ctx.strokeStyle = cssColor(element.color, 0.95); ctx.lineWidth = 1 / R.scale; }
@@ -1606,7 +1633,7 @@
   }
 
   function drawOriginCross() {
-    if (!$("showOrigin").checked) return;
+    if (thumbRendering || !$("showOrigin").checked) return;
     const arm = 12 / R.scale;
     ctx.save();
     ctx.strokeStyle = "#ef4444";
@@ -1655,8 +1682,8 @@
     const assets = ensureJobAssets(R.job);
     // The Original view swaps the on-screen canvas only; exports always draw the fitted shapes.
     const original = targetCtx === screenCtx && R.view === "original";
-    if ((original || $("showImage").checked) && assets.base) ctx.drawImage(assets.base, 0, 0, imageWidth, imageHeight);
-    if (!original && $("showMask").checked && assets.mask) {
+    if ((original || (!thumbRendering && $("showImage").checked)) && assets.base) ctx.drawImage(assets.base, 0, 0, imageWidth, imageHeight);
+    if (!original && !thumbRendering && $("showMask").checked && assets.mask) {
       ctx.save();
       ctx.globalAlpha = 0.22;
       ctx.drawImage(assets.mask, 0, 0, imageWidth, imageHeight);
@@ -1669,7 +1696,7 @@
     // painter order, and an earlier Client sibling renders first), so with
     // this clip the preview composites exactly like the exported file.
     const clientMaskEl = $("showClientMask");
-    const clientMask = !original && clientMaskEl && clientMaskEl.checked ? currentClientMaskRect() : null;
+    const clientMask = !original && !thumbRendering && clientMaskEl && clientMaskEl.checked ? currentClientMaskRect() : null;
     if (clientMask) {
       ctx.save();
       ctx.beginPath();
@@ -1755,6 +1782,7 @@
 
     const view = currentView();
     if ($("zoomLabel")) $("zoomLabel").textContent = Math.round(view.zoom * 100) + "%";
+    positionLayerPill();
   }
 
   function canvasToImagePoint(event) {
@@ -1941,7 +1969,7 @@
     syncResultView();
     if (mode === "fill") {
       const assets = ensureJobAssets(R.job);
-      if (assets.preview) $("previewImg").src = assets.preview.toDataURL("image/png");
+      updateFittedThumb();
       if (assets.base) $("originalThumb").src = assets.base.toDataURL("image/png");
       $("nativePreview").hidden = !assets.native;
       $("differencePreview").hidden = !assets.difference;
@@ -1966,6 +1994,7 @@
       $("retryPrimevalSpeed").value=cfg.primeval_turbo?"turbo":"fast";
       $("retryPrimevalResolution").value=cfg.primeval_resolution || 512;
       $("retryFocusDetail").checked=cfg.focus?cfg.focus.enabled!==false||!cfg.primeval_turbo:true;
+      setExperiments("retry",cfg.primeval_experiments);
       $("retryGaussianAlgorithm").value=cfg.gaussian_algorithm || "gaussianimage";
       $("retryGaussianIterations").value=cfg.gaussian_iterations || 600;
       $("retryGaussianResolution").value=cfg.gaussian_resolution || 512;
@@ -1995,6 +2024,7 @@
     $("retryPrimevalSettings").hidden=method!=="primeval";
     $("retryMixedShapeHint").hidden=!(method==="primeval"&&$("retryShapeMixed").checked&&$("retryPrimevalSpeed").value!=="turbo");
     $("retryFocusSettings").hidden=!(method==="primeval"&&$("retryPrimevalSpeed").value==="turbo");
+    $("retryExperimentalSettings").hidden=$("retryFocusSettings").hidden;
     retryShapeInputs.forEach(input=>input.closest(".shape-check").classList.toggle("active",input.checked));
   }
   $("retryFitMethod").addEventListener("change",syncRetryShapeLabels);
@@ -2015,6 +2045,7 @@
       primeval_turbo:method==="primeval"&&$("retryPrimevalSpeed").value==="turbo",
       primeval_speed:$("retryPrimevalSpeed").value==="turbo"?"fast":$("retryPrimevalSpeed").value,
       primeval_resolution:Number($("retryPrimevalResolution").value)||512,primeval_seed:42,
+      primeval_experiments:turbo?readExperiments("retry"):[],
       gaussian_algorithm:$("retryGaussianAlgorithm").value,
       gaussian_iterations:Math.max(1,Math.round(Number($("retryGaussianIterations").value)||600)),
       gaussian_resolution:Number($("retryGaussianResolution").value)||512,
@@ -2225,6 +2256,7 @@
   });
 
   function endPointer(event) {
+    if (R && (gizmoDrag?.pushed || elementDrag?.pushed)) scheduleFittedThumb(); // a drag changed geometry
     if (pointers.has(event.pointerId)) pointers.delete(event.pointerId);
     if (pointers.size < 2) pinchStart = null;
     if (pointers.size === 0) canvas.classList.remove("dragging");
@@ -2351,6 +2383,26 @@
 
   /* Undo/redo are per-job element-array snapshots (elements are small plain
    * objects; a 400-primitive job snapshots at ~100 KB, stack capped at 30). */
+  /* The "Fitted result" thumbnail follows edits: an unedited result shows its
+   * render, an edited one a clean drawing of the current shapes (no selection,
+   * origin, mask or underlay), refreshed shortly after each change. */
+  function scheduleFittedThumb() {
+    clearTimeout(thumbTimer);
+    thumbTimer = setTimeout(updateFittedThumb, 250);
+  }
+  function updateFittedThumb() {
+    if (!R || $("previewCompare").hidden) return;
+    const job = R.job, assets = ensureJobAssets(job);
+    const edited = job.result.primeval_png ? job.primevalEdited : Boolean(job.editUndo && job.editUndo.length);
+    if (!edited) { if (assets.preview) $("previewImg").src = assets.preview.toDataURL("image/png"); return; }
+    const { width, height } = R.data.image_size, scale = Math.min(1, 320 / Math.max(width, height));
+    const thumb = document.createElement("canvas");
+    thumb.width = Math.max(1, Math.round(width * scale)); thumb.height = Math.max(1, Math.round(height * scale));
+    thumbRendering = true;
+    try { drawScene(thumb.getContext("2d"), scale, 0, 0); } finally { thumbRendering = false; }
+    $("previewImg").src = thumb.toDataURL("image/png");
+  }
+
   function pushUndoSnapshot(json) {
     const job = R.job;
     if(job.result.primeval_png)job.primevalEdited=true;
@@ -2359,6 +2411,7 @@
     if (job.editUndo.length > 30) job.editUndo.shift();
     job.editRedo.length = 0;
     updateEditButtons();
+    scheduleFittedThumb();
   }
 
   function restoreElements(json) {
@@ -2372,6 +2425,7 @@
     refreshSelectionUI();
     updateStats();
     renderCanvas();
+    scheduleFittedThumb();
   }
 
   function doUndo() {
@@ -2405,7 +2459,109 @@
     renderCanvas();
   }
 
+  // Radius around the element centre that contains the whole shape (image px).
+  function elementReach(element) {
+    const size = element.size || {};
+    const w = size.width || (size.rx || 0) * 2, h = size.height || (size.ry || 0) * 2;
+    return Math.hypot(w, h) * R.ppu;
+  }
+
+  // Points inside the shape on a 24x24 grid over its reach (its centre if tiny).
+  function elementSamples(element) {
+    const c = imagePointToElementCenter(element), r = elementReach(element), points = [];
+    for (let gy = 0; gy < 24; gy++) for (let gx = 0; gx < 24; gx++) {
+      const x = c.x - r + (gx + 0.5) * r / 12, y = c.y - r + (gy + 0.5) * r / 12;
+      if (pointInElement(element, x, y)) points.push({ x, y });
+    }
+    return points.length ? points : [c];
+  }
+
+  // Whether two shapes overlap: points inside either one fall inside the other.
+  function elementsOverlap(a, b, samples) {
+    const ca = imagePointToElementCenter(a), cb = imagePointToElementCenter(b);
+    if (Math.hypot(ca.x - cb.x, ca.y - cb.y) > elementReach(a) + elementReach(b)) return false;
+    const of = (e) => { if (!samples.has(e)) samples.set(e, elementSamples(e)); return samples.get(e); };
+    return of(a).some((q) => pointInElement(b, q.x, q.y)) || of(b).some((q) => pointInElement(a, q.x, q.y));
+  }
+
+  // The nearest unselected shape above (dir 1) or below (dir -1) that overlaps
+  // `element` in `elements`, or null; stepping past it is the next visible change.
+  function nextOverlap(elements, element, dir, chosen, samples) {
+    for (let j = elements.indexOf(element) + dir; j >= 0 && j < elements.length; j += dir) {
+      const other = elements[j];
+      if (chosen.has(other) || isBackgroundElement(other)) continue;
+      if (elementsOverlap(element, other, samples)) return other;
+    }
+    return null;
+  }
+
+  /* Layer steps: each selected shape moves past the next shape that overlaps it,
+   * up (1) or down (-1), so every step changes the picture; shapes in between
+   * that do not touch it keep their order. One undo entry. */
+  function stepSelection(dir) {
+    if (!R || !R.selectedSet.size || R.view === "original") return;
+    const elements = R.data.elements.slice(), samples = new Map();
+    const order = [...R.selectedSet].sort((a, b) => (b - a) * dir);
+    const chosen = new Set(order.map((i) => elements[i])), primary = R.selected !== null ? elements[R.selected] : null;
+    let moved = false;
+    for (const element of order.map((i) => elements[i])) {
+      const target = nextOverlap(elements, element, dir, chosen, samples);
+      if (!target) continue;
+      elements.splice(elements.indexOf(element), 1);
+      elements.splice(elements.indexOf(target) + (dir > 0 ? 1 : 0), 0, element);
+      moved = true;
+    }
+    if (!moved) return;
+    pushUndoSnapshot();
+    R.data.elements = elements;
+    R.selectedSet = new Set([...chosen].map((element) => elements.indexOf(element)));
+    R.selected = primary ? elements.indexOf(primary) : null;
+    R.hovered = null;
+    refreshTemplateIndexState();
+    refreshSelectionUI();
+    updateStats();
+    renderCanvas();
+  }
+
+  // Which steps can change the picture, refreshed when the selection or shapes change.
+  function syncLayerSteps() {
+    if (!R) return;
+    const steps = { up: false, down: false, position: "" };
+    if (R.selectedSet.size) {
+      const elements = R.data.elements, samples = new Map(), chosen = new Set([...R.selectedSet].map((i) => elements[i]));
+      steps.up = [...chosen].some((e) => nextOverlap(elements, e, 1, chosen, samples));
+      steps.down = [...chosen].some((e) => nextOverlap(elements, e, -1, chosen, samples));
+      const total = elements.filter((e) => !isBackgroundElement(e)).length;
+      if (R.selected !== null) steps.position = `${displayElementIndex(R.data, R.selected) + 1}/${total}`;
+    }
+    R.layerSteps = steps;
+    positionLayerPill();
+  }
+
+  /* Floating layer controls just below the primary selection (above it when
+   * there is no room), clamped to the canvas; hidden without a selection. */
+  function positionLayerPill() {
+    const pill = $("layerPill"), element = R && R.selected !== null ? R.data.elements[R.selected] : null;
+    const show = Boolean(element && R.view !== "original" && R.layerSteps);
+    pill.hidden = !show;
+    if (!show) return;
+    $("btnLayerUp").disabled = !R.layerSteps.up;
+    $("btnLayerDown").disabled = !R.layerSteps.down;
+    $("btnLayerUp").title = `${t("result.edit.layerUp")} (Ctrl+])`;
+    $("btnLayerDown").title = `${t("result.edit.layerDown")} (Ctrl+[)`;
+    $("layerPos").textContent = R.layerSteps.position;
+    const { s, offX, offY } = viewTransform(), points = elementSamples(element), wrap = $("canvasWrap");
+    const xs = points.map((q) => q.x), ys = points.map((q) => q.y);
+    const w = pill.offsetWidth, h = pill.offsetHeight, gap = 22;
+    let x = (Math.min(...xs) + Math.max(...xs)) / 2 * s + offX - w / 2, y = Math.max(...ys) * s + offY + gap;
+    if (y + h > wrap.clientHeight - 4) y = Math.min(...ys) * s + offY - gap - h;
+    pill.style.left = Math.round(Math.min(Math.max(x, 4), wrap.clientWidth - w - 4)) + "px";
+    pill.style.top = Math.round(Math.min(Math.max(y, 4), wrap.clientHeight - h - 4)) + "px";
+  }
+
   $("btnUndo").addEventListener("click", doUndo);
+  $("btnLayerUp").addEventListener("click", () => stepSelection(1));
+  $("btnLayerDown").addEventListener("click", () => stepSelection(-1));
   $("btnRedo").addEventListener("click", doRedo);
   $("btnDeleteSel").addEventListener("click", deleteSelection);
 
@@ -2418,6 +2574,7 @@
     }
     syncEditPanel();
     updateEditButtons();
+    syncLayerSteps();
   }
 
   /* ── edit panel (properties of the primary selection) ── */
@@ -2679,6 +2836,8 @@
     if (mod && (event.key === "y" || event.key === "Y" || (event.shiftKey && (event.key === "z" || event.key === "Z")))) {
       event.preventDefault(); doRedo(); return;
     }
+    if (mod && (event.key === "]" || event.code === "BracketRight")) { event.preventDefault(); stepSelection(1); return; }
+    if (mod && (event.key === "[" || event.code === "BracketLeft")) { event.preventDefault(); stepSelection(-1); return; }
     if (event.key === "Delete" || event.key === "Backspace") {
       event.preventDefault();
       deleteSelection();

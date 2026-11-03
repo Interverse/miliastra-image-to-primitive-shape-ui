@@ -43,3 +43,11 @@ required-features = ["bench"]
 [[example]]
 name = "engine"
 required-features = ["lab"]
+
+[[example]]
+name = "turbo_lab"
+required-features = ["lab"]
+
+[[example]]
+name = "turbo_trace"
+required-features = ["lab"]

@@ -81,6 +81,24 @@ pub fn approximate(
         let structural=if structural.is_undefined(){false}else{structural.as_bool().filter(|v|!*v||proposal_only).ok_or_else(||TypeError::new("Invalid importance structuralProposals"))?};
         Some((width as usize,height as usize,values,strength,additive,refine,proposal_only,structural))
     };
+    // Experimental Turbo research options (all off unless given): a line proposal /
+    // post-process variant, extra search rounds on every step, and named parameters
+    // as "name=value,name=value".
+    let experimental=Reflect::get(&render,&"experimental".into())?;
+    let (variant,extra,lab)=if experimental.is_undefined(){(0,None,Vec::new())}else{
+        let invalid=||->JsValue{TypeError::new("Invalid experimental options").into()};
+        let field=|key:&str|Reflect::get(&experimental,&key.into());
+        let variant=field("lineVariant")?;let variant=if variant.is_undefined(){0}else{variant.as_f64().filter(|v|v.fract()==0.0&&*v>=0.0&&*v<=f64::from(u32::MAX)).ok_or_else(invalid)? as u32};
+        let extra=field("extraRounds")?;let extra=if extra.is_undefined(){None}else{Some((extra.as_f64().filter(|v|v.fract()==0.0&&*v>=1.0&&*v<=64.0).ok_or_else(invalid)? as usize,1.0))};
+        let params=field("labParams")?;let mut lab=Vec::new();
+        if !params.is_undefined(){
+            for pair in params.as_string().ok_or_else(invalid)?.split(',').filter(|p|!p.is_empty()){
+                let (name,value)=pair.split_once('=').ok_or_else(invalid)?;
+                lab.push((name.trim().to_string(),value.trim().parse::<f64>().ok().filter(|v|v.is_finite()).ok_or_else(invalid)?));
+            }
+        }
+        (variant,extra,lab)
+    };
     let render = read_render(&render)?;
     let request = normalize_request(input, &output, render).map_err(|error| js_error(&error))?;
 
@@ -108,7 +126,7 @@ pub fn approximate(
     };
     let timings=Array::new();let started=js_sys::Date::now();
     let mut phase=|name:&'static str|{let entry=Object::new();set(&entry,"phase",name.into());set(&entry,"elapsed_ms",(js_sys::Date::now()-started).into());timings.push(&entry);};
-    let execution = Execution::new().cancellation(&token).phases(&mut phase).fast(fast).fastest(fastest).turbo(turbo).measured_redistribution(measured).redistribution_trials(trials).rect_aspect(aspect).live_progress(true);
+    let execution = Execution::new().cancellation(&token).phases(&mut phase).fast(fast).fastest(fastest).turbo(turbo).measured_redistribution(measured).redistribution_trials(trials).rect_aspect(aspect).line_proposals(variant).extra_rounds(extra).lab_params(lab).live_progress(true);
     let execution=if let Some((w,h,v,s,a,b,p,structural))=attention{execution.attention_terms(w,h,v,s,a,b).attention_proposals_only(p).structural_proposals_only(structural)}else{execution};
     let execution = if on_progress.is_some() {
         execution.progress(&mut on_step)

@@ -28,6 +28,30 @@ pub fn working_target(
     crate::working_target(input, render, || Ok(()))
 }
 
+/// The Turbo fit with `observe` called every `every` search steps and after each
+/// refinement phase (phase name, steps so far, model).
+///
+/// # Errors
+///
+/// The errors of the Turbo fit.
+pub fn turbo_traced(
+    request: crate::ApproximateRequest,
+    execution: crate::Execution<'_>,
+    every: usize,
+    observe: &mut dyn FnMut(&str, usize, &primeval_core::rgba::RgbaModel),
+) -> Result<Drawing, ApproximateError> {
+    crate::turbo::fit_traced(request, execution.turbo(true), Some((every.max(1), observe)))
+}
+
+/// Turbo's premultiplied working target and size for `input` at `detail`.
+///
+/// # Errors
+///
+/// Decoding errors.
+pub fn turbo_target(input: &[u8], detail: u32) -> Result<(u32, u32, Vec<[f64; 4]>), ApproximateError> {
+    crate::turbo::working_target(input, detail)
+}
+
 /// The target [`working_target`] returns, as an image, and the resolved
 /// background, from the same steps. This image convenience helper gives
 /// the same dimensions and pixels as [`primeval_core::Buffer::pixels`] of

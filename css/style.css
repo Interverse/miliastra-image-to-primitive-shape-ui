@@ -725,6 +725,13 @@ body {
 
 .focus-settings { display: grid; gap: 4px; }
 .focus-settings[hidden] { display: none; }
+.experimental-settings { border-top: 1px solid var(--md-outline-variant); padding-top: 4px; }
+.experimental-settings[hidden] { display: none; }
+.experimental-settings summary { cursor: pointer; padding: 6px 0; display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--md-on-surface); }
+.experimental-settings summary::-webkit-details-marker { display: none; }
+.experimental-settings summary::before { content: "▸"; width: 10px; color: var(--md-on-surface-variant); }
+.experimental-settings[open] summary::before { content: "▾"; }
+.experimental-list { display: grid; gap: 6px; padding-bottom: 4px; }
 /* One-click switch for Focus detail, next to the images it affects. */
 /* Settings row: text on the left, switch on the right, centered vertically. */
 .focus-switch {
@@ -1331,6 +1338,33 @@ input[type="range"]::-webkit-slider-thumb {
   cursor: grab;
 }
 #mainCanvas.dragging { cursor: grabbing; }
+.layer-pill {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: var(--md-surface-container-high);
+  color: var(--md-on-surface);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+.layer-pill[hidden] { display: none; }
+.layer-pill-btn {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.layer-pill-btn:hover:not(:disabled) { background: var(--md-surface-container-highest); }
+.layer-pill-btn:disabled { opacity: 0.35; cursor: default; }
+.layer-pill-pos { padding: 0 8px 0 4px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--md-on-surface-variant); }
 
 .zoom-label {
   font-family: var(--font-mono);

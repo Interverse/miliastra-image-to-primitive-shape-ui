@@ -19,11 +19,22 @@ Ctrl/Shift-click still toggles the topmost primitive. The canvas is positioned
 out of flow and sized from its wrapper; otherwise narrow layouts grew it by the
 wrapper padding on every render.
 
+A floating pill under the selected primitive (above it near the canvas edge)
+shows its layer (for example 3/40) with Up and Down buttons; Ctrl+] and Ctrl+[
+do the same. A step moves each selected primitive past the next primitive that
+overlaps it (`stepSelection` in `js/app.js`), so every step changes the picture;
+primitives in between that do not touch it keep their order. A button is disabled
+when no overlapping primitive is left in that direction. Overlap is tested on a
+24x24 grid of points inside each shape. Each step is one undo entry.
+
 The "Fitted result" and "Original" thumbnails under the canvas are a toggle that
 switches the main canvas, keeping zoom and pan for comparison. The active view is
 highlighted, and the canvas is outlined while the original is shown. The Original
 view is screen-only: nothing is pickable, gizmos are hidden, and exports always
-draw the fitted result.
+draw the fitted result. The "Fitted result" thumbnail shows the native render
+until the shapes are edited, then a clean vector drawing of the current shapes (no
+selection, origin, mask or underlay), refreshed 250 ms after each edit, drag or
+undo; undoing back to the original shows the native render again.
 
 The full selection-box edges are draggable, not just their midpoint dots.
 Left/right resize only local X; top/bottom resize only local Y, anchored at the

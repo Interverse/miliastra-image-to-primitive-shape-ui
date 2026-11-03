@@ -7,6 +7,7 @@ visible defect; details there. After a transparent-hole fix, a second fresh held
 (22 images) was consistent with no defects but gained 2.6–4.4%, below the 5% target. A strengthened setting (additive 3, attention-scaled opacity error) then gained
 4.1–5.8% on a fourth fresh set (photos 5–11% by category; flat illustrations shift
 detail toward the map's priorities), blind review 6–0.
+
 ## Shipped: Focus detail (owner decision, 2026-11-01)
 
 The strengthened setting is integrated as **Focus detail**, a Primeval Turbo
@@ -211,17 +212,20 @@ Baseline fit times (4 parallel jobs × 4 threads, so contended): median 24 s
 
 ## Remaining work
 
-1. Decide with the owner whether the gates stay as proposed. Options: a
-   noise-aware per-image global gate (more seeds, or change beyond two standard
-   errors), or a region target for 1000 shapes only. Tuning alone does not
-   close the gap under the current gates.
-2. Otherwise change the mechanism rather than the weights (for example explicit
-   per-region shape budgets), tune on the 25-image set, and only then run
-   `importance-heldout-2.json` once.
-3. If promoted: page-owned cancellable inference worker, bounded LRU cache,
-   localized opt-in UI (15 languages), result metadata, packaged ONNX/ORT assets
-   with licenses and Pages fetch checks. None of this exists yet.
-4. Test additional browsers/devices for inference time and memory.
+Shipped items (worker, cache, 15-language UI, result metadata, packaged model and
+runtime with licences, Pages checks) are done; see above.
+
+1. Test inference time and memory on other browsers and devices (Safari, Firefox,
+   phones); only this desktop Chromium has been timed.
+2. Transparent illustrations with Focus detail can still leave paint over a small
+   transparent gap (Ferris, some seeds); see the lines and curves section of
+   [Turbo](primeval-turbo.md) for the gap cleanup work.
+3. Optional: a noise-aware per-image global gate (more seeds) if further
+   strengthening is attempted; tuning alone did not close the earlier gap.
+4. Small marks (a mouth stroke at 400 shapes) can still be missed without a
+   manual focus area. Automatic small-feature weighting raised feature metrics
+   but lost a fresh blinded display review; see "Low-count detail program" in
+   [Turbo](primeval-turbo.md).
 
 ## Reproduction
 

@@ -1,5 +1,54 @@
 //! Research constraint: one upright triangle sprite, local X/Y scale and rotation.
 //! Project every proposal and gradient update, rather than post-distorting a fit.
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// tan 15.5 degrees: base angles stay above it.
+const TANGENT: f64 = 0.2773245440598384;
+// Process-wide like the rectangle aspect cap: tan(min angle) and cot(min angle / 2),
+// the apex limit. The default cotangent equals (1 + sqrt(1 + t^2)) / t.
+static LIMITS: [AtomicU64; 2] = [AtomicU64::new(TANGENT.to_bits()), AtomicU64::new(0)];
+
+/// tan(min angle) and, while a TriangleAngle is held, cot(min angle / 2).
+#[inline(always)]
+fn limits() -> (f64, Option<f64>) {
+    let held = LIMITS[1].load(Ordering::Relaxed);
+    (f64::from_bits(LIMITS[0].load(Ordering::Relaxed)), (held != 0).then(|| f64::from_bits(held)))
+}
+
+/// While a TriangleAngle is held, the tangent validity checks use: just below
+/// its projected limit, so projected triangles stay valid.
+pub(crate) fn held_tangent() -> Option<f64> {
+    (LIMITS[1].load(Ordering::Relaxed) != 0).then(|| f64::from_bits(LIMITS[0].load(Ordering::Relaxed)) * 0.999)
+}
+
+/// Lowers the triangle minimum interior angle (Turbo). Overlapping holders share
+/// the value; the default returns when the last one drops.
+pub struct TriangleAngle(());
+static HOLDERS: std::sync::Mutex<usize> = std::sync::Mutex::new(0);
+impl TriangleAngle {
+    /// Sets the minimum angle in degrees (at most 15.5, at least 1).
+    #[must_use]
+    pub fn set(degrees: f64) -> Self {
+        let degrees = degrees.clamp(1.0, 15.5);
+        let tangent = degrees.to_radians().tan();
+        let cotangent = 1.0 / (degrees / 2.0).to_radians().tan();
+        let mut holders = HOLDERS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        *holders += 1;
+        LIMITS[0].store(tangent.to_bits(), Ordering::Relaxed);
+        LIMITS[1].store(cotangent.to_bits(), Ordering::Relaxed);
+        Self(())
+    }
+}
+impl Drop for TriangleAngle {
+    fn drop(&mut self) {
+        let mut holders = HOLDERS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        *holders -= 1;
+        if *holders == 0 {
+            LIMITS[0].store(TANGENT.to_bits(), Ordering::Relaxed);
+            LIMITS[1].store(0, Ordering::Relaxed);
+        }
+    }
+}
 #[inline(always)]
 pub(crate) fn project(v: &mut [f64; 6]) -> bool {
     let original = *v;
@@ -34,10 +83,11 @@ pub(crate) fn project(v: &mut [f64; 6]) -> bool {
         let (mut nx, mut ny) = (-uy, ux);
         if bx*nx+by*ny < 0.0 { nx = -nx; ny = -ny; }
         let half = (ax*ux+ay*uy).abs().max(0.5);
-        // Preserve Primeval's >15 degree minimum interior angle.
-        let tangent = 0.2773245440598384_f64; // tan 15.5 degrees
-        let height = (bx*nx+by*ny).abs().clamp(
-            half*tangent, half*(1.0+(1.0+tangent*tangent).sqrt())/tangent);
+        // Minimum interior angle: Primeval's 15.5 degrees unless a TriangleAngle is held.
+        let (tangent, cotangent) = limits();
+        // The default keeps the original expression, so default output is unchanged.
+        let high = match cotangent { Some(c) => half*c, None => half*(1.0+(1.0+tangent*tangent).sqrt())/tangent };
+        let height = (bx*nx+by*ny).abs().clamp(half*tangent, high);
             (ux,uy,nx,ny,half,height)
         };
         let mut candidate = [0.0; 6];
@@ -79,8 +129,8 @@ fn frames_simd(v:&[f64;6])->[(f64,f64,f64,f64,f64,f64);3] {
         let flip=f64x2_lt(f64x2_add(f64x2_mul(ax,ux),f64x2_mul(ay,uy)),f64x2_splat(0.0));ux=v128_bitselect(f64x2_neg(ux),ux,flip);uy=v128_bitselect(f64x2_neg(uy),uy,flip);
         let mut nx=f64x2_neg(uy);let mut ny=ux;let flip=f64x2_lt(f64x2_add(f64x2_mul(bx,nx),f64x2_mul(by,ny)),f64x2_splat(0.0));nx=v128_bitselect(f64x2_neg(nx),nx,flip);ny=v128_bitselect(f64x2_neg(ny),ny,flip);
         let half=f64x2_max(f64x2_abs(f64x2_add(f64x2_mul(ax,ux),f64x2_mul(ay,uy))),f64x2_splat(0.5));
-        let tangent=0.2773245440598384_f64;
-        let high=f64x2_div(f64x2_mul(half,f64x2_splat(1.0+(1.0+tangent*tangent).sqrt())),f64x2_splat(tangent));
+        let (tangent,cotangent)=limits();
+        let high=match cotangent{Some(c)=>f64x2_mul(half,f64x2_splat(c)),None=>f64x2_div(f64x2_mul(half,f64x2_splat(1.0+(1.0+tangent*tangent).sqrt())),f64x2_splat(tangent))};
         let height=f64x2_min(f64x2_max(f64x2_abs(f64x2_add(f64x2_mul(bx,nx),f64x2_mul(by,ny))),f64x2_mul(half,f64x2_splat(tangent))),high);
         out[start]=(f64x2_extract_lane::<0>(ux),f64x2_extract_lane::<0>(uy),f64x2_extract_lane::<0>(nx),f64x2_extract_lane::<0>(ny),f64x2_extract_lane::<0>(half),f64x2_extract_lane::<0>(height));
         if start==0 {out[1]=(f64x2_extract_lane::<1>(ux),f64x2_extract_lane::<1>(uy),f64x2_extract_lane::<1>(nx),f64x2_extract_lane::<1>(ny),f64x2_extract_lane::<1>(half),f64x2_extract_lane::<1>(height));}
@@ -90,7 +140,32 @@ fn frames_simd(v:&[f64;6])->[(f64,f64,f64,f64,f64,f64);3] {
 
 #[cfg(test)]
 mod tests {
-    use super::project;
+    use super::{project, TriangleAngle};
+    #[test]
+    fn held_angle_allows_thin_isosceles_triangles_and_restores_the_default() {
+        // A sliver with a 6 degree apex: the default projection keeps every angle
+        // at 15.5 degrees or more; a held 5 degree minimum keeps the sliver.
+        let sliver = [0.0, -50.0, -2.6, 0.0, 2.6, 0.0];
+        let smallest = |v: &[f64; 6]| (0..3).map(|i| {
+            let (a, b, c) = (i, (i + 1) % 3, (i + 2) % 3);
+            let (ux, uy, wx, wy) = (v[2*b]-v[2*a], v[2*b+1]-v[2*a+1], v[2*c]-v[2*a], v[2*c+1]-v[2*a+1]);
+            ((ux*wx+uy*wy) / (ux.hypot(uy) * wx.hypot(wy))).acos().to_degrees()
+        }).fold(180.0, f64::min);
+        let mut default = sliver;
+        project(&mut default);
+        assert!(smallest(&default) > 15.4, "{default:?}");
+        {
+            let _held = TriangleAngle::set(5.0);
+            assert!(crate::asset_triangle::held_tangent().is_some());
+            let mut relaxed = sliver;
+            project(&mut relaxed);
+            assert!((smallest(&relaxed) - 5.95).abs() < 0.1, "{relaxed:?}");
+        }
+        assert!(crate::asset_triangle::held_tangent().is_none());
+        let mut again = sliver;
+        project(&mut again);
+        assert_eq!(again, default);
+    }
     #[test]
     fn projected_shapes_are_isosceles_and_idempotent() {
         for n in 0..1000 {

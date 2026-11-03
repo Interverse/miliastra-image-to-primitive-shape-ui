@@ -379,6 +379,10 @@ pub struct Execution<'a> {
     measured_redistribution: bool,
     redistribution_trials: Option<usize>,
     rect_aspect: Option<u32>,
+    line_proposals: u32,
+    triangle_angle: Option<f64>,
+    extra_rounds: Option<(usize,f64)>,
+    lab_params: Vec<(String,f64)>,
 }
 
 /// How an installed attention map is used by Turbo.
@@ -413,6 +417,14 @@ impl<'a> Execution<'a> {
     pub fn redistribution_trials(mut self,trials:Option<usize>)->Self{self.redistribution_trials=trials;self}
     /// Experimental: Turbo rectangle aspect cap above the default 8; `None` keeps it.
     pub fn rect_aspect(mut self,cap:Option<u32>)->Self{self.rect_aspect=cap;self}
+    /// Experimental: Turbo line and curve proposal variant; 0 keeps the default search.
+    pub fn line_proposals(mut self,variant:u32)->Self{self.line_proposals=variant;self}
+    /// Experimental: Turbo triangle minimum interior angle below 15.5 degrees; `None` keeps it.
+    pub fn triangle_angle(mut self,degrees:Option<f64>)->Self{self.triangle_angle=degrees;self}
+    /// Experimental: `extra` more Turbo search rounds per step for the first `share` (0 to 1) of steps.
+    pub fn extra_rounds(mut self,schedule:Option<(usize,f64)>)->Self{self.extra_rounds=schedule;self}
+    /// Experimental named Turbo parameters for research runs.
+    pub fn lab_params(mut self,params:Vec<(String,f64)>)->Self{self.lab_params=params;self}
     /// Include browser-only refinement and layer updates in progress.
     pub fn live_progress(mut self,enabled:bool)->Self{self.live_progress=enabled;self}
     /// Observe stage boundaries for performance diagnostics.
@@ -626,7 +638,7 @@ fn approximate_decoded(
             }
             let live=execution.live_progress;
             let mut reference_progress=|mut info:ProgressInfo|{if live{info.preview=None;info.preview_index=None;info.shape.clear();}if let Some(observer)=execution.progress.as_mut(){observer(info);}};
-            let drawing=approximate_decoded(ApproximateRequest{input:Vec::new(),output:OutputFormat::Png,render:options},Execution{attention:None,progress:Some(&mut reference_progress),cancel:execution.cancel,phase:None,fast:execution.fast,fastest:execution.fastest,turbo:false,live_progress:live,measured_redistribution:false,redistribution_trials:None,rect_aspect:None},Some(DynamicImage::ImageRgb8(rgb)))?;
+            let drawing=approximate_decoded(ApproximateRequest{input:Vec::new(),output:OutputFormat::Png,render:options},Execution{attention:None,progress:Some(&mut reference_progress),cancel:execution.cancel,phase:None,fast:execution.fast,fastest:execution.fastest,turbo:false,live_progress:live,measured_redistribution:false,redistribution_trials:None,rect_aspect:None,line_proposals:0,triangle_angle:None,extra_rounds:None,lab_params:Vec::new()},Some(DynamicImage::ImageRgb8(rgb)))?;
             execution.mark("reference-end");Some(drawing)
         }else{None};
         // Resample premultiplied channels: invisible RGB cannot bleed into edges.

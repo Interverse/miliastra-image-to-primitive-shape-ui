@@ -11,6 +11,8 @@ use std::sync::{OnceLock,Mutex};
 
 mod turbo;
 mod structure;
+mod lines;
+mod features;
 
 const N: usize = 11;
 const ALPHA_WEIGHT: f64 = 4.0;
@@ -173,7 +175,7 @@ pub struct RgbaModel {
     width:u32, height:u32, target:Vec<[f64;4]>, current:Vec<[f64;4]>,
     prefix:Vec<Sums>, error_prefix:Vec<f64>, proposal:Buffer, canvas:Buffer, grid:ErrorGrid,
     background:Color,
-    optimized:bool, turbo:bool, clear_alpha_weight:f64, detail_weights:Vec<f64>, refine_weights:Vec<f64>, alpha_gains:Vec<f64>, refine_alpha_gains:Vec<f64>, proposal_weights:Vec<f64>, measured_redistribution:bool, redistribution_trials:usize,
+    optimized:bool, turbo:bool, clear_alpha_weight:f64, detail_weights:Vec<f64>, refine_weights:Vec<f64>, alpha_gains:Vec<f64>, refine_alpha_gains:Vec<f64>, proposal_weights:Vec<f64>, measured_redistribution:bool, redistribution_trials:usize, line_variant:u32, lines:Option<Vec<lines::Primitive>>, extra_rounds:(usize,usize), faint_holes:Vec<bool>, lab:Vec<(String,f64)>, features_marked:bool, feature_regions:Vec<Vec<usize>>, attention:Vec<f64>,
     step_workers:Vec<WorkerCtx<rand_chacha::ChaCha8Rng>>,
     seed:u64, shapes:Vec<DrawnShape>, layers:Vec<Shape>, score:f64,family:ShapeKind,exact_coverage:bool,frozen:Vec<bool>,fast_residual:bool,
 }
@@ -207,6 +209,8 @@ impl RgbaModel {
             // attended hole (an eye, a gap between letters) cannot be reopened once
             // painted, and partly transparent detail keeps its colour/opacity balance.
             gains[y*w+x]=1.0+3.0*additive*sampled;
+            if self.attention.is_empty(){self.attention=vec![0.0;w*h];}
+            self.attention[y*w+x]=sampled;
             if self.target[y*w+x][3]==0.0{continue;}
             weights[y*w+x]=1.0+(weights[y*w+x]-1.0)*(1.0+strength*sampled)+3.0*additive*sampled;
         }}
@@ -246,7 +250,8 @@ impl RgbaModel {
     }
     fn detail_weight(&self,i:usize)->f64{self.detail_weights.get(i).copied().unwrap_or(1.0)}
     fn alpha_weight(&self,i:usize)->f64 {
-        let base=if self.target[i][3]==0.0{self.clear_alpha_weight}else{ALPHA_WEIGHT*if self.detail_weights.is_empty(){1.0}else{2.0}};
+        // Faint holes inside opaque areas (see `faint_holes`) count as clear pixels.
+        let base=if self.target[i][3]==0.0||self.faint_holes.get(i).copied().unwrap_or(false){self.clear_alpha_weight}else{ALPHA_WEIGHT*if self.detail_weights.is_empty(){1.0}else{2.0}};
         base*self.alpha_gains.get(i).copied().unwrap_or(1.0)
     }
     /// Target pixels are normalized premultiplied RGBA, resampled before entry.
@@ -261,7 +266,7 @@ impl RgbaModel {
         let proposal=Buffer::from_rgb(width,height,proxy(&target)).unwrap();
         let canvas=Buffer::from_rgb(width,height,proxy(&current)).unwrap();
         let score=target.iter().map(|p|p[0]*p[0]+p[1]*p[1]+p[2]*p[2]+ALPHA_WEIGHT*p[3]*p[3]).sum();
-        let mut model=Self{background:Color::new(0,0,0,0),optimized:false,turbo:false,clear_alpha_weight:16.0,detail_weights:Vec::new(),refine_weights:Vec::new(),alpha_gains:Vec::new(),refine_alpha_gains:Vec::new(),proposal_weights:Vec::new(),measured_redistribution:false,redistribution_trials:8,step_workers:Vec::new(),width,height,target,current,prefix:vec![[0.0;N];(width as usize+1)*height as usize],error_prefix:vec![0.0;(width as usize+1)*height as usize],proposal,canvas,grid:ErrorGrid::new(width,height,16,16),seed:seed.unwrap_or_else(crate::util::entropy_seed),shapes:Vec::new(),layers:Vec::new(),score,family:ShapeKind::Any,exact_coverage:false,frozen:Vec::new(),fast_residual:false};
+        let mut model=Self{background:Color::new(0,0,0,0),optimized:false,turbo:false,clear_alpha_weight:16.0,detail_weights:Vec::new(),refine_weights:Vec::new(),alpha_gains:Vec::new(),refine_alpha_gains:Vec::new(),proposal_weights:Vec::new(),measured_redistribution:false,redistribution_trials:8,line_variant:0,lines:None,extra_rounds:(0,0),faint_holes:Vec::new(),lab:Vec::new(),features_marked:false,feature_regions:Vec::new(),attention:Vec::new(),step_workers:Vec::new(),width,height,target,current,prefix:vec![[0.0;N];(width as usize+1)*height as usize],error_prefix:vec![0.0;(width as usize+1)*height as usize],proposal,canvas,grid:ErrorGrid::new(width,height,16,16),seed:seed.unwrap_or_else(crate::util::entropy_seed),shapes:Vec::new(),layers:Vec::new(),score,family:ShapeKind::Any,exact_coverage:false,frozen:Vec::new(),fast_residual:false};
         for y in 0..height as usize {model.update_row(y);}
         model
     }
@@ -363,15 +368,33 @@ impl RgbaModel {
         self.grid.compute(&self.proposal,&self.canvas);
         let round=SearchRound{half_resolution:false,target:&self.proposal,current:&self.canvas,error_grid:&self.grid,score:0,coarse:None};
         let mut effort=RoundEffort::of(kind);if self.fast_residual{effort.candidates=64;effort.age=35;}let step=self.shapes.len() as u64;
-        let rounds=if self.turbo{8}else{(if self.fast_residual{4}else{16})*if kind==ShapeKind::Mixed{3}else{1}};
+        let base_rounds=if self.turbo{8+(self.line_variant>>24) as usize+if (step as usize)<self.extra_rounds.1{self.extra_rounds.0}else{0}}else{(if self.fast_residual{4}else{16})*if kind==ShapeKind::Mixed{3}else{1}};
         let proposals=if self.turbo{self.turbo_proposals(kind)}else{Vec::new()};
+        // Experimental: extra rounds that hill-climb from edge-aligned proposals.
+        let dedicated=if self.turbo{self.dedicated_line_groups(kind)}else{Vec::new()};
+        let rounds=base_rounds+dedicated.len();
         let mut workers=if self.optimized{std::mem::take(&mut self.step_workers)}else{Vec::new()};
         workers.resize_with(rounds,||{let mut work=WorkerCtx::new(self.width as i32,self.height as i32,crate::rng::round_rng(self.seed,step,0));work.rgba_reuse=self.optimized;work});
         let search=|(index,worker):(usize,&mut WorkerCtx<_>)| {
+            if index>=base_rounds{
+                let group=&dedicated[index-base_rounds];
+                worker.rng=crate::rng::round_rng(self.seed,step,1000+index as u64);
+                let mut shape=group[0].clone();let mut scored=self.evaluate_shape(&shape,worker,0.0);
+                for candidate in &group[1..]{let trial=self.evaluate_shape(candidate,worker,scored.0);if trial.0<scored.0{shape=candidate.clone();scored=trial;}}
+                let mut age=0;
+                while age<50 {
+                    let mut candidate=shape.clone();candidate.mutate(worker,Step::Scaled((0.8408964152537145_f64).powi(age as i32).max(1.0/64.0)));
+                    Self::project_rectangle(&mut candidate);
+                    let score=self.evaluate_shape(&candidate,worker,scored.0);
+                    if score.0<scored.0 {shape=candidate;scored=score;age=0;}else{age+=1;}
+                }
+                return (shape,scored);
+            }
             let stream=if kind==ShapeKind::Mixed{index/3}else{index};
             let kind=if kind==ShapeKind::Mixed{crate::mixed::family(index)}else{kind};
             let mut effort=if self.family==ShapeKind::Mixed{RoundEffort::of(kind)}else{effort};if self.fast_residual{effort.candidates=64;effort.age=35;}
-            if self.turbo{effort.candidates=32;effort.age=50;}
+            // Research control: `extra_candidates` more random starts per round.
+            if self.turbo{effort.candidates=32+self.lab_param("extra_candidates").unwrap_or(0.0)as usize;effort.age=50;}
             let index=index as u64;worker.rng=crate::rng::round_rng(self.seed,step,stream as u64);
             let mut shape=Shape::random(kind,worker,&round);if self.fast_residual{Self::narrow(&mut shape,index,(256.0/f64::from(self.width.max(self.height))).min(1.0));}
             let mut scored=self.evaluate_shape(&shape,worker,0.0);
@@ -382,7 +405,7 @@ impl RgbaModel {
                 if score.0<scored.0 {shape=candidate;scored=score;}
             }
             if self.turbo {
-                for candidate in proposals.iter().skip(index as usize).step_by(rounds) {let trial=self.evaluate_shape(candidate,worker,scored.0);if trial.0<scored.0{shape=candidate.clone();scored=trial;}}
+                for candidate in proposals.iter().skip(index as usize).step_by(base_rounds) {let trial=self.evaluate_shape(candidate,worker,scored.0);if trial.0<scored.0{shape=candidate.clone();scored=trial;}}
             }
             let mut age=0;
             while age<effort.age {
@@ -470,7 +493,7 @@ impl RgbaModel {
             let ux=(p.x[1]-p.x[0]+p.x[2]-p.x[3])/4.0;let uy=(p.y[1]-p.y[0]+p.y[2]-p.y[3])/4.0;
             let radius=(ux*ux+uy*uy).sqrt().max(1e-8);let dx=ux/radius;let dy=uy/radius;
             let vx=(p.x[3]-p.x[0]+p.x[2]-p.x[1])/4.0;let vy=(p.y[3]-p.y[0]+p.y[2]-p.y[1])/4.0;
-            let width=radius.max(0.5);let height=(-dy*vx+dx*vy).abs().clamp((width/8.0).max(0.5),width*8.0);
+            let cap=f64::from(crate::shapes::rect_aspect());let width=radius.max(0.5);let height=(-dy*vx+dx*vy).abs().clamp((width/cap).max(0.5),width*cap);
             for (i,(a,b)) in [(-1.0,-1.0),(1.0,-1.0),(1.0,1.0),(-1.0,1.0)].iter().enumerate(){p.x[i]=cx+a*width*dx-b*height*dy;p.y[i]=cy+a*width*dy+b*height*dx;}
         }}
     }

@@ -137,6 +137,10 @@ pub(super) fn fit(
             measured_redistribution: false,
             redistribution_trials: None,
             rect_aspect: None,
+            line_proposals: 0,
+            triangle_angle: None,
+            extra_rounds: None,
+            lab_params: Vec::new(),
         };
         let drawing = match approximate_drawing_inner(
             ApproximateRequest {

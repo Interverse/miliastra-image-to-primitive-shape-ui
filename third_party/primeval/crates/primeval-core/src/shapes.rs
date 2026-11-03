@@ -1601,7 +1601,7 @@ impl Polygon {
     #[must_use]
     pub(crate) fn is_valid(&self) -> bool {
         let vertices: [(f64, f64); 4] = std::array::from_fn(|i| (self.x[i], self.y[i]));
-        is_legible_convex(&vertices[..self.order], TAN_MIN_ANGLE)
+        is_legible_convex(&vertices[..self.order], tan_min_angle())
     }
 
     /// The orientation of the polygon, as [`is_legible_convex`] takes it.
@@ -1625,7 +1625,7 @@ impl Polygon {
                 point(j),
                 point((j + 1) % 4),
                 orientation,
-                TAN_MIN_ANGLE,
+                tan_min_angle(),
             )
         })
     }
@@ -1674,6 +1674,17 @@ impl Polygon {
     }
 }
 
+/// The minimum-angle bound in effect: [`TAN_MIN_ANGLE`] unless an experimental
+/// triangle angle is held.
+#[inline(always)]
+fn tan_min_angle() -> f64 {
+    #[cfg(feature = "asset-triangle")]
+    if let Some(tangent) = crate::asset_triangle::held_tangent() {
+        return tangent;
+    }
+    TAN_MIN_ANGLE
+}
+
 /// `tan 15°`, the bound of the minimum-angle rule. The validity checks
 /// compare tangents instead of computing angles, so they call no libm
 /// function, whose results can differ between platforms: native and wasm
@@ -1697,18 +1708,28 @@ pub(crate) fn rect_aspect() -> i32 {
 }
 
 /// Experimental: raises the rectangle aspect cap until dropped.
-pub struct RectAspect(i32);
+/// Overlapping holders (concurrent fits in one process) share the value; the
+/// default returns when the last one drops, so no fit can leave it raised.
+pub struct RectAspect(());
+static RECT_HOLDERS: std::sync::Mutex<usize> = std::sync::Mutex::new(0);
 impl RectAspect {
-    /// Sets the cap (at least [`MAX_ASPECT`]) and remembers the previous one.
+    /// Sets the cap (at least [`MAX_ASPECT`]) until the last holder drops.
     #[must_use]
     pub fn set(cap: u32) -> Self {
         let cap = i32::try_from(cap).unwrap_or(i32::MAX).max(MAX_ASPECT);
-        Self(RECT_ASPECT.swap(cap, std::sync::atomic::Ordering::Relaxed))
+        let mut holders = RECT_HOLDERS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        *holders += 1;
+        RECT_ASPECT.store(cap, std::sync::atomic::Ordering::Relaxed);
+        Self(())
     }
 }
 impl Drop for RectAspect {
     fn drop(&mut self) {
-        RECT_ASPECT.store(self.0, std::sync::atomic::Ordering::Relaxed);
+        let mut holders = RECT_HOLDERS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        *holders -= 1;
+        if *holders == 0 {
+            RECT_ASPECT.store(MAX_ASPECT, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 }
 

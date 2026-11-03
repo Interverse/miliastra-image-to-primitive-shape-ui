@@ -41,6 +41,7 @@ function normalizeRender(render) {
         redistribution: field(render,"redistribution",v=>v==="energy"||v==="measured","must be energy or measured"),
         redistributionTrials: field(render,"redistributionTrials",v=>Number.isInteger(v)&&v>=1,"must be a positive integer"),
         rectAspect: field(render,"rectAspect",v=>Number.isInteger(v)&&v>=8,"must be an integer of at least 8"),
+        experimental: field(render,"experimental",v=>v!==null&&typeof v==="object","must be an object"),
         count: field(render, "count", isNumber, "must be a number"),
         shape: field(render, "shape", isString, "must be a string"),
         // The type check shares Rust's wording; Rust checks the value.

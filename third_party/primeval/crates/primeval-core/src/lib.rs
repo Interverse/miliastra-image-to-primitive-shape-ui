@@ -61,4 +61,6 @@ pub use error::ParseError;
 pub use model::Search;
 pub use model::{Model, ModelOptions};
 pub use shapes::{RectAspect, ShapeKind};
+#[cfg(feature = "asset-triangle")]
+pub use asset_triangle::TriangleAngle;
 pub use util::sin_cos_degrees;

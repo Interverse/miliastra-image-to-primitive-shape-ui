@@ -92,3 +92,30 @@ gates remain unmet. See `docs/development/primeval-turbo.md` in the site root.
     rectangle" choice; the game has no aspect limit) through a process-wide value
     held for one Turbo fit (`shapes.rs` `RectAspect`, `mixed.rs` replacement).
     Triangles stay isosceles. See `docs/development/automatic-importance-*.md`.
+
+14. Lines and curves (Turbo only; Maximum Detail and Fast are unchanged). A Turbo fit
+    holds a 64:1 rectangle aspect cap and a 5 degree triangle minimum angle
+    (`primeval-render/src/turbo.rs`): the game scales its rectangle and isosceles
+    triangle sprites freely, so a straight line or a tapering stroke can be one
+    shape. `asset_triangle.rs` `TriangleAngle` and `shapes.rs` `RectAspect` are
+    process-wide while held; holders are counted and the upstream defaults return
+    when the last fit ends. Polygon validity and Turbo rectangle projection follow
+    the held values. Default arithmetic is unchanged when nothing is held. Run Rust
+    tests with `--test-threads=1`: a Turbo test fit holds the values for the whole
+    process. After Turbo refinement, `clear_gaps` (`rgba/turbo.rs`) cleans paint
+    left over (nearly) transparent source pixels: one refinement pass of only the
+    layers covering it with that opacity error weighted 16 times, then up to eight
+    remove-and-replace trials; each change is kept only if the composite error over
+    black and white falls, and the count never changes. `mark_faint_holes` gives
+    small faint holes inside opaque areas the clear-pixel opacity weight, so early
+    shapes do not cover them and leave dark patches. Spill-aware reordering
+    (`reorder_spill`) and shape merging (`merge_turbo`) are research options,
+    off by default; they gained at most 0.1-0.2%. Edge-aligned proposals
+    (`rgba/lines.rs`, `Execution::line_proposals`) are a research option, off by
+    default. Small-feature weighting and feature proposals (`rgba/features.rs`)
+    are lab-only research options set through `Execution::lab_params`, off by
+    default; the weighting failed fresh blinded review. The WASM binding accepts
+    `render.experimental` (`lineVariant`, `extraRounds`, `labParams`) so the site's
+    Experimental settings can turn these on; `dist/request.js` passes it through.
+    Edge detection runs only when an edge proposal kind is chosen. See
+    `docs/development/primeval-turbo.md` in the site root.

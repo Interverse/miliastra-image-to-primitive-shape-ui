@@ -83,7 +83,10 @@ frame.addEventListener('load',async()=>{
   const focusSwitch=$('focusDetail');check(focusSwitch.getAttribute('role')==='switch'&&$('focusSettings').closest('#shapeTypeSection')===null,'Focus detail is a one-click switch beside the images');
   focusSwitch.click();check(!focusSwitch.checked&&pill.hidden&&$('focusThumbHint').hidden&&!$('focusSettings').hidden,'switch turns focus off for all images in one click');
   focusSwitch.click();check(focusSwitch.checked&&!pill.hidden,'switch turns focus back on');
+  check(!$('experimentalSettings').hidden&&$('experimentalList').querySelectorAll('input[data-experiment]').length===8&&$('experimentalCount').hidden,'Experimental options listed for Turbo, none chosen');
+  const firstExperiment=$('experimentalList').querySelector('input');firstExperiment.click();check($('experimentalCount').textContent==='1'&&!$('experimentalCount').hidden,'chosen experimental options are counted');firstExperiment.click();
   change('primevalSpeed','fast');check($('focusSettings').hidden&&d.querySelector('.file-thumb-focus').hidden,'Focus detail hidden for Maximum Detail');
+  check($('experimentalSettings').hidden&&$('experimentalSettings').offsetHeight===0,'Experimental options hidden for Maximum Detail');
   d.querySelector('.file-thumb-remove').click();check(!d.querySelector('.file-thumb'),'last image removed');
   // The golden comparisons below use Maximum Detail, as chosen before this block.
   let latestNative;const captureNative=w.Worker.prototype.postMessage;
@@ -118,6 +121,17 @@ frame.addEventListener('load',async()=>{
     const originalPng=new Uint8Array(await(await download('btnExportPNG')).arrayBuffer());
     check(originalPng.length===golden.length&&originalPng.every((v,i)=>v===golden[i]),'Original view does not change the exported PNG');
     $('viewFitted').click();check($('viewFitted').getAttribute('aria-pressed')==='true'&&picked()===cycle[0],'Fitted view restored with the selection kept');
+    const geometry=()=>[$('editX').value,$('editY').value,$('editSizeA').value,$('editSizeB').value,$('editRot').value].join();
+    const topShape=geometry();check(!$('layerPill').hidden&&/^\d+\/\d+$/.test($('layerPos').textContent)&&!$('btnLayerDown').disabled,'layer pill shows the layer of the selected shape');
+    for(let k=1;k<cycle.length;k++)canvas.dispatchEvent(new w.MouseEvent('click',at));
+    const lowShape=geometry(),beforeStep=await(await download('btnExportJSON')).text(),layerOf=()=>Number($('layerPos').textContent.split('/')[0]),lowLayer=layerOf();
+    $('btnLayerUp').click();
+    check(geometry()===lowShape&&layerOf()>lowLayer&&JSON.parse(await(await download('btnExportJSON')).text()).elements.length===json.elements.length,'Up moves the selected shape up a layer and keeps the count');
+    const upLayer=layerOf();w.document.dispatchEvent(new w.KeyboardEvent('keydown',{key:'[',code:'BracketLeft',ctrlKey:true,bubbles:true}));
+    check(geometry()===lowShape&&layerOf()<upLayer,'Ctrl+[ moves it back down');
+    $('btnUndo').click();$('btnUndo').click();check(await(await download('btnExportJSON')).text()===beforeStep,'undo restores the layer order');
+    check($('layerPill').hidden,'layer pill hidden without a selection');
+    canvas.dispatchEvent(new w.MouseEvent('click',at));check(picked()===cycle[0],'top shape selectable again after undo');
     const beforeTransform=JSON.parse(await(await download('btnExportJSON')).text());
     const a=-(typeof element.rotation==='object'?element.rotation.z:element.rotation||0)*Math.PI/180;
     const ox=rect.left+(wrap.clientWidth-64)/2,oy=rect.top+(wrap.clientHeight-64)/2;
@@ -158,10 +172,13 @@ frame.addEventListener('load',async()=>{
     check(JSON.stringify(JSON.parse(await(await download('btnExportJSON')).text()).elements)===beforePan,'middle-button pan does not move shapes');$('btnResetView').click();
     change('editShape','rectangle');check(JSON.parse(await(await download('btnExportJSON')).text()).elements.some(e=>e.image_asset_ref===100001&&!e.is_background),'shape selector changes the exported asset');$('btnUndo').click();
     const resetRect=canvas.getBoundingClientRect();canvas.dispatchEvent(new w.MouseEvent('click',{bubbles:true}));canvas.dispatchEvent(new w.PointerEvent('pointerdown',{pointerId:82,button:0,clientX:resetRect.left+(wrap.clientWidth-64)/2+element.center.x,clientY:resetRect.top+(wrap.clientHeight-64)/2-element.center.y}));canvas.dispatchEvent(new w.PointerEvent('pointerup',{pointerId:82}));
-    $('btnDeleteSel').click();
+    const pause=()=>new Promise(r=>setTimeout(r,400));await pause();const thumbBefore=$('previewImg').src;
+    $('btnDeleteSel').click();await pause();
+    check($('previewImg').src!==thumbBefore,'fitted thumbnail follows an edit');
     check(JSON.parse(await(await download('btnExportJSON')).text()).elements.length===40,'editing changes the exported drawing');
     check((await(await download('btnExportSVG')).text())!==svg,'edited output does not return stale native SVG');
-    $('btnUndo').click();
+    $('btnUndo').click();await pause();
+    check($('previewImg').src===thumbBefore,'undo restores the fitted thumbnail');
     const restored=new Uint8Array(await(await download('btnExportPNG')).arrayBuffer());
     check(restored.length===golden.length&&restored.every((v,i)=>v===golden[i]),'undo restores exact native PNG');
    }
