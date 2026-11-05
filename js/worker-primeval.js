@@ -40,7 +40,7 @@ self.onmessage=async({data:msg})=>{
     if(!Number.isSafeInteger(count)||count<1)throw Error("Invalid shape count");
     if(allowed.length!==1||!["circle","rect","triangle","mixed"].includes(allowed[0]))throw Error("Choose one Primeval shape mode");
     self.PRIMEVAL_THREADS=Number.isInteger(config.primeval_threads)&&config.primeval_threads>0?config.primeval_threads:Math.min(16,navigator.hardwareConcurrency||1);
-    runtime ??= await import("./vendor/primeval/dist/browser-runtime.js?v=pause-save-1");
+    runtime ??= await import("./vendor/primeval/dist/browser-runtime.js?v=smooth-contours-1");
     const rgba=new Uint8ClampedArray(msg.rgba);
     const transparent=!!config.enable_png_mode&&rgba.some((a,i)=>i%4===3&&a<255);
     const background=!config.enable_png_mode&&config.background_color!=null?String(config.background_color):null;
@@ -59,7 +59,7 @@ self.onmessage=async({data:msg})=>{
     const detail=Number(config.primeval_resolution??512);
     if(!Number.isInteger(detail)||detail<32||detail>2048)throw Error("Invalid fitting detail");
     postMessage({type:"progress",jobId:msg.jobId,step:0,total:count,phase:""});
-    const output=await runtime.approximateInWorker({input,output:"png",render:{shape,count,...(config.primeval_turbo===true&&msg.importance?{importance:msg.importance}:{}),...(config.primeval_turbo===true&&config.primeval_redistribution?{redistribution:config.primeval_redistribution}:{}),...(config.primeval_turbo===true&&config.primeval_redistribution_trials?{redistributionTrials:config.primeval_redistribution_trials}:{}),...(config.primeval_turbo===true&&config.primeval_rect_aspect?{rectAspect:config.primeval_rect_aspect}:{}),...(config.primeval_turbo===true?experimentalRender(config.primeval_experiments):{}),turbo:config.primeval_turbo===true,fast:profile==="fast",fastest:profile==="fastest",alpha:"auto",...(background?{background}:{}),...(transparent?{background:profile==="fastest"?"transparent-fast":config.primeval_alpha_strategy==="greedy"?"transparent":"transparent-reference"}:{}),seed:config.primeval_seed??42,resizeInput:Math.min(detail,Math.max(fittingWidth,fittingHeight)),outputSize:Math.max(msg.width,msg.height)},execution:{onProgress:info=>{
+    const output=await runtime.approximateInWorker({input,output:"png",render:{shape,count,contourSmoothing:config.primeval_turbo===true?Number(config.primeval_contour_smoothing??1):0,...(config.primeval_turbo===true&&msg.importance?{importance:msg.importance}:{}),...(config.primeval_turbo===true&&config.primeval_redistribution?{redistribution:config.primeval_redistribution}:{}),...(config.primeval_turbo===true&&config.primeval_redistribution_trials?{redistributionTrials:config.primeval_redistribution_trials}:{}),...(config.primeval_turbo===true&&config.primeval_rect_aspect?{rectAspect:config.primeval_rect_aspect}:{}),...(config.primeval_turbo===true?experimentalRender(config.primeval_experiments):{}),turbo:config.primeval_turbo===true,fast:profile==="fast",fastest:profile==="fastest",alpha:"auto",...(background?{background}:{}),...(transparent?{background:profile==="fastest"?"transparent-fast":config.primeval_alpha_strategy==="greedy"?"transparent":"transparent-reference"}:{}),seed:config.primeval_seed??42,resizeInput:Math.min(detail,Math.max(fittingWidth,fittingHeight)),outputSize:Math.max(msg.width,msg.height)},execution:{onProgress:info=>{
       // Avoid thousands of DOM/structured-clone updates; every engine step runs.
       if(info.shape||info.previewSvg||info.step===1||info.step%Math.max(1,Math.floor(count/100))===0||info.step===count)postMessage({type:"progress",jobId:msg.jobId,step:info.step,total:info.total,refinementStep:info.refinementStep,refinementTotal:info.refinementTotal,previewOnly:!!info.refinementTotal,previewSvg:info.previewSvg,shapeSvg:info.shape,previewIndex:info.previewIndex,phase:info.refinementTotal?"refine":transparent&&info.step===count?"refine":""});
     }}});
@@ -88,6 +88,7 @@ self.onmessage=async({data:msg})=>{
     result.config.primeval_stage_timings=stages;
     result.config.ai_upscale=upscaleMetadata;
     result.config.primeval_turbo=config.primeval_turbo===true;
+    result.config.primeval_contour_smoothing=config.primeval_turbo===true?Number(config.primeval_contour_smoothing??1):0;
     if(config.primeval_turbo===true&&config.primeval_experiments?.length)result.config.primeval_experiments=config.primeval_experiments.filter(key=>key!=='groups');
     postMessage({type:"done",jobId:msg.jobId,result},[result.image_rgba,result.preview_rgba,result.primeval_png]);
   }catch(error){postMessage({type:"error",jobId:msg.jobId,message:error?.message || String(error)});}

@@ -375,6 +375,7 @@ pub struct Execution<'a> {
     fast: bool,
     fastest: bool,
     turbo: bool,
+    contour_smoothing: f64,
     live_progress: bool,
     measured_redistribution: bool,
     redistribution_trials: Option<usize>,
@@ -411,6 +412,8 @@ impl<'a> Execution<'a> {
     pub fn fastest(mut self,enabled:bool)->Self{self.fastest=enabled;self}
     /// Experimental direct source-RGBA fitting with structured proposals.
     pub fn turbo(mut self,enabled:bool)->Self{self.turbo=enabled;self}
+    /// Source-supported Turbo contour regularization; zero preserves the original fit.
+    pub fn contour_smoothing(mut self,strength:f64)->Self{self.contour_smoothing=strength;self}
     /// Experimental: rank Turbo redistribution trials by measured removal loss.
     pub fn measured_redistribution(mut self,enabled:bool)->Self{self.measured_redistribution=enabled;self}
     /// Experimental: Turbo redistribution trial count; `None` keeps the default.
@@ -638,7 +641,7 @@ fn approximate_decoded(
             }
             let live=execution.live_progress;
             let mut reference_progress=|mut info:ProgressInfo|{if live{info.preview=None;info.preview_index=None;info.shape.clear();}if let Some(observer)=execution.progress.as_mut(){observer(info);}};
-            let drawing=approximate_decoded(ApproximateRequest{input:Vec::new(),output:OutputFormat::Png,render:options},Execution{attention:None,progress:Some(&mut reference_progress),cancel:execution.cancel,phase:None,fast:execution.fast,fastest:execution.fastest,turbo:false,live_progress:live,measured_redistribution:false,redistribution_trials:None,rect_aspect:None,line_proposals:0,triangle_angle:None,extra_rounds:None,lab_params:Vec::new()},Some(DynamicImage::ImageRgb8(rgb)))?;
+            let drawing=approximate_decoded(ApproximateRequest{input:Vec::new(),output:OutputFormat::Png,render:options},Execution{attention:None,progress:Some(&mut reference_progress),cancel:execution.cancel,phase:None,fast:execution.fast,fastest:execution.fastest,turbo:false,contour_smoothing:0.0,live_progress:live,measured_redistribution:false,redistribution_trials:None,rect_aspect:None,line_proposals:0,triangle_angle:None,extra_rounds:None,lab_params:Vec::new()},Some(DynamicImage::ImageRgb8(rgb)))?;
             execution.mark("reference-end");Some(drawing)
         }else{None};
         // Resample premultiplied channels: invisible RGB cannot bleed into edges.

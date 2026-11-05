@@ -38,6 +38,7 @@ function normalizeRender(render) {
         fastest: field(render,"fastest",v=>typeof v==="boolean","must be a boolean"),
         fast: field(render,"fast",v=>typeof v==="boolean","must be a boolean"),
         turbo: field(render,"turbo",v=>typeof v==="boolean","must be a boolean"),
+        contourSmoothing: field(render,"contourSmoothing",v=>Number.isFinite(v)&&v>=0&&v<=4,"must be a finite number from 0 to 4"),
         redistribution: field(render,"redistribution",v=>v==="energy"||v==="measured","must be energy or measured"),
         redistributionTrials: field(render,"redistributionTrials",v=>Number.isInteger(v)&&v>=1,"must be a positive integer"),
         rectAspect: field(render,"rectAspect",v=>Number.isInteger(v)&&v>=8,"must be an integer of at least 8"),

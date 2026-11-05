@@ -119,6 +119,24 @@ gates remain unmet. See `docs/development/primeval-turbo.md` in the site root.
     Experimental settings can turn these on; `dist/request.js` passes it through.
     Edge detection runs only when an edge proposal kind is chosen. See
     `docs/development/primeval-turbo.md` in the site root.
+# Source-aware contour fitting
+
+Turbo now accepts `Execution::contour_smoothing` / browser
+`render.contourSmoothing` (finite0..4). The website automatically uses1; the
+library default0 preserves the original numerical path and Maximum Detail.
+`rgba/contours.rs` uses original premultiplied-RGBA structure tensors to penalize
+visible unsupported polygon turns and boundaries misaligned with source edges.
+Source corner evidence relaxes the prior. Later-layer transmission suppresses
+cost on occluded boundaries. The same geometry/paint families, complete search
+rounds, requested counts, cancellation and exported assets remain in use.
+
+Search and conditional refinement use a bounded contour prior; full refinement
+passes and Turbo replacement/reordering guards evaluate pixel loss plus visible
+contour cost. Pixel-prefix sums and reported reconstruction loss remain in their
+original units. Rejected smoothing refinement passes restore progress geometry,
+so pause/export checkpoints reflect the accepted construction. See
+`docs/development/smooth-contours.md` for measured benefits and regressions.
+
 # Retired construction experiment
 
 2026-11-04: removed the failed nested-group/scaffold construction paths, their

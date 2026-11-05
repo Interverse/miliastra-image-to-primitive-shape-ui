@@ -23,6 +23,7 @@ pub(crate) fn fit_traced(request:ApproximateRequest,mut execution:Execution<'_>,
     let _=execution.triangle_angle;
     let mut model=primeval_core::rgba::RgbaModel::new(w,h,pixels,request.render.seed);
     model.enable_exact_optimizations();
+    model.set_contour_smoothing(execution.contour_smoothing).map_err(ApproximateError::internal)?;
     if let Some((width,height,values,strength,additive,refine,proposal_only))=execution.attention.take(){
         model.set_attention_terms(width,height,&values,strength,additive,refine).map_err(ApproximateError::internal)?;
         match proposal_only {

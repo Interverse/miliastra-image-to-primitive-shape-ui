@@ -57,6 +57,8 @@ pub fn approximate(
     let fast=js_sys::Reflect::get(&render,&JsValue::from_str("fast")).ok().and_then(|v|v.as_bool()).unwrap_or(false);
     let fastest=js_sys::Reflect::get(&render,&JsValue::from_str("fastest")).ok().and_then(|v|v.as_bool()).unwrap_or(false);
     let turbo=Reflect::get(&render,&JsValue::from_str("turbo")).ok().and_then(|v|v.as_bool()).unwrap_or(false);
+    let contour=Reflect::get(&render,&"contourSmoothing".into())?;
+    let contour=if contour.is_undefined(){0.0}else{contour.as_f64().filter(|v|v.is_finite()&&(0.0..=4.0).contains(v)).ok_or_else(||TypeError::new("Invalid contourSmoothing"))?};
     // Experimental Turbo redistribution ranking; "energy" is the default.
     let measured=match Reflect::get(&render,&"redistribution".into())?.as_string().as_deref(){None|Some("energy")=>false,Some("measured")=>true,Some(_)=>return Err(TypeError::new("Invalid redistribution").into())};
     let aspect=Reflect::get(&render,&"rectAspect".into())?;
@@ -126,7 +128,7 @@ pub fn approximate(
     };
     let timings=Array::new();let started=js_sys::Date::now();
     let mut phase=|name:&'static str|{let entry=Object::new();set(&entry,"phase",name.into());set(&entry,"elapsed_ms",(js_sys::Date::now()-started).into());timings.push(&entry);};
-    let execution = Execution::new().cancellation(&token).phases(&mut phase).fast(fast).fastest(fastest).turbo(turbo).measured_redistribution(measured).redistribution_trials(trials).rect_aspect(aspect).line_proposals(variant).extra_rounds(extra).lab_params(lab).live_progress(true);
+    let execution = Execution::new().cancellation(&token).phases(&mut phase).fast(fast).fastest(fastest).turbo(turbo).contour_smoothing(contour).measured_redistribution(measured).redistribution_trials(trials).rect_aspect(aspect).line_proposals(variant).extra_rounds(extra).lab_params(lab).live_progress(true);
     let execution=if let Some((w,h,v,s,a,b,p,structural))=attention{execution.attention_terms(w,h,v,s,a,b).attention_proposals_only(p).structural_proposals_only(structural)}else{execution};
     let execution = if on_progress.is_some() {
         execution.progress(&mut on_step)

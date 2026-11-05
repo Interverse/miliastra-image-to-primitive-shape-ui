@@ -13,6 +13,7 @@ mod turbo;
 mod structure;
 mod lines;
 mod features;
+mod contours;
 
 const N: usize = 11;
 const ALPHA_WEIGHT: f64 = 4.0;
@@ -177,6 +178,7 @@ pub struct RgbaModel {
     background:Color,
     optimized:bool, turbo:bool, clear_alpha_weight:f64, detail_weights:Vec<f64>, refine_weights:Vec<f64>, alpha_gains:Vec<f64>, refine_alpha_gains:Vec<f64>, proposal_weights:Vec<f64>, measured_redistribution:bool, redistribution_trials:usize, line_variant:u32, lines:Option<Vec<lines::Primitive>>, extra_rounds:(usize,usize), faint_holes:Vec<bool>, lab:Vec<(String,f64)>, features_marked:bool, feature_regions:Vec<Vec<usize>>, attention:Vec<f64>,
     step_workers:Vec<WorkerCtx<rand_chacha::ChaCha8Rng>>,
+    contour_strength:f64, contour_field:Vec<f64>, contour_normals:Vec<[f64;2]>,
     seed:u64, shapes:Vec<DrawnShape>, layers:Vec<Shape>, score:f64,family:ShapeKind,exact_coverage:bool,frozen:Vec<bool>,fast_residual:bool,
 }
 
@@ -266,7 +268,7 @@ impl RgbaModel {
         let proposal=Buffer::from_rgb(width,height,proxy(&target)).unwrap();
         let canvas=Buffer::from_rgb(width,height,proxy(&current)).unwrap();
         let score=target.iter().map(|p|p[0]*p[0]+p[1]*p[1]+p[2]*p[2]+ALPHA_WEIGHT*p[3]*p[3]).sum();
-        let mut model=Self{background:Color::new(0,0,0,0),optimized:false,turbo:false,clear_alpha_weight:16.0,detail_weights:Vec::new(),refine_weights:Vec::new(),alpha_gains:Vec::new(),refine_alpha_gains:Vec::new(),proposal_weights:Vec::new(),measured_redistribution:false,redistribution_trials:8,line_variant:0,lines:None,extra_rounds:(0,0),faint_holes:Vec::new(),lab:Vec::new(),features_marked:false,feature_regions:Vec::new(),attention:Vec::new(),step_workers:Vec::new(),width,height,target,current,prefix:vec![[0.0;N];(width as usize+1)*height as usize],error_prefix:vec![0.0;(width as usize+1)*height as usize],proposal,canvas,grid:ErrorGrid::new(width,height,16,16),seed:seed.unwrap_or_else(crate::util::entropy_seed),shapes:Vec::new(),layers:Vec::new(),score,family:ShapeKind::Any,exact_coverage:false,frozen:Vec::new(),fast_residual:false};
+        let mut model=Self{contour_strength:0.0,contour_field:Vec::new(),contour_normals:Vec::new(),background:Color::new(0,0,0,0),optimized:false,turbo:false,clear_alpha_weight:16.0,detail_weights:Vec::new(),refine_weights:Vec::new(),alpha_gains:Vec::new(),refine_alpha_gains:Vec::new(),proposal_weights:Vec::new(),measured_redistribution:false,redistribution_trials:8,line_variant:0,lines:None,extra_rounds:(0,0),faint_holes:Vec::new(),lab:Vec::new(),features_marked:false,feature_regions:Vec::new(),attention:Vec::new(),step_workers:Vec::new(),width,height,target,current,prefix:vec![[0.0;N];(width as usize+1)*height as usize],error_prefix:vec![0.0;(width as usize+1)*height as usize],proposal,canvas,grid:ErrorGrid::new(width,height,16,16),seed:seed.unwrap_or_else(crate::util::entropy_seed),shapes:Vec::new(),layers:Vec::new(),score,family:ShapeKind::Any,exact_coverage:false,frozen:Vec::new(),fast_residual:false};
         for y in 0..height as usize {model.update_row(y);}
         model
     }
@@ -359,7 +361,8 @@ impl RgbaModel {
             // existing error inside this conservative bounding rectangle.
             if available+1e-10 < -bound {return (0.0,Color::new(0,0,0,0));}
         }
-        self.evaluate(coverage(shape,worker,self.exact_coverage))
+        let (loss,color)=self.evaluate(coverage(shape,worker,self.exact_coverage));
+        self.contour_rank(shape,(loss,color),None)
     }
 
     /// Add one shape, preserving the original count and geometry constraints.
@@ -418,9 +421,10 @@ impl RgbaModel {
         };
         let results:Vec<_>=workers.par_iter_mut().enumerate().map(search).collect();
         if self.optimized{self.step_workers=workers;}
-        let (shape,(delta,color))=results.into_iter().enumerate().min_by(|(ia,a),(ib,b)|a.1.0.total_cmp(&b.1.0).then(ia.cmp(ib))).unwrap().1;
+        let (shape,(_,color))=results.into_iter().enumerate().min_by(|(ia,a),(ib,b)|a.1.0.total_cmp(&b.1.0).then(ia.cmp(ib))).unwrap().1;
         let mut worker=WorkerCtx::new(self.width as i32,self.height as i32,crate::rng::round_rng(self.seed,step,16));worker.rgba_reuse=self.optimized;
         let lines=coverage(&shape,&mut worker,self.exact_coverage);
+        let delta=self.evaluate(lines).0; // Keep cached loss/prefixes purely photometric.
         let a=f64::from(color.a)/255.0;let rgb=[color.r,color.g,color.b].map(|v|f64::from(v)/255.0);
         let mut dirty=vec![false;self.height as usize];
         for line in lines {
@@ -569,7 +573,7 @@ impl RgbaModel {
         let mut cached_rows:Vec<_>=(0..self.height).map(|_|OnceLock::new()).collect();
         let mut spare_rows:Vec<_>=(0..self.height).map(|_|Mutex::new(Vec::new())).collect();
         for pass in 0..passes {
-            let old_shapes=self.shapes.clone();let old_layers=self.layers.clone();let old_score=self.score;
+            let old_shapes=self.shapes.clone();let old_layers=self.layers.clone();let old_score=self.score;let old_contour=self.contour_total();
             let mut forward=vec![self.background_pixel();n];let mut checkpoints=Vec::new();
             for i in 0..count {
                 if cancelled(){return false;}
@@ -604,8 +608,8 @@ impl RgbaModel {
                     // guard below still accepts on that exact composite.
                     let latency=self.family!=ShapeKind::Mixed&&rounds<crate::refine::ROUNDS&&self.width.max(self.height)>256;
                     let exact_proposals=self.exact_coverage&&!latency;
-                    let evaluate=|shape:&Shape,work:&mut WorkerCtx<_>|fit(&self.layer_prefix_sums(coverage(shape,work,exact_proposals),base,&suffix,&transmission,rows,spare));
-                    let initial=if exact_proposals {fit(&self.layer_prefix_sums(&lines[i],base,&suffix,&transmission,rows,spare))}
+                    let evaluate=|shape:&Shape,work:&mut WorkerCtx<_>|{let (loss,color)=fit(&self.layer_prefix_sums(coverage(shape,work,exact_proposals),base,&suffix,&transmission,rows,spare));self.contour_rank(shape,(loss,color),Some(&transmission))};
+                    let initial=if exact_proposals {let (loss,color)=fit(&self.layer_prefix_sums(&lines[i],base,&suffix,&transmission,rows,spare));self.contour_rank(&self.layers[i],(loss,color),Some(&transmission))}
                         else {evaluate(&self.layers[i],&mut worker)};
                     let results:Vec<_>=refiners.par_iter_mut().enumerate().map(|(round,cache)|{
                         let round=round as u64;
@@ -645,9 +649,16 @@ impl RgbaModel {
             for (i,drawn) in self.shapes.iter().enumerate(){Self::paint(&mut actual,self.width,&lines[i],drawn.color);}
             let actual:Vec<[f64;4]>=actual.into_iter().map(|p|p.map(f64::from)).collect();
             let score=self.loss(&actual);
-            if score<=old_score+1e-10 {self.current=actual;self.score=score;}
-            else {self.layers=old_layers;self.shapes=old_shapes;lines=self.layers.iter().map(|s|coverage(s,&mut worker,self.exact_coverage).to_vec()).collect();}
-            if pass>=2 && old_score-self.score<=old_score*0.0001 {break;}
+            let contour=self.contour_total();
+            if score+contour<=old_score+old_contour+1e-10 {self.current=actual;self.score=score;}
+            else {
+                let restored:Vec<_>=if self.contour_strength>0.0{self.shapes.iter().zip(&old_shapes).enumerate().filter_map(|(i,(a,b))|(a!=b).then_some(i)).collect()}else{Vec::new()};
+                self.layers=old_layers;self.shapes=old_shapes;lines=self.layers.iter().map(|s|coverage(s,&mut worker,self.exact_coverage).to_vec()).collect();
+                // Pause/download previews must reflect the accepted construction,
+                // including a whole-pass rollback after conditional layer fits.
+                for i in restored {observer(((pass+1)as usize*count)as u32,(passes as usize*count)as u32,i,&self.shapes[i]);}
+            }
+            if pass>=2 && old_score+old_contour-self.score-self.contour_total()<=(old_score+old_contour)*0.0001 {break;}
         }
         for y in 0..self.height as usize {self.update_row(y);}
         true

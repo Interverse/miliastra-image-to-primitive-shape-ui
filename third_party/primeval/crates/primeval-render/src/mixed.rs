@@ -133,6 +133,7 @@ pub(super) fn fit(
             fast,
             fastest,
             turbo: false,
+            contour_smoothing: 0.0,
             live_progress:execution.live_progress,
             measured_redistribution: false,
             redistribution_trials: None,

@@ -205,7 +205,7 @@ impl RgbaModel {
             if removed.contains(&original){continue;}
             let pair=trial%2==1&&original+1<count&&!removed.contains(&(original+1));
             let index=original-removed.iter().filter(|&&i|i<original).count();
-            let old_layers=self.layers.clone();let old_shapes=self.shapes.clone();let old_frozen=self.frozen.clone();let old_canvas=self.current.clone();let old_score=self.score;
+            let old_layers=self.layers.clone();let old_shapes=self.shapes.clone();let old_frozen=self.frozen.clone();let old_canvas=self.current.clone();let old_score=self.score;let old_contour=self.contour_total();
             let old_metrics=self.detail_metrics();
             self.layers.remove(index);self.shapes.remove(index);self.frozen.remove(index);
             if pair{self.layers.remove(index);self.shapes.remove(index);self.frozen.remove(index);}
@@ -216,7 +216,7 @@ impl RgbaModel {
             self.step_turbo(self.family);
             if pair{self.step_turbo(self.family);}
             let metrics=self.detail_metrics();
-            if self.score<old_score && metrics.0<=old_metrics.0 && metrics.1<=old_metrics.1 {
+            if self.score+self.contour_total()<old_score+old_contour && metrics.0<=old_metrics.0 && metrics.1<=old_metrics.1 {
                 removed.push(original);if pair{removed.push(original+1);}
                 for i in index..count{observer((trial+1)as u32,trials as u32,i,&self.shapes[i]);}
             }else{
@@ -533,7 +533,7 @@ impl RgbaModel {
         let stride=((count-1)/12).max(1);let indices:Vec<_>=(0..count-1).step_by(stride).collect();
         for (trial,&i) in indices.iter().enumerate(){
             if cancelled(){return false;}
-            let old_layers=self.layers.clone();let old_shapes=self.shapes.clone();let old_frozen=self.frozen.clone();let old_current=self.current.clone();let old_score=self.score;let metrics=self.detail_metrics();
+            let old_layers=self.layers.clone();let old_shapes=self.shapes.clone();let old_frozen=self.frozen.clone();let old_current=self.current.clone();let old_score=self.score;let old_contour=self.contour_total();let metrics=self.detail_metrics();
             self.layers.swap(i,i+1);self.shapes.swap(i,i+1);self.frozen.swap(i,i+1);
             // Repaint first: refinement's rollback must refer to the swapped scene.
             let mut worker=WorkerCtx::new(self.width as i32,self.height as i32,crate::rng::round_rng(self.seed,0,22));worker.rgba_reuse=true;
@@ -542,7 +542,7 @@ impl RgbaModel {
             self.current=canvas.into_iter().map(|p|p.map(f64::from)).collect();self.score=self.loss(&self.current);
             let complete=self.refine_observed(1,0,&mut *cancelled,|_,_,_,_|{});
             let after=self.detail_metrics();
-            if complete&&self.score<old_score&&after.0<=metrics.0&&after.1<=metrics.1{
+            if complete&&self.score+self.contour_total()<old_score+old_contour&&after.0<=metrics.0&&after.1<=metrics.1{
                 for index in 0..count{observer((trial+1)as u32,indices.len()as u32,index,&self.shapes[index]);}
             }else{self.layers=old_layers;self.shapes=old_shapes;self.frozen=old_frozen;self.current=old_current;self.score=old_score;observer((trial+1)as u32,indices.len()as u32,i,&self.shapes[i]);}
             for y in 0..self.height as usize{self.update_row(y);}
@@ -565,7 +565,7 @@ impl RgbaModel {
         if gap.iter().filter(|g|**g).count()<4{return true;}
         let mut worker=WorkerCtx::new(self.width as i32,self.height as i32,crate::rng::round_rng(self.seed,0,23));worker.rgba_reuse=true;
         let touching:Vec<bool>=self.layers.iter().map(|shape|coverage(shape,&mut worker,true).iter().any(|line|(line.x1..=line.x2).any(|x|gap[line.y as usize*w+x as usize]))).collect();
-        let old_layers=self.layers.clone();let old_shapes=self.shapes.clone();let old_frozen=self.frozen.clone();let old_current=self.current.clone();let old_score=self.score;let old_gains=self.alpha_gains.clone();
+        let old_layers=self.layers.clone();let old_shapes=self.shapes.clone();let old_frozen=self.frozen.clone();let old_current=self.current.clone();let old_score=self.score;let old_contour=self.contour_total();let old_gains=self.alpha_gains.clone();
         let before=self.matte_error();
         // Boost opacity error on gap pixels and their two-pixel neighbourhood.
         let boost=self.lab_param("gap_boost").unwrap_or(16.0);
@@ -578,7 +578,7 @@ impl RgbaModel {
         self.score=self.loss(&self.current);
         let complete=self.refine_observed(1,crate::refine::ROUNDS,&mut *cancelled,|_,_,_,_|{});
         self.alpha_gains=old_gains;self.frozen=old_frozen;self.score=self.loss(&self.current);
-        if complete&&self.matte_error()<before{
+        if complete&&self.matte_error()<before&&(self.contour_strength==0.0||self.score+self.contour_total()<=old_score+old_contour){
             for i in 0..self.layers.len(){if self.layers[i]!=old_layers[i]||self.shapes[i]!=old_shapes[i]{observer(1,1,i,&self.shapes[i]);}}
         }else{self.layers=old_layers;self.shapes=old_shapes;self.current=old_current;self.score=old_score;}
         for y in 0..h{self.update_row(y);}
@@ -604,14 +604,14 @@ impl RgbaModel {
             }).max_by(|a,b|a.1.total_cmp(&b.1).then(b.0.cmp(&a.0))) else {return true;};
             if paint<=0.0{return true;}
             let before=self.matte_error();
-            let old_layers=self.layers.clone();let old_shapes=self.shapes.clone();let old_frozen=self.frozen.clone();let old_current=self.current.clone();let old_score=self.score;
+            let old_layers=self.layers.clone();let old_shapes=self.shapes.clone();let old_frozen=self.frozen.clone();let old_current=self.current.clone();let old_score=self.score;let old_contour=self.contour_total();
             self.layers.remove(index);self.shapes.remove(index);self.frozen.remove(index);
             let mut canvas=vec![self.background_pixel();self.target.len()];
             for (shape,drawn) in self.layers.iter().zip(&self.shapes){Self::paint(&mut canvas,self.width,coverage(shape,&mut worker,true),drawn.color);}
             self.current=canvas.into_iter().map(|p|p.map(f64::from)).collect();self.score=self.loss(&self.current);
             for y in 0..self.height as usize{self.update_row(y);}
             self.step_turbo(self.family);
-            if self.matte_error()<before{
+            if self.matte_error()<before&&(self.contour_strength==0.0||self.score+self.contour_total()<=old_score+old_contour){
                 rejected.clear();
                 for i in index..self.layers.len(){observer(trial+1,8,i,&self.shapes[i]);}
             }else{
@@ -690,7 +690,7 @@ impl RgbaModel {
             let destination=(0..index).map(|j|(coverage(&self.layers[j],&mut worker,true).iter().map(|line|(line.x1..=line.x2).filter(|&x|mask[line.y as usize*w+x as usize]).count()).sum::<usize>(),j)).max();
             let Some((overlap,destination))=destination else {rejected.push(self.shapes[index].clone());continue;};
             if overlap==0{rejected.push(self.shapes[index].clone());continue;}
-            let old_layers=self.layers.clone();let old_shapes=self.shapes.clone();let old_frozen=self.frozen.clone();let old_current=self.current.clone();let old_score=self.score;let metrics=self.detail_metrics();
+            let old_layers=self.layers.clone();let old_shapes=self.shapes.clone();let old_frozen=self.frozen.clone();let old_current=self.current.clone();let old_score=self.score;let old_contour=self.contour_total();let metrics=self.detail_metrics();
             let layer=self.layers.remove(index);let shape=self.shapes.remove(index);let frozen=self.frozen.remove(index);
             self.layers.insert(destination,layer);self.shapes.insert(destination,shape);self.frozen.insert(destination,frozen);
             let mut canvas=vec![self.background_pixel();self.target.len()];
@@ -701,7 +701,7 @@ impl RgbaModel {
             let complete=self.refine_observed(1,crate::refine::ROUNDS,&mut *cancelled,|_,_,_,_|{});
             self.frozen=moved_frozen;
             let after=self.detail_metrics();
-            if complete&&self.score<old_score&&after.0<=metrics.0&&after.1<=metrics.1{
+            if complete&&self.score+self.contour_total()<old_score+old_contour&&after.0<=metrics.0&&after.1<=metrics.1{
                 rejected.clear();
                 for i in destination..=index{observer(trial+1,trials,i,&self.shapes[i]);}
             }else{
@@ -778,7 +778,7 @@ impl RgbaModel {
             let disc=((a-d).powi(2)+4.0*b*b).sqrt();let angle=0.5*(2.0*b).atan2(a-d).to_degrees();
             let ellipse=Shape::RotatedEllipse(RotatedEllipse{x:mx,y:my,rx:(2.0*((a+d+disc)/2.0).max(0.0).sqrt()).max(1.0),ry:(2.0*((a+d-disc)/2.0).max(0.0).sqrt()).max(1.0),angle});
             let candidates:Vec<Shape>=crate::mixed::FAMILIES.iter().filter(|f|self.family==ShapeKind::Mixed||self.family==**f).filter_map(|f|crate::mixed::replacement(&ellipse,*f)).collect();
-            let old_layers=self.layers.clone();let old_shapes=self.shapes.clone();let old_frozen=self.frozen.clone();let old_current=self.current.clone();let old_score=self.score;let metrics=self.detail_metrics();
+            let old_layers=self.layers.clone();let old_shapes=self.shapes.clone();let old_frozen=self.frozen.clone();let old_current=self.current.clone();let old_score=self.score;let old_contour=self.contour_total();let metrics=self.detail_metrics();
             let old_matte=self.matte_error();
             let mut winner:Option<(f64,Vec<Shape>,Vec<DrawnShape>,Vec<bool>,Vec<[f64;4]>)>=None;
             for merged in candidates{
@@ -802,7 +802,7 @@ impl RgbaModel {
                 // Bit 21: accept on the composite error over black and white (which
                 // counts spill) instead of requiring no opaque or spill increase at all.
                 let guarded=if self.line_variant&(1<<21)!=0{self.matte_error()<old_matte}else{after.0<=metrics.0&&after.1<=metrics.1};
-                if self.score<old_score&&guarded&&winner.as_ref().is_none_or(|w|self.score<w.0){
+                if self.score+self.contour_total()<old_score+old_contour&&guarded&&winner.as_ref().is_none_or(|w|self.score<w.0){
                     winner=Some((self.score,self.layers.clone(),self.shapes.clone(),self.frozen.clone(),self.current.clone()));
                 }
             }

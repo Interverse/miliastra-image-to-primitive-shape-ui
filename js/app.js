@@ -229,6 +229,7 @@
     $("shapeHint").hidden=method!=="legacy";
     $("mixedShapeHint").hidden=!(primeval&&$("shapeMixed").checked&&$("primevalSpeed").value!=="turbo");
     $("focusSettings").hidden=!(primeval&&$("primevalSpeed").value==="turbo");
+    $("contourHint").hidden=$("focusSettings").hidden;
     $("experimentalSettings").hidden=$("focusSettings").hidden;
     syncFocusButtons();
     $("gaussianSettings").hidden=!gaussian;
@@ -849,6 +850,7 @@
       cfg.allowed_shapes=method==="gaussian"?["blurred_circle"]:[shape];
       if(method==="primeval"){
         cfg.primeval_turbo=$("primevalSpeed").value==="turbo";
+        cfg.primeval_contour_smoothing=cfg.primeval_turbo?1:0;
         cfg.primeval_speed=cfg.primeval_turbo?"fast":$("primevalSpeed").value;
         cfg.primeval_resolution=Number($("primevalResolution").value)||512;
         cfg.primeval_seed=42;
@@ -1094,7 +1096,7 @@
     }
 
     let workerFile = job.config.mode === "outline" ? "js/worker-outline.js?v=structure-priority-7" :
-      job.config.fit_method === "primeval" ? "js/worker-primeval.js?v=pause-save-1" :
+      job.config.fit_method === "primeval" ? "js/worker-primeval.js?v=smooth-contours-1" :
       job.config.fit_method === "compression" ? "js/worker-compress.js?v=3" :
       (job.config.allowed_shapes || []).includes("blurred_circle") ?
         "js/worker-gaussian.js?v=structure-priority-7" : "js/worker-fill.js?v=structure-priority-7";
@@ -2106,6 +2108,7 @@
     $("retryPrimevalSettings").hidden=method!=="primeval";
     $("retryMixedShapeHint").hidden=!(method==="primeval"&&$("retryShapeMixed").checked&&$("retryPrimevalSpeed").value!=="turbo");
     $("retryFocusSettings").hidden=!(method==="primeval"&&$("retryPrimevalSpeed").value==="turbo");
+    $("retryContourHint").hidden=$("retryFocusSettings").hidden;
     $("retryExperimentalSettings").hidden=$("retryFocusSettings").hidden;
     retryShapeInputs.forEach(input=>input.closest(".shape-check").classList.toggle("active",input.checked));
   }
@@ -2129,6 +2132,7 @@
       primeval_resolution:Number($("retryPrimevalResolution").value)||512,primeval_seed:42,
       ai_upscale:method==="primeval"&&$("retryAiUpscale").checked,
       primeval_experiments:turbo?readExperiments("retry"):[],
+      primeval_contour_smoothing:turbo?1:0,
       gaussian_algorithm:$("retryGaussianAlgorithm").value,
       gaussian_iterations:Math.max(1,Math.round(Number($("retryGaussianIterations").value)||600)),
       gaussian_resolution:Number($("retryGaussianResolution").value)||512,

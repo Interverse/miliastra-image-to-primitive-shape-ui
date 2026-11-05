@@ -86,8 +86,10 @@ frame.addEventListener('load',async()=>{
   focusSwitch.click();check(focusSwitch.checked&&!pill.hidden,'switch turns focus back on');
   check(!$('experimentalSettings').hidden&&$('experimentalList').querySelectorAll('input[data-experiment]').length===8&&$('experimentalCount').hidden,'Remaining research options listed for Turbo, none chosen');
   check(!d.querySelector('[data-experiment="groups"]'),'Failed nested-group experiment is not selectable');
+  check(!$('contourHint').hidden,'Turbo describes automatic smoother contours without adding shape combinations');
   const firstExperiment=$('experimentalList').querySelector('input');firstExperiment.click();check($('experimentalCount').textContent==='1'&&!$('experimentalCount').hidden,'chosen experimental options are counted');firstExperiment.click();
   change('primevalSpeed','fast');check($('focusSettings').hidden&&d.querySelector('.file-thumb-focus').hidden,'Focus detail hidden for Maximum Detail');
+  check($('contourHint').hidden,'Maximum Detail preserves its original objective');
   check($('experimentalSettings').hidden&&$('experimentalSettings').offsetHeight===0,'Experimental options hidden for Maximum Detail');
   d.querySelector('.file-thumb-remove').click();check(!d.querySelector('.file-thumb'),'last image removed');
   // The golden comparisons below use Maximum Detail, as chosen before this block.
