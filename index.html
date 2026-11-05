@@ -13,7 +13,7 @@
   </script>
   <title data-i18n="app.pageTitle">Miliastra Wonderland Image Fitter</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='38' cy='42' r='26' fill='%234355B9'/%3E%3Crect x='48' y='44' width='36' height='36' rx='6' fill='%23E8A317' transform='rotate(12 66 62)'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="css/style.css?v=43">
+  <link rel="stylesheet" href="css/style.css?v=pause-save-1">
 </head>
 <body>
   <header class="topbar">
@@ -46,13 +46,6 @@
           <div id="uploadWarning" class="upload-warning" hidden aria-live="polite" data-i18n="upload.largeWarning"></div>
         </div>
         <p class="hint focus-thumb-hint" id="focusThumbHint" hidden data-i18n="focus.thumbHint"></p>
-        <div id="focusSettings" class="focus-settings">
-          <label class="focus-switch">
-            <input type="checkbox" role="switch" id="focusDetail" checked>
-            <span class="focus-switch-track" aria-hidden="true"></span>
-            <span class="focus-switch-text"><strong data-i18n="focus.toggle">Focus detail</strong><small data-i18n="focus.hint"></small></span>
-          </label>
-        </div>
         <p class="hint" data-i18n="fitting.formats"></p>
         <p class="hint" data-i18n="upload.multiHint"></p>
       </section>
@@ -81,6 +74,21 @@
               <label for="primevalResolution" data-i18n="fillParams.gaussianResolution">Detail (px)</label>
               <input id="primevalResolution" type="number" min="32" max="2048" step="1" value="512" class="num-input">
             </div>
+            <fieldset class="enhancement-controls">
+              <legend data-i18n="upscale.enhancements">Enhancements</legend>
+        <div id="focusSettings" class="focus-settings">
+          <label class="focus-switch">
+            <input type="checkbox" role="switch" id="focusDetail" checked>
+            <span class="focus-switch-track" aria-hidden="true"></span>
+            <span class="focus-switch-text"><strong data-i18n="focus.toggle">Focus detail</strong><small data-i18n="focus.hint"></small></span>
+          </label>
+        </div>
+            <label class="focus-switch">
+              <input type="checkbox" id="aiUpscale">
+              <span class="focus-switch-track" aria-hidden="true"></span>
+              <span class="focus-switch-text"><strong data-i18n="upscale.toggle">Upscale</strong><small data-i18n="upscale.hint">Enhances each source locally before fitting. Can be slow.</small></span>
+            </label>
+            </fieldset>
           </div>
           <div class="shape-checks" id="legacyShapeChecks">
             <label class="shape-check"><input type="radio" name="fitShape" id="shapeMixed" checked><span class="shape-icon">△○□</span><span data-i18n="shapes.mixed">Mixed</span></label>
@@ -288,7 +296,10 @@
         <span data-i18n="batch.empty.text"></span>
       </div>
 
-      <section class="generation-preview"><h3 id="generationPreviewTitle" data-i18n="editor.progress">Generation preview</h3><p id="previewJobName" class="hint"></p><div id="generationVector" hidden></div><img id="generationPreview" alt="" hidden><p id="generationStatus" class="hint"></p><progress id="refinementProgress" max="1" value="0" hidden aria-labelledby="generationStatus"></progress></section>
+      <section class="generation-preview">
+        <div class="generation-preview-heading"><h3 id="generationPreviewTitle" data-i18n="editor.progress">Generation preview</h3><button type="button" id="btnPausePreview" class="btn-tonal" data-i18n="batch.pauseSave" data-i18n-title="batch.pauseSaveHint" hidden>Pause &amp; save</button></div>
+        <p id="previewJobName" class="hint"></p><div id="generationVector" hidden></div><img id="generationPreview" alt="" hidden><p id="generationStatus" class="hint"></p><progress id="refinementProgress" max="1" value="0" hidden aria-labelledby="generationStatus"></progress>
+      </section>
       <div class="job-list" id="jobList"></div>
       <p class="local-note" data-i18n="footer.local"></p>
     </main>
@@ -427,10 +438,21 @@
             <label for="retryPrimevalResolution" data-i18n="fillParams.gaussianResolution">Detail (px)</label>
             <input id="retryPrimevalResolution" type="number" min="32" max="2048" step="1" value="512" class="num-input">
           </div>
+          <fieldset class="enhancement-controls">
+            <legend data-i18n="upscale.enhancements">Enhancements</legend>
           <div id="retryFocusSettings" class="focus-settings">
-            <label class="check-label"><input type="checkbox" id="retryFocusDetail" checked><span data-i18n="focus.toggle">Focus detail</span></label>
-            <p class="hint" data-i18n="focus.hint"></p>
+            <label class="focus-switch">
+              <input type="checkbox" role="switch" id="retryFocusDetail" checked>
+              <span class="focus-switch-track" aria-hidden="true"></span>
+              <span class="focus-switch-text"><strong data-i18n="focus.toggle">Focus detail</strong><small data-i18n="focus.hint"></small></span>
+            </label>
           </div>
+          <label class="focus-switch">
+            <input type="checkbox" id="retryAiUpscale">
+            <span class="focus-switch-track" aria-hidden="true"></span>
+            <span class="focus-switch-text"><strong data-i18n="upscale.toggle">Upscale</strong></span>
+          </label>
+          </fieldset>
           <details id="retryExperimentalSettings" class="experimental-settings">
             <summary><span data-i18n="experimental.title">Experimental</span> <span id="retryExperimentalCount" class="val-tag" hidden></span></summary>
             <div id="retryExperimentalList" class="experimental-list"></div>
@@ -706,7 +728,9 @@
   <script src="js/locales/compression.js?v=3"></script>
   <script src="js/locales/fitting.js?v=11"></script>
   <script src="js/locales/focus.js?v=6"></script>
-  <script src="js/locales/experimental.js?v=2"></script>
+  <script src="js/locales/experimental.js?v=retired-groups-1"></script>
+  <script src="js/locales/pause.js?v=1"></script>
+  <script src="js/locales/upscale.js?v=3"></script>
   <script src="js/i18n.js?v=25"></script>
   <script src="js/zip.js?v=24"></script>
   <script src="js/gia.js?v=26"></script>
@@ -715,10 +739,11 @@
   <script src="js/png-decode.js?v=24"></script>
   <script src="js/gaussian.js?v=25"></script>
   <script src="js/compression-quality.js?v=1"></script>
-  <script src="js/primeval-result.js?v=3"></script>
+  <script src="js/primeval-result.js?v=5"></script>
+  <script src="js/progress-result.js?v=1"></script>
   <script src="js/native-edit.js?v=3"></script>
   <script src="js/gizmo-resize.js?v=1"></script>
   <script src="js/focus.js?v=1"></script>
-  <script src="js/app.js?v=structure-priority-75"></script>
+  <script src="js/app.js?v=pause-save-1"></script>
 </body>
 </html>

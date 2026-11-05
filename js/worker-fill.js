@@ -1492,6 +1492,8 @@ function processFill(jobId, rgba, width, height, config) {
   if (config.guided_sampling) model.enableGuidedSampling();
 
   const results = [];
+  const checkpointResults=[];
+  let checkpointAlpha=null;
   let done = 0;
   for (const [mode, count] of shapeConfigs) {
     for (let i = 0; i < count; i++) {
@@ -1504,10 +1506,20 @@ function processFill(jobId, rgba, width, height, config) {
       res.packed_color = packColor(res.color, res.alpha);
       results.push(res);
       done++;
-      if (done % Math.max(1,Math.floor(numPrimitives/40)) === 0 || done === numPrimitives) {
+      if (done === 1 || done % Math.max(1,Math.floor(numPrimitives/40)) === 0 || done === numPrimitives) {
         const preview=new Uint8ClampedArray(model.current.length);
         for(let p=0;p<preview.length;p+=4){const a=model.current[p+3];for(let c=0;c<3;c++)preview[p+c]=a?model.current[p+c]*255/a:0;preview[p+3]=a;}
-        postMessage({ type: "progress", jobId, step: done, total: numPrimitives,previewRGBA:preview.buffer,previewWidth:model.w,previewHeight:model.h },[preview.buffer]);
+        if(transparentOutput&&!checkpointAlpha){checkpointAlpha=new Float64Array(n);for(let p=0;p<n;p++)checkpointAlpha[p]=rgba[p*4+3]/255;}
+        for(let p=checkpointResults.length;p<results.length;p++){
+          const res={...results[p]};
+          if(transparentOutput){const opacity=shapeOpacity(res,checkpointAlpha,width,height);res.alpha=opacity<=MIN_VISIBLE_ALPHA_WEIGHT?0:Imaging.clamp(res.alpha*opacity,0,1);res.packed_color=packColor(res.color,res.alpha);}
+          checkpointResults.push(res);
+        }
+        const elements=resultsToElements(checkpointResults,imageScale,imageCenter,config.primitives||[],outputAlpha);
+        if(needsWhiteBackground)elements.unshift({type:'rectangle',shape:'rect',center:{x:width/2*imageScale,y:-height/2*imageScale},relative:{x:(width/2-imageCenter[0])*imageScale,y:(imageCenter[1]-height/2)*imageScale},size:{width:(width+8)*imageScale,height:(height+8)*imageScale},rotation:0,color:'#ffffff',alpha:1,packed_color:0xffffffff,is_background:true});
+        const checkpoint={mode:'fill',image_size:{width,height},image_center:{x:imageCenter[0],y:imageCenter[1]},elements,elements_count:elements.length,mask:{enabled:false},mask_gray:null,preview_rgba:null,
+          config:{...config,mode:'fill',engine:'primitive',fill_variant:transparentOutput?'png':'mask',output_has_transparency:transparentOutput,pixel_per_unit:PyNum.round(1/imageScale,6),unit_scale:imageScale,image_scale:imageScale,num_primitives:numPrimitives}};
+        postMessage({ type: "progress", jobId, step: done, total: numPrimitives,previewRGBA:preview.buffer,previewWidth:model.w,previewHeight:model.h,checkpoint },[preview.buffer]);
       }
     }
   }

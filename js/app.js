@@ -206,7 +206,7 @@
     list.addEventListener("change",()=>syncExperimentCount(prefix));
   }
   function readExperiments(prefix){
-    return [...$(prefix?"retryExperimentalList":"experimentalList").querySelectorAll("input[data-experiment]:checked")].map(input=>input.dataset.experiment);
+    return [...$(prefix?"retryExperimentalList":"experimentalList").querySelectorAll("input[data-experiment]:checked:not(:disabled)")].map(input=>input.dataset.experiment);
   }
   function setExperiments(prefix,keys){
     const chosen=new Set(Array.isArray(keys)?keys:[]);
@@ -852,6 +852,7 @@
         cfg.primeval_speed=cfg.primeval_turbo?"fast":$("primevalSpeed").value;
         cfg.primeval_resolution=Number($("primevalResolution").value)||512;
         cfg.primeval_seed=42;
+        cfg.ai_upscale=$("aiUpscale").checked;
         const focus=entry&&entry.focus||{enabled:true,automatic:true,areas:[]};
         cfg.focus={enabled:cfg.primeval_turbo&&$("focusDetail").checked&&focus.enabled!==false,automatic:focus.automatic,areas:focus.areas.map(area=>area.slice())};
         cfg.primeval_experiments=cfg.primeval_turbo?readExperiments(""):[];
@@ -1042,6 +1043,7 @@
 
   async function startJob(job) {
     job.status = "processing";
+    job.startedAt=performance.now();
     if(job.config.fit_method==='primeval'){
       const slots=Math.max(1,Math.min(MAX_CONCURRENT,runningCount()+jobs.filter(j=>j.status==='queued').length));
       job.config.primeval_threads=Math.max(1,Math.min(16,Math.floor((navigator.hardwareConcurrency||1)/slots)));
@@ -1092,7 +1094,7 @@
     }
 
     let workerFile = job.config.mode === "outline" ? "js/worker-outline.js?v=structure-priority-7" :
-      job.config.fit_method === "primeval" ? "js/worker-primeval.js?v=structure-priority-7" :
+      job.config.fit_method === "primeval" ? "js/worker-primeval.js?v=pause-save-1" :
       job.config.fit_method === "compression" ? "js/worker-compress.js?v=3" :
       (job.config.allowed_shapes || []).includes("blurred_circle") ?
         "js/worker-gaussian.js?v=structure-priority-7" : "js/worker-fill.js?v=structure-priority-7";
@@ -1103,17 +1105,21 @@
 
     worker.onmessage = (event) => {
       const msg = event.data;
-      if (msg.jobId !== job.id) return;
+      if (msg.jobId !== job.id || job.status!=="processing") return;
       if (msg.type === "progress") {
+        const wasReady=canPauseJob(job);
+        if(job.config.fit_method==='primeval')job.partialDrawing=ProgressResult.update(job.partialDrawing,msg);
+        if(msg.checkpoint)job.checkpoint=msg.checkpoint;
         if(!msg.previewOnly)job.progress = msg.step;
         if(!msg.previewOnly)job.progressTotal = msg.total;
         updateGenerationPreview(job,msg);
         if(msg.refinementTotal){job.refinementStep=msg.refinementStep;job.refinementTotal=msg.refinementTotal;}else if(msg.shapeSvg){job.refinementTotal=0;}
         const phase=msg.phase || "";
-        if(job.phase!==phase){job.phase=phase;renderJobs();}
+        if(job.phase!==phase||wasReady!==canPauseJob(job)){job.phase=phase;renderJobs();}
         scheduleProgressFlush();
       } else if (msg.type === "done") {
         job.result = msg.result;
+        job.partialDrawing=null;job.checkpoint=null;
         updateGenerationPreview(job,{});
         if(msg.result.primeval_png){job.primevalOriginalElements=JSON.stringify(msg.result.elements);job.primevalEdited=false;}
         job.status = "done";
@@ -1123,13 +1129,15 @@
         pumpQueue();
       } else if (msg.type === "error") {
         job.status = "error";
-        job.error = msg.message==="COMPRESSION_EXACT_BUDGET" ? t("compression.exactBudget") : msg.message;
+        job.error = msg.message==="COMPRESSION_EXACT_BUDGET" ? t("compression.exactBudget") :
+          msg.message==="AI_UPSCALE_LIMIT" ? t("upscale.limit") : msg.message;
         worker.terminate(); // unknown worker state — do not pool
         job.worker = null;
         pumpQueue();
       }
     };
     worker.onerror = (event) => {
+      if(job.status!=="processing")return;
       job.status = "error";
       job.error = event.message || t("error.workerFailed");
       worker.terminate();
@@ -1155,10 +1163,41 @@
     } else if (job.status === "processing") {
       if (job.focusToken) { job.focusToken.cancelled = true; if (job.focusToken.abort) job.focusToken.abort(); }
       if (job.worker) { job.worker.terminate(); job.worker = null; }
+      job.partialDrawing=null;job.checkpoint=null;
       job.status = "cancelled";
     }
     pumpQueue();
   }
+
+  function canPauseJob(job){
+    return job?.status==='processing'&&!!(job.partialDrawing?.shapes.length||job.checkpoint?.elements?.length);
+  }
+  async function pauseJob(job){
+    if(!canPauseJob(job))return;
+    // Terminate immediately; a stalled synchronous fitter cannot service messages.
+    // The last completed vector checkpoint is retained on the main thread.
+    job.status='pausing';
+    if(job.worker){job.worker.onmessage=null;job.worker.onerror=null;job.worker.terminate();job.worker=null;}
+    pumpQueue();
+    try{
+      const decoded=await decodeToRGBA(job.file);
+      if(!jobs.includes(job))return;
+      const result=job.partialDrawing
+        ?ProgressResult.primeval(job.partialDrawing,job.config,decoded.width,decoded.height)
+        :structuredClone(job.checkpoint);
+      result.image_rgba=decoded.data.data.buffer;
+      result.config={...result.config,partial:true,paused:true,partial_reason:'user-paused',
+        requested_num_primitives:job.config.num_primitives,
+        completed_primitives:result.elements.filter(e=>!e.is_background).length};
+      result.elapsed_seconds=Math.round((performance.now()-job.startedAt)/10)/100;
+      job.result=result;job.status='paused';job.assets=null;
+      job.partialDrawing=null;job.checkpoint=null;
+      if(result.primeval_drawing)job.primevalOriginalElements=JSON.stringify(result.elements);
+      updateGenerationPreview(job,{});
+      renderJobs();showResult(job);
+    }catch(error){job.status='error';job.error=error.message||t('error.decode');renderJobs();}
+  }
+  $('btnPausePreview').addEventListener('click',()=>pauseJob(jobs.find(j=>j.id===selectedPreviewJobId)));
 
   $("btnSubmit").addEventListener("click", () => {
     if (!pendingFiles.length) {
@@ -1185,7 +1224,7 @@
 
   $("btnClearDone").addEventListener("click", () => {
     for (let i = jobs.length - 1; i >= 0; i--) {
-      if (["done", "error", "cancelled"].includes(jobs[i].status)) jobs.splice(i, 1);
+      if (["done", "paused", "error", "cancelled"].includes(jobs[i].status)) jobs.splice(i, 1);
     }
     renderJobs();
   });
@@ -1222,21 +1261,21 @@
 
   function renderOverall() {
     const active = jobs.filter((job) => job.status !== "cancelled");
-    const doneCount = jobs.filter((job) => job.status === "done").length;
+    const doneCount = jobs.filter((job) => ["done","paused"].includes(job.status)).length;
     const hasWork = jobs.some((job) => job.status === "queued" || job.status === "processing");
     $("overallProgress").hidden = !jobs.length;
     $("btnCancelAll").hidden = !hasWork;
-    $("btnClearDone").hidden = !jobs.some((job) => ["done", "error", "cancelled"].includes(job.status));
-    const hasFinished=jobs.some(job=>job.status==="done"&&job.result);
+    $("btnClearDone").hidden = !jobs.some((job) => ["done", "paused", "error", "cancelled"].includes(job.status));
+    const hasFinished=jobs.some(job=>["done","paused"].includes(job.status)&&job.result);
     $("btnDownloadAll").hidden = !hasFinished;
     $("batchLuaTemplateField").hidden = !hasFinished;
-    $("batchLuaBudgetNote").hidden = !jobs.some(job=>job.status==="done"&&job.result&&!compressionLuaFits(job.result));
+    $("batchLuaBudgetNote").hidden = !jobs.some(job=>["done","paused"].includes(job.status)&&job.result&&!compressionLuaFits(job.result));
     if (!jobs.length) return;
     let totalProgress = 0;
     let denom = 0;
     for (const job of active) {
       denom++;
-      if (job.status === "done") totalProgress += 1;
+      if (["done","paused"].includes(job.status)) totalProgress += 1;
       else if (job.status === "processing" && job.progressTotal) totalProgress += job.progress / job.progressTotal;
     }
     const pct = denom ? Math.round(100 * totalProgress / denom) : 0;
@@ -1250,6 +1289,8 @@
     selectedPreviewJobId=job?.id||null;
     $('generationStatus').closest('section').hidden=!job;
     $('previewJobName').textContent=job?.name||'';
+    $('btnPausePreview').hidden=job?.status!=='processing';
+    $('btnPausePreview').disabled=!canPauseJob(job);
     const vector=$('generationVector'),img=$('generationPreview');
     vector.hidden=!job?.previewVector;img.hidden=!!job?.previewVector||!job?.previewUrl;
     if(job?.previewVector&&vector.firstChild!==job.previewVector)vector.replaceChildren(job.previewVector);
@@ -1261,13 +1302,47 @@
     document.querySelectorAll('#jobList .job-card').forEach(card=>card.classList.toggle('preview-selected',card.dataset.jobId===selectedPreviewJobId));
   }
   function scheduleGenerationPreview(){if(previewFramePending)return;previewFramePending=true;requestAnimationFrame(()=>{previewFramePending=false;renderGenerationPreview();});}
+  function nativeProgressNode(node,width,height,config){
+    const number=(name,fallback=0)=>Number(node.getAttribute(name)??fallback);
+    const hex=node.getAttribute('fill');
+    if(!/^#[0-9a-f]{6}$/i.test(hex))return null;
+    const color=[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16));
+    color.push(Math.round(number('fill-opacity',1)*255));
+    let shape;
+    if(node.localName==='ellipse'){
+      const angle=Number((node.getAttribute('transform')||'').match(/rotate\(\s*([-\d.e]+)/)?.[1]||0);
+      shape={kind:'ellipse',geometry:[number('cx'),number('cy'),number('rx'),number('ry'),angle],color};
+    }else if(node.localName==='polygon'){
+      shape={kind:'polygon',geometry:(node.getAttribute('points')||'').trim().split(/[\s,]+/).map(Number),color};
+    }else if(node.localName==='rect'){
+      shape={kind:'rectangle',geometry:[number('x'),number('y'),number('width'),number('height')],color};
+    }else return null;
+    const elements=PrimevalResult.drawingToElements({width,height,background:[0,0,0,0],shapes:[shape]},width,height,config).elements;
+    const svg=PrimevalResult.elementsToSvg(elements,width,height,{...config,output_has_transparency:true});
+    return new DOMParser().parseFromString(svg,'image/svg+xml').documentElement.firstElementChild;
+  }
   function updateGenerationPreview(job,msg){
-    if(msg.previewSvg){
+    if(job.result?.primeval_drawing){
+      const {width,height}=job.result.image_size;
+      const svg=PrimevalResult.elementsToSvg(job.result.elements,width,height,job.result.config);
+      job.previewVector=new DOMParser().parseFromString(svg,'image/svg+xml').documentElement;
+      job.previewUrl=null;
+    }else if(msg.previewSvg){
       const root=new DOMParser().parseFromString(msg.previewSvg,'image/svg+xml').documentElement;
-      if(root.localName==='svg'){job.previewVector=document.importNode(root,true);job.previewLayers=Array.from(job.previewVector.children).filter(el=>!(el.localName==='rect'&&!el.hasAttribute('x')&&!el.hasAttribute('transform')));}
+      if(root.localName==='svg'){
+        job.previewWidth=Number(root.getAttribute('width'));job.previewHeight=Number(root.getAttribute('height'));
+        const nodes=Array.from(root.children);root.replaceChildren();job.previewLayers=[];
+        for(const node of nodes){
+          const background=node.localName==='rect'&&!node.hasAttribute('x')&&!node.hasAttribute('transform');
+          const native=nativeProgressNode(node,job.previewWidth,job.previewHeight,job.config);
+          if(native){root.append(native);if(!background)job.previewLayers.push(native);}
+        }
+        job.previewVector=root;
+      }
     }else if(msg.shapeSvg&&Number.isInteger(msg.previewIndex)&&job.previewVector){
       const root=new DOMParser().parseFromString('<svg xmlns="http://www.w3.org/2000/svg">'+msg.shapeSvg+'</svg>','image/svg+xml').documentElement;
-      const node=root.firstElementChild;if(node){const imported=document.importNode(node,true),old=job.previewLayers[msg.previewIndex];if(old)old.replaceWith(imported);else job.previewVector.append(imported);job.previewLayers[msg.previewIndex]=imported;}
+      const node=root.firstElementChild;
+      if(node){const native=nativeProgressNode(node,job.previewWidth,job.previewHeight,job.config),old=job.previewLayers[msg.previewIndex];if(native){if(old)old.replaceWith(native);else job.previewVector.append(native);job.previewLayers[msg.previewIndex]=native;}}
     }else if(msg.previewRGBA){job.previewVector=null;job.previewUrl=rgbaToCanvas(msg.previewRGBA,msg.previewWidth,msg.previewHeight).toDataURL();}
     else if(job.result?.preview_rgba){job.previewVector=null;job.previewUrl=rgbaToCanvas(job.result.preview_rgba,job.result.image_size.width,job.result.image_size.height).toDataURL();}
     scheduleGenerationPreview();
@@ -1309,9 +1384,10 @@
       status.textContent = job.status === "done" && job.result?.config?.quality?.classification === "quality-regression" ? t("compression.failed") :
         job.status === "processing" && ["native","lossless","partition","fit","refine"].includes(job.phase) ? t("compression.phase."+job.phase) :
         job.status==="processing"&&job.phase==="model" ? t("batch.phase.model") :
-        job.status==="processing"&&job.phase==="focus" ? t("batch.phase.focus") : statusLabel(job.status);
+        job.status==="processing"&&job.phase==="focus" ? t("batch.phase.focus") :
+        job.status==="processing"&&job.phase==="upscale" ? t("upscale.phase") : statusLabel(job.status);
       statusRow.appendChild(status);
-      if (job.status === "done" && job.result) {
+      if (["done","paused"].includes(job.status) && job.result) {
         const info = document.createElement("span");
         info.textContent = t("batch.elements", { n: job.result.elements_count }) +
           " · " + t("batch.elapsed", { s: job.result.elapsed_seconds });
@@ -1344,7 +1420,7 @@
 
       const actions = document.createElement("div");
       actions.className = "job-actions";
-      if (job.status === "done") {
+      if (["done","paused"].includes(job.status)) {
         const view = document.createElement("button");
         view.className = "btn-text";
         view.textContent = t("batch.viewResult");
@@ -1352,13 +1428,18 @@
         actions.appendChild(view);
       }
       if (job.status === "queued" || job.status === "processing") {
+        if(job.status==='processing'){
+          const pause=document.createElement('button');pause.className='btn-text';pause.textContent=t('batch.pauseSave');
+          pause.title=t('batch.pauseSaveHint');pause.disabled=!canPauseJob(job);pause.dataset.pauseJob=job.id;
+          pause.addEventListener('click',()=>pauseJob(job));actions.appendChild(pause);
+        }
         const cancel = document.createElement("button");
         cancel.className = "btn-text danger";
         cancel.textContent = t("batch.cancel");
         cancel.addEventListener("click", () => { cancelJob(job); renderJobs(); });
         actions.appendChild(cancel);
       }
-      if (["done", "error", "cancelled"].includes(job.status)) {
+      if (["done", "paused", "error", "cancelled"].includes(job.status)) {
         const remove = document.createElement("button");
         remove.className = "btn-text";
         remove.textContent = t("batch.remove");
@@ -1955,7 +2036,7 @@
     $("statTriangle").textContent = String(triangleCount);
     $("statImgSize").textContent = `${data.image_size.width}×${data.image_size.height}`;
     $("elemCountDisplay").textContent = t("result.canvas.elements", { n: elements.length });
-    $("topbarStatus").textContent = t("result.done", { count: data.elements_count, elapsed: data.elapsed_seconds });
+    $("topbarStatus").textContent = t(data.config?.partial?"result.paused":"result.done", { count: data.elements_count, elapsed: data.elapsed_seconds });
     updateCompressionReport();
 
     const hasMask = Boolean(R.job.result.mask_gray);
@@ -1993,6 +2074,7 @@
       for(const [id,shape] of shapePairs)$("retryShape"+id).checked=shape===(allowed.find(s=>["circle","rect","triangle","mixed"].includes(s)) || "mixed");
       $("retryPrimevalSpeed").value=cfg.primeval_turbo?"turbo":"fast";
       $("retryPrimevalResolution").value=cfg.primeval_resolution || 512;
+      $("retryAiUpscale").checked=!!R.job.config.ai_upscale;
       $("retryFocusDetail").checked=cfg.focus?cfg.focus.enabled!==false||!cfg.primeval_turbo:true;
       setExperiments("retry",cfg.primeval_experiments);
       $("retryGaussianAlgorithm").value=cfg.gaussian_algorithm || "gaussianimage";
@@ -2045,6 +2127,7 @@
       primeval_turbo:method==="primeval"&&$("retryPrimevalSpeed").value==="turbo",
       primeval_speed:$("retryPrimevalSpeed").value==="turbo"?"fast":$("retryPrimevalSpeed").value,
       primeval_resolution:Number($("retryPrimevalResolution").value)||512,primeval_seed:42,
+      ai_upscale:method==="primeval"&&$("retryAiUpscale").checked,
       primeval_experiments:turbo?readExperiments("retry"):[],
       gaussian_algorithm:$("retryGaussianAlgorithm").value,
       gaussian_iterations:Math.max(1,Math.round(Number($("retryGaussianIterations").value)||600)),
@@ -2394,7 +2477,7 @@
     if (!R || $("previewCompare").hidden) return;
     const job = R.job, assets = ensureJobAssets(job);
     const edited = job.result.primeval_png ? job.primevalEdited : Boolean(job.editUndo && job.editUndo.length);
-    if (!edited) { if (assets.preview) $("previewImg").src = assets.preview.toDataURL("image/png"); return; }
+    if (!edited && !job.result.primeval_drawing && !job.result.config?.partial) { if (assets.preview) $("previewImg").src = assets.preview.toDataURL("image/png"); return; }
     const { width, height } = R.data.image_size, scale = Math.min(1, 320 / Math.max(width, height));
     const thumb = document.createElement("canvas");
     thumb.width = Math.max(1, Math.round(width * scale)); thumb.height = Math.max(1, Math.round(height * scale));
@@ -2888,7 +2971,7 @@
       group_name: exportBaseName || null,
       origin: originUnits,
       image_size: data.image_size,
-      config: data.config?.engine==="primeval-browser"?{...R.job.config,...data.config}:R.job.config || data.config,
+      config: data.config?.engine==="primeval-browser"||data.config?.partial?{...R.job.config,...data.config}:R.job.config || data.config,
       mask: data.mask || null,
       elements: renderOrderedElements(data).map((element, index) => ({
         id: element.id != null ? element.id : index,
@@ -3472,7 +3555,7 @@
   /* ─────────────── download all (ZIP) ─────────────── */
 
   $("btnDownloadAll").addEventListener("click", async () => {
-    const doneJobs = jobs.filter((job) => job.status === "done" && job.result);
+    const doneJobs = jobs.filter((job) => ["done","paused"].includes(job.status) && job.result);
     if (!doneJobs.length) {
       alert(t("batch.downloadAllNothing"));
       return;
@@ -3515,7 +3598,7 @@
           group_name: job.baseName,
           origin: originUnits,
           image_size: data.image_size,
-          config: job.config,
+          config: data.config?.partial?{...job.config,...data.config}:job.config,
           mask: data.mask || null,
           elements: data.elements,
         };

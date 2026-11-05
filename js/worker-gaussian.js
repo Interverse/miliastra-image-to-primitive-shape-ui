@@ -228,6 +228,7 @@ async function fitPyramid(rgba,width,height,count,resolution,transparent,config,
       seed:(Number(config.seed)||1)+level,cancelled:hooks.cancelled,
       progress:()=>{if(hooks.progress)hooks.progress(consumed,iterations);}});
     if(!grown)return null;
+    if(hooks.preview)hooks.preview(grown.params,fw,fh,transparent);
     const steps=level===levels.length-1?iterations-consumed:Math.max(1,Math.round(iterations*fractions[level]));
     const recycle=level===levels.length-1&&count>=16&&steps>=100;
     const firstSteps=recycle?Math.max(1,Math.floor(steps*0.8)):steps;
@@ -290,6 +291,24 @@ function toElements(params, fitWidth, fitHeight, width, height, config) {
   return out;
 }
 
+function gaussianResult(params, fw, fh, width, height, config, transparent, fitted = {}) {
+  const elements = toElements(params, fw, fh, width, height, config);
+  const origin = config.origin || {}, custom = origin.type === "custom";
+  const center = { x: origin.type === "top_left" ? 0 : custom ? Number(origin.x) : width / 2,
+    y: origin.type === "top_left" ? 0 : custom ? Number(origin.y) : height / 2 };
+  const scale = clamp(Number(config.image_scale) || 1, 0.1, 100);
+  for (const el of elements) el.relative = { x: el.center.x - center.x * scale, y: el.center.y + center.y * scale };
+  return { mode: "fill", image_center: center, image_size: { width, height }, elements_count: elements.length, elements,
+    config: { mode: "fill", engine: "gaussianimage-browser", gaussian_algorithm:"gaussianimage", algorithm_details:fitted.method || null, gaussian_profile: "normalized-3sigma-approximation", blending: "source-over",
+      allowed_shapes: ["blurred_circle"], pixel_per_unit: 1 / scale, unit_scale: scale, image_scale: scale,
+      num_primitives: Number(config.num_primitives ?? 400), enable_png_mode: !!config.enable_png_mode, output_has_transparency: transparent,
+      fill_variant: transparent ? "png" : "mask", gaussian_resolution: Math.max(32, Math.round(Number(config.gaussian_resolution) || 512)),
+      gaussian_iterations: Math.max(1, Math.round(Number(config.gaussian_iterations) || 600)),
+      training_size: { width: fw, height: fh },
+      initial_loss: fitted.initialLoss, final_loss: fitted.loss, weighted_loss:fitted.weightedLoss,
+      fitting_stages:fitted.stages, quality_version:3 }, mask: { enabled: false } };
+}
+
 async function processGaussian(rgba, width, height, config = {}, hooks = {}) {
   if (!(width > 0 && height > 0) || rgba.length !== width * height * 4) throw new Error("Invalid Gaussian image dimensions");
   const started = Date.now();
@@ -299,16 +318,22 @@ async function processGaussian(rgba, width, height, config = {}, hooks = {}) {
   for (let i = 3; i < rgba.length; i += 4) if (rgba[i] < 255) { hasAlpha = true; break; }
   const transparent = !!config.enable_png_mode && hasAlpha;
   const resolution = Math.max(32, Math.round(Number(config.gaussian_resolution) || 512));
-  const algorithm="gaussianimage";
-  const fitted=await fitPyramid(rgba,width,height,count,resolution,transparent,config,hooks);
+  let lastCheckpoint = 0, checkpointSent = false;
+  const fitted=await fitPyramid(rgba,width,height,count,resolution,transparent,config,{...hooks,
+    preview:(params,fw,fh,png)=>{
+      if(hooks.preview)hooks.preview(params,fw,fh,png);
+      const now=Date.now();
+      if(hooks.checkpoint && params.length && (!checkpointSent || now-lastCheckpoint>=500)){
+        hooks.checkpoint(gaussianResult(params,fw,fh,width,height,config,transparent));
+        checkpointSent=true;lastCheckpoint=now;
+      }
+    }});
   if (!fitted) return null;
   const fw=fitted.width,fh=fitted.height;
-  const elements = toElements(fitted.params, fw, fh, width, height, config);
-  const origin = config.origin || {}, custom = origin.type === "custom";
-  const center = { x: origin.type === "top_left" ? 0 : custom ? Number(origin.x) : width / 2,
-    y: origin.type === "top_left" ? 0 : custom ? Number(origin.y) : height / 2 };
+  const result = gaussianResult(fitted.params,fw,fh,width,height,config,transparent,fitted);
+  const elements = result.elements;
   const scale = clamp(Number(config.image_scale) || 1, 0.1, 100);
-  for (const el of elements) el.relative = { x: el.center.x - center.x * scale, y: el.center.y + center.y * scale };
+  if(hooks.checkpoint)hooks.checkpoint(result);
   // Render quantized/exported parameters, including global opacity, so the
   // thumbnail matches Canvas/SVG/GIA rather than a higher-precision model.
   const renderParams = new Float64Array(fitted.params.length);
@@ -329,15 +354,7 @@ async function processGaussian(rgba, width, height, config = {}, hooks = {}) {
     preview[p + 3] = Math.round(a * 255);
     if (!transparent) image[p + 3] = 255;
   }
-  return { mode: "fill", image_center: center, image_size: { width, height }, elements_count: elements.length, elements,
-    config: { mode: "fill", engine: algorithm+"-browser", gaussian_algorithm:algorithm, algorithm_details:fitted.method || null, gaussian_profile: "normalized-3sigma-approximation", blending: "source-over",
-      allowed_shapes: ["blurred_circle"], pixel_per_unit: 1 / scale, unit_scale: scale, image_scale: scale,
-      num_primitives: count, enable_png_mode: !!config.enable_png_mode, output_has_transparency: transparent,
-      fill_variant: transparent ? "png" : "mask", gaussian_resolution: resolution,
-      gaussian_iterations: Math.max(1, Math.round(Number(config.gaussian_iterations) || 600)),
-      training_size: { width: fw, height: fh },
-      initial_loss: fitted.initialLoss, final_loss: fitted.loss, weighted_loss:fitted.weightedLoss,
-      fitting_stages:fitted.stages, quality_version:3 }, mask: { enabled: false },
+  return { ...result,
     image_rgba: image.buffer, preview_rgba: preview.buffer, mask_gray: null, elapsed_seconds: (Date.now() - started) / 1000 };
 }
 
@@ -347,11 +364,13 @@ if (typeof self !== "undefined" && typeof importScripts === "function") {
     if (msg.cmd === "cancel") { cancelled = true; return; }
     if (msg.cmd !== "process") return;
     cancelled = false;
+    let progress = {step:0,total:1}, lastPreview = 0;
     try {
       const result = await processGaussian(new Uint8ClampedArray(msg.rgba), msg.width, msg.height, {...msg.config,gaussian_algorithm:"gaussianimage"}, {
         cancelled: () => cancelled,
-        preview:(params,width,height,transparent)=>{const now=Date.now();if(now-(self.lastPreview||0)<500)return;self.lastPreview=now;const pixels=evaluate(params,width,height,null,transparent,1,0,false).pixels;const rgba=new Uint8ClampedArray(pixels.length);for(let i=0;i<pixels.length;i+=4){const a=pixels[i+3];for(let c=0;c<3;c++)rgba[i+c]=a?pixels[i+c]/a*255:0;rgba[i+3]=a*255;}postMessage({type:'progress',jobId:msg.jobId,step:0,total:1,previewOnly:true,previewRGBA:rgba.buffer,previewWidth:width,previewHeight:height},[rgba.buffer]);},
-        progress: (step, total, phase) => postMessage({ type: "progress", jobId: msg.jobId, step, total, phase }),
+        preview:(params,width,height,transparent)=>{const now=Date.now();if(now-lastPreview<500)return;lastPreview=now;const pixels=evaluate(params,width,height,null,transparent,1,0,false).pixels;const rgba=new Uint8ClampedArray(pixels.length);for(let i=0;i<pixels.length;i+=4){const a=pixels[i+3];for(let c=0;c<3;c++)rgba[i+c]=a?pixels[i+c]/a*255:0;rgba[i+3]=a*255;}postMessage({type:'progress',jobId:msg.jobId,...progress,previewOnly:true,previewRGBA:rgba.buffer,previewWidth:width,previewHeight:height},[rgba.buffer]);},
+        checkpoint:checkpoint=>postMessage({type:"progress",jobId:msg.jobId,...progress,previewOnly:true,checkpoint}),
+        progress: (step, total, phase) => {progress={step,total,phase};postMessage({ type: "progress", jobId: msg.jobId, ...progress });},
       });
       if (!result) postMessage({ type: "cancelled", jobId: msg.jobId });
       else postMessage({ type: "done", jobId: msg.jobId, result }, [result.image_rgba, result.preview_rgba]);

@@ -732,8 +732,27 @@ body {
 .experimental-settings summary::before { content: "▸"; width: 10px; color: var(--md-on-surface-variant); }
 .experimental-settings[open] summary::before { content: "▾"; }
 .experimental-list { display: grid; gap: 6px; padding-bottom: 4px; }
-/* One-click switch for Focus detail, next to the images it affects. */
+/* Shared enhancement switches for upload and re-processing. */
 /* Settings row: text on the left, switch on the right, centered vertically. */
+.enhancement-controls {
+  min-width: 0;
+  margin: 0;
+  padding: 4px 0;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-shape-md);
+  background: var(--md-surface-container);
+}
+.enhancement-controls legend {
+  margin-left: 10px;
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--md-on-surface-variant);
+}
+.enhancement-controls .focus-switch {
+  margin-top: 0;
+  border: 0;
+  border-radius: 0;
+}
 .focus-switch {
   position: relative;
   display: grid;
@@ -1255,6 +1274,10 @@ input[type="range"]::-webkit-slider-thumb {
 .job-status.done { background: var(--md-tertiary-container); color: var(--md-on-tertiary-container); }
 .job-status.error { background: var(--md-error-container); color: var(--md-on-error-container); }
 .job-status.cancelled { background: var(--md-surface-container-high); color: var(--md-outline); }
+.job-status.paused { background: var(--md-tertiary-container); color: var(--md-on-tertiary-container); }
+.job-status.pausing { background: var(--md-primary-container); color: var(--md-on-primary-container); }
+.generation-preview-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+.generation-preview-heading h3 { margin:0; }
 
 .job-progress { margin-bottom: 6px; }
 .job-progress .progress-track { height: 5px; }

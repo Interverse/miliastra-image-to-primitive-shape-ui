@@ -2,7 +2,7 @@
 'use strict';
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),http=require('node:http');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
-const root=require('../runtime-root.cjs'),site=path.join(root,'.pages-site');
+const root=require('../runtime-root.cjs'),site=path.resolve(process.env.PRIMEVAL_DEPLOYMENT_SITE||path.join(root,'.pages-site'));
 const prefix='/miliastra-image-to-primitive-shape-ui/';
 const server=http.createServer((req,res)=>{
  const pathname=decodeURIComponent(new URL(req.url,'http://local').pathname);

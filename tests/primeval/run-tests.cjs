@@ -35,7 +35,12 @@ for(const [lang,table] of Object.entries(world.LOCALES))check(focusKeys.every(ke
 vm.runInNewContext(fs.readFileSync(path.join(root,'js/locales/experimental.js'),'utf8'),{window:world});
 const experimentalKeys=['experimental.title','experimental.hint','experimental.features','experimental.featureProposals','experimental.edges','experimental.extraRounds','experimental.spillReorder','experimental.merge','experimental.gaps','experimental.measured','result.edit.layerUp','result.edit.layerDown'];
 for(const [lang,table] of Object.entries(world.LOCALES))check(experimentalKeys.every(key=>typeof table[key]==='string'&&table[key].length),lang+' experimental strings');
+vm.runInNewContext(fs.readFileSync(path.join(root,'js/locales/pause.js'),'utf8'),{window:world});
+for(const [lang,table] of Object.entries(world.LOCALES))check(['batch.pauseSave','batch.pauseSaveHint','batch.status.pausing','batch.status.paused','result.paused'].every(key=>typeof table[key]==='string'&&table[key].length)&&table['result.paused'].includes('{count}')&&!('experimental.groups' in table),lang+' pause labels and retired group option');
 const Gia=require(path.join(root,'js/gia-export.js')),exported=Gia.convertResultToGiaJson({image_size:{width:160,height:128},elements:P.drawingToElements(sample,160,128).elements},'shapes.png',1,{x:80,y:64});
 check(exported.elements.length===4,'GIA keeps one image per shape');
 check(exported.elements[1].image_asset_ref===100003,'GIA triangle asset retained');
+const previewSvg=P.elementsToSvg([{type:'ellipse',center:{x:0,y:0},size:{rx:2,ry:3},rotation:{z:30},color:'#123456',alpha:0.5}],64,32,{image_scale:2,output_has_transparency:true});
+check(previewSvg.includes('translate(0 0) rotate(-30)')&&previewSvg.includes('rx="1" ry="1.5"'),'native preview uses absolute centers without adding the image origin twice');
+check(!previewSvg.includes('<image')&&previewSvg.includes('fill-opacity="0.5"'),'native preview contains vector controls and original opacity');
 console.log('PASS '+checks+' geometry, matte, localization and export checks');

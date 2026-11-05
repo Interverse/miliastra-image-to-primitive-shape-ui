@@ -1,7 +1,7 @@
 // The calling worker of the single-threaded build. The glue import is static
 // so that bundlers bundle it with its snippets and `.wasm` asset.
-import * as glueModule from "../wasm/single/primeval.js?v=structure-priority-7";
-import { requestRunner, scope } from "./worker-common.js?v=structure-priority-7";
+import * as glueModule from "../wasm/single/primeval.js?v=pause-partial-1";
+import { requestRunner, scope } from "./worker-common.js?v=pause-partial-1";
 const glue = glueModule;
 const run = requestRunner(glue);
 scope.onmessage = ({ data }) => {

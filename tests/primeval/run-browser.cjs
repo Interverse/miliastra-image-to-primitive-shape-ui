@@ -57,7 +57,7 @@ const server=http.createServer((req,res)=>{
   await browser.close();server.close();return;
  }
  await page.goto('http://127.0.0.1:8350/tests/primeval/browser_smoke.html');
- await page.waitForFunction(()=>document.body.dataset.result,{timeout:180000});
+ await page.waitForFunction(()=>document.body.dataset.result,undefined,{timeout:180000});
  const report=await page.locator('#report').textContent();
  const output=path.join(root,'reference/research-2026-10');
  fs.writeFileSync(path.join(output,`site-smoke-${process.argv[2]||1440}.txt`),report);

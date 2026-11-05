@@ -80,10 +80,12 @@ frame.addEventListener('load',async()=>{
   $('focusModeOff').click();check($('focusStatus').textContent===w.LOCALES.en['focus.offStatus']&&$('focusInstruction').textContent==='','Off mode says focus is off');
   $('focusDone').click();check(pill.textContent.includes(w.LOCALES.en['focus.stateOff']),'per-image Off shows on the pill');
   pill.click();$('focusModeAuto').click();$('focusDone').click();check(pill.textContent.includes(w.LOCALES.en['focus.stateAuto']),'Automatic mode restored');
-  const focusSwitch=$('focusDetail');check(focusSwitch.getAttribute('role')==='switch'&&$('focusSettings').closest('#shapeTypeSection')===null,'Focus detail is a one-click switch beside the images');
+  const focusSwitch=$('focusDetail');check(focusSwitch.getAttribute('role')==='switch'&&$('focusSettings').closest('.enhancement-controls')===$('aiUpscale').closest('.enhancement-controls'),'Focus detail and Upscale share the accessible enhancements group');
+  check($('retryFocusSettings').closest('.enhancement-controls')===$('retryAiUpscale').closest('.enhancement-controls'),'Re-process groups Focus detail and Upscale consistently');
   focusSwitch.click();check(!focusSwitch.checked&&pill.hidden&&$('focusThumbHint').hidden&&!$('focusSettings').hidden,'switch turns focus off for all images in one click');
   focusSwitch.click();check(focusSwitch.checked&&!pill.hidden,'switch turns focus back on');
-  check(!$('experimentalSettings').hidden&&$('experimentalList').querySelectorAll('input[data-experiment]').length===8&&$('experimentalCount').hidden,'Experimental options listed for Turbo, none chosen');
+  check(!$('experimentalSettings').hidden&&$('experimentalList').querySelectorAll('input[data-experiment]').length===8&&$('experimentalCount').hidden,'Remaining research options listed for Turbo, none chosen');
+  check(!d.querySelector('[data-experiment="groups"]'),'Failed nested-group experiment is not selectable');
   const firstExperiment=$('experimentalList').querySelector('input');firstExperiment.click();check($('experimentalCount').textContent==='1'&&!$('experimentalCount').hidden,'chosen experimental options are counted');firstExperiment.click();
   change('primevalSpeed','fast');check($('focusSettings').hidden&&d.querySelector('.file-thumb-focus').hidden,'Focus detail hidden for Maximum Detail');
   check($('experimentalSettings').hidden&&$('experimentalSettings').offsetHeight===0,'Experimental options hidden for Maximum Detail');
@@ -209,7 +211,9 @@ frame.addEventListener('load',async()=>{
   check(!$('mixedShapeHint').hidden&&!$('shapeMixed').closest('.shape-check').hidden,'Primeval Mixed is selectable with its hint');
   await upload();$('btnSubmit').click();done++;await wait(()=>d.querySelectorAll('.job-status.done').length===done||errors.length||d.querySelector('.job-error'));
   w.Worker.prototype.postMessage=mixedPost;check(liveFrames>0,'selected job receives intermediate fitting previews');check(liveLayers>0,'individual layer deltas stream to preview');check(refinementSteps.some(n=>n>0),'detail refinement reports real completed work');check(!d.getElementById('previewJob'),'preview dropdown removed');const cardsForPreview=d.querySelectorAll('#jobList .job-card');cardsForPreview[0].click();check(cardsForPreview[0].classList.contains('preview-selected'),'clicking a job card selects its preview');cardsForPreview[cardsForPreview.length-1].click();check(cardsForPreview[cardsForPreview.length-1].classList.contains('preview-selected'),'clicking another job swaps the preview');check(!$('generationPreview').hidden||!$('generationVector').hidden,'selected job preview is visible');
-  check(!errors.length&&!d.querySelector('.job-error'),'Mixed fit completes');d.querySelectorAll('.job-card')[done-1].querySelector('.job-actions button').click();
+  check(!errors.length&&!d.querySelector('.job-error'),'Mixed fit completes');
+  check($('generationPreview').hidden&&!$('generationVector').hidden&&$('generationVector').querySelector('[transform^="translate("]'),'Completed preview uses native exported control vectors');
+  d.querySelectorAll('.job-card')[done-1].querySelector('.job-actions button').click();
   const mixed=JSON.parse(await(await download('btnExportJSON')).text());
   check(mixed.config.num_primitives===8&&mixed.elements.length===(mixed.config.output_has_transparency?8:9)&&mixed.config.primeval_shape==='mixed','Mixed retains one shared count');
   check(mixed.elements.every(e=>['ellipse','triangle','rectangle'].includes(e.type))&&Object.values(mixed.config.primeval_shape_counts).reduce((a,b)=>a+b,0)===8,'Mixed exports only supported assets');
@@ -227,7 +231,7 @@ frame.addEventListener('load',async()=>{
   check(turbo.config.primeval_turbo&&!turbo.config.primeval_exact&&$('retryPrimevalSpeed').value==='turbo','Turbo selection reaches worker and is restored');
   $('homeLink').click();change('fitMethod','primeval');$('numPrimsManual').value='1000000';await upload();$('btnSubmit').click();
   await wait(()=>d.querySelector('.job-status.processing'));const processing=d.querySelector('.job-status.processing').closest('.job-card');
-  processing.querySelector('.job-actions button').click();await wait(()=>d.querySelector('.job-status.cancelled'));
+  processing.querySelector('.job-actions button.danger').click();await wait(()=>d.querySelector('.job-status.cancelled'));
   check(true,'large Primeval job can be cancelled');
   let capturedConfig;const originalPost=w.Worker.prototype.postMessage;
   w.Worker.prototype.postMessage=function(message,...args){if(message.cmd==='process')capturedConfig=message.config;return originalPost.call(this,message,...args);};

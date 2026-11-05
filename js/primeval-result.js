@@ -80,6 +80,28 @@
     }
   }
   const encodeRGBA=(rgba,width,height)=>encodeRGB(rgba,width,height,4);
-  const api={triangle,drawingToElements,matteRGB,encodeRGB,encodeRGBA,drawElements};root.PrimevalResult=api;
+  function elementsToSvg(elements,width,height,config={}) {
+    const unit=Number(config.image_scale)||1;
+    const parts=[];
+    if(config.output_has_transparency===false)parts.push(`<rect width="${width}" height="${height}" fill="white"/>`);
+    for(const element of elements){
+      const x=element.center.x/unit,y=-element.center.y/unit;
+      const angle=-(element.rotation?.z||0);
+      const color=/^#[0-9a-f]{6}$/i.test(element.color)?element.color:'#808080';
+      const alpha=Math.max(0,Math.min(1,Number(element.alpha)));
+      const attributes=`fill="${color}" fill-opacity="${alpha}" transform="translate(${x} ${y}) rotate(${angle})"`;
+      if(element.type==='ellipse'){
+        parts.push(`<ellipse rx="${element.size.rx/unit}" ry="${element.size.ry/unit}" ${attributes}/>`);
+      }else{
+        const w=element.size.width/unit,h=element.size.height/unit;
+        if(element.type==='triangle'){
+          const top=element.triangle_pivot==='box'?-h/2:-2*h/3;
+          parts.push(`<polygon points="0,${top} ${-w/2},${top+h} ${w/2},${top+h}" ${attributes}/>`);
+        }else parts.push(`<rect x="${-w/2}" y="${-h/2}" width="${w}" height="${h}" ${attributes}/>`);
+      }
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${parts.join('')}</svg>`;
+  }
+  const api={triangle,drawingToElements,matteRGB,encodeRGB,encodeRGBA,drawElements,elementsToSvg};root.PrimevalResult=api;
   if(typeof module!=="undefined")module.exports=api;
 })(typeof self!=="undefined"?self:globalThis);

@@ -36,7 +36,8 @@ impl RgbaModel {
         if !self.reorder_turbo(&mut cancelled,&mut observer){return false;}
         if self.line_variant&SPILL_REORDER!=0&&!self.reorder_spill(&mut cancelled,&mut observer){return false;}
         if self.line_variant&MERGE!=0&&!self.merge_turbo(&mut cancelled,&mut observer){return false;}
-        self.clear_gaps(&mut cancelled,&mut observer)
+        if !self.clear_gaps(&mut cancelled,&mut observer) {return false;}
+        true
     }
 
     /// Lab hook: the Turbo refinement sequence with a snapshot after each phase.

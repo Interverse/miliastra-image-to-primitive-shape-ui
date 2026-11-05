@@ -119,3 +119,10 @@ gates remain unmet. See `docs/development/primeval-turbo.md` in the site root.
     Experimental settings can turn these on; `dist/request.js` passes it through.
     Edge detection runs only when an edge proposal kind is chosen. See
     `docs/development/primeval-turbo.md` in the site root.
+# Retired construction experiment
+
+2026-11-04: removed the failed nested-group/scaffold construction paths, their
+proposal/audit APIs and lab runners. Exact working-tree sources and generated
+vendor files were archived in the site's ignored
+`reference/retired-construction-experiment-2026-11-04/` before removal.
+Ordinary fitting, Focus, native vector progress and pinned Maximum Detail remain.
