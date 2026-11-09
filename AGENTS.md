@@ -43,3 +43,6 @@ build. Serve the root over HTTP, usually port 8321. GitHub Pages uses
    Optional historical golden cases may be skipped when not generated; report it.
 9. Keep research reports, large generated outputs, toolchains and obsolete
    applications ignored. Keep useful source, build tools, fixtures and docs tracked.
+
+10. Preserve the existing exported JSON layout and field semantics. Existing users
+    depend on it for their parsers; optimize other formats without changing JSON.

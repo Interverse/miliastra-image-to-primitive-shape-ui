@@ -260,7 +260,7 @@ for (const [label, payload] of Object.entries(synthetic)) compare(`synthetic ${l
     firstDiff(LuaExport.PRIMITIVE_IMAGE_LIBRARY, libRef));
 
   const payload = synthetic.mixed_shapes;
-  const script = LuaExport.buildStandaloneLuaScript(payload);
+  const script = LuaExport.buildReadableLuaScript(payload);
   const dataTable = LuaExport.convertJsonToLuaText(payload);
   const dataBlock = `local ${LuaExport.DATA_VARIABLE} = {\n` + dataTable.slice("return {\n".length);
 
@@ -277,24 +277,24 @@ for (const [label, payload] of Object.entries(synthetic)) compare(`synthetic ${l
   check("standalone ends with newline", script.endsWith("end\n"));
 
   // Image Control Template index: filled in when provided, TODO placeholder otherwise.
-  const filled = LuaExport.buildStandaloneLuaScript(payload, { imageTemplateIndex: "  4242  " });
+  const filled = LuaExport.buildReadableLuaScript(payload, { imageTemplateIndex: "  4242  " });
   check("template index fills the constant", filled.includes("\nlocal IMAGE_TEMPLATE_INDEX = 4242 -- Image Control Template index\n") && !filled.includes("TODO") && filled.includes("IMAGE_TEMPLATE_INDEX is set to 4242"));
   check("mixed export shares one template", !filled.includes("imageTemplates") && filled.includes("            imageTemplate,\n            canvas,"));
   check("mixed export sets assets dynamically", filled.includes("control:SetImage(Enum.ImageSource.StaticReference, imageAsset)") && filled.includes("rectangleAsset = 100001") && filled.includes("circleAsset = 100002") && filled.includes("triangleAsset = 100003"));
   check("image type follows the selected asset", filled.includes("if imageAsset == 106057 then\n        control.imageType = Enum.ImageType.Basic\n    else\n        control.imageType = Enum.ImageType.Stretch"));
-  check("template index accepts a number", LuaExport.buildStandaloneLuaScript(payload, { imageTemplateIndex: 7 }).includes("\nlocal IMAGE_TEMPLATE_INDEX = 7 --"));
+  check("template index accepts a number", LuaExport.buildReadableLuaScript(payload, { imageTemplateIndex: 7 }).includes("\nlocal IMAGE_TEMPLATE_INDEX = 7 --"));
   for (const bad of ["", "   ", "12a", "-1", "1.5", "1e3", null, undefined, "99999999999999999"]) {
-    const out = LuaExport.buildStandaloneLuaScript(payload, { imageTemplateIndex: bad });
+    const out = LuaExport.buildReadableLuaScript(payload, { imageTemplateIndex: bad });
     check(`invalid template index ${JSON.stringify(bad)} keeps placeholder`,
       out.includes(`\nlocal IMAGE_TEMPLATE_INDEX = ${LuaExport.IMAGE_TEMPLATE_PLACEHOLDER} -- TODO: replace with your Image Control Template index\n`));
   }
-  check("no options keeps placeholder", LuaExport.buildStandaloneLuaScript(payload) === LuaExport.buildStandaloneLuaScript(payload, { imageTemplateIndex: "" }));
+  check("no options keeps placeholder", LuaExport.buildReadableLuaScript(payload) === LuaExport.buildReadableLuaScript(payload, { imageTemplateIndex: "" }));
   check("parseTemplateIndex", LuaExport.parseTemplateIndex("0") === 0 && LuaExport.parseTemplateIndex(" 1234567890 ") === 1234567890 &&
     LuaExport.parseTemplateIndex("x") === null && LuaExport.parseTemplateIndex("+5") === null && LuaExport.parseTemplateIndex(12) === 12);
 
   // A name that would break a `--` comment or a string literal must not.
   const hostile = Object.assign({}, payload, { image_name: 'a"b\\c[[d\ne' });
-  const hostileScript = LuaExport.buildStandaloneLuaScript(hostile);
+  const hostileScript = LuaExport.buildReadableLuaScript(hostile);
   check("hostile name escaped in string", hostileScript.includes('name = "a\\"b\\\\c[[d\\ne",'));
   check("hostile name neutralised in header comment", hostileScript.split("\n")[0] === "-- a\"b\\c[ [d e — primitive image as a client UI script");
 
@@ -361,7 +361,7 @@ for (const [label, payload] of Object.entries(synthetic)) compare(`synthetic ${l
       lua.lua_pop(L, 1);
       return v;
     };
-    if (run(stubs, "Lua VM stubs") && run(script, "Lua VM loads standalone script") && call("OnStart")) {
+    if (run(stubs, "Lua VM stubs") && run(LuaExport.buildStandaloneLuaScript(payload), "Lua VM loads packed standalone script") && call("OnStart")) {
       const n = payload.elements.length;
       check("Lua VM instantiates root + canvas + primitives", globalNumber("__instantiated") === n + 2,
         `instantiated ${globalNumber("__instantiated")}, want ${n + 2}`);
@@ -400,6 +400,93 @@ for (const [value, expected] of q) {
   const got = LuaExport.quantizeToTenths(value);
   check(`quantizeToTenths(${value})`, got === expected, `got ${got}, want ${expected}`);
 }
+
+// Execute packed and readable exports against identical recording controls.
+// This checks every API argument, layer order, colour, transform and cleanup.
+const nativeLua = ["lua", "texlua"].find(command => {
+  const probe = spawnSync(command, ["--version"], {encoding:"utf8"});
+  return !probe.error && probe.status === 0;
+});
+if (nativeLua) {
+  const stress = {image_size:{width:640,height:480},config:{},elements:[]};
+  let seed=42;
+  const random=()=>((seed=(Math.imul(seed,1664525)+1013904223)>>>0)/4294967296);
+  for(let i=0;i<1200;i++) stress.elements.push(el(
+    ["ellipse","rectangle","triangle"][i%3], random()*800-400,random()*600-300,
+    {rx:random()*100,ry:random()*100,width:random()*100,height:random()*100},
+    random()*720-360,Math.floor(random()*4294967296),
+    i%7===0 && i%3===0 ? {primitive_type:"blurred_circle"} : {}));
+  const repeated={...stress,elements:Array.from({length:1800},(_,i)=>el(["ellipse","rectangle","triangle"][i%3],i%40,(i%30)-15,{rx:4,ry:6,width:8,height:12},i%4*45,[0,0xffffffff,0x80ff0000,0xff0000ff][i%4]))};
+  check("repeated data selects LZ",LuaExport.packLuaData(repeated).lz);
+  const repeatedBefore=Buffer.byteLength(LuaExport.buildReadableLuaScript(repeated)),repeatedAfter=Buffer.byteLength(LuaExport.buildStandaloneLuaScript(repeated));
+  check("repeated export under 20%",repeatedAfter<repeatedBefore*.2,`${repeatedBefore} -> ${repeatedAfter}`);
+  console.log(`Lua repeated export: ${repeatedBefore} -> ${repeatedAfter} bytes (${(repeatedAfter/repeatedBefore*100).toFixed(1)}% of original)`);
+  const correlated={image_size:{width:640,height:480},config:{},elements:[]};
+  for(let i=0;i<2400;i++){
+    const r=i%256,g=(r+7)%256,b=(r+13)%256,a=128+i%32;
+    correlated.elements.push(el('ellipse',i%640,Math.floor(i/640),{rx:i%17+1,ry:i%13+1},0,a*16777216+r*65536+g*256+b));
+  }
+  const correlatedArt=LuaExport.packLuaData(correlated),correlatedSize=Buffer.byteLength(LuaExport.buildStandaloneLuaScript(correlated));
+  check('correlated colours select Rice/channel encoding',correlatedArt.version===3&&correlatedArt.columnCount===11);
+  check('Rice/channel export smaller than previous v2 baseline by 25%',correlatedSize<18162*.75,`18162 -> ${correlatedSize}`);
+  check('Rice and split colour reader exercised',correlatedArt.columns.includes(',4}')||correlatedArt.columns.includes(',3}'));
+  console.log(`Lua correlated export: previous v2 18162 -> ${correlatedSize} bytes`);
+  const shaded={...correlated,elements:Array.from({length:2000},(_,i)=>el(['ellipse','rectangle','triangle'][i%3],i%400,i%300,{rx:i===0?10000:1+i%13,ry:1+i%7,width:2*(1+i%13),height:2*(1+i%7)},0,(128+i%32)*16777216+90*65536+91*256+92,i%21===0?{primitive_type:'blurred_circle'}:{}))};
+  const shadedArt=LuaExport.packLuaData(shaded);
+  check('Rice/channel and streaming LZ combined',shadedArt.version===3&&shadedArt.lz);
+  for(const [label,payload] of Object.entries({...synthetic,offCenter:{...synthetic.mixed_shapes,origin:{x:12.5,y:-17.25}},stress,repeated,correlated,shaded})) {
+    const harness = `
+local trace={}
+local nodes={}
+local function record(...) local t={...} for i=1,#t do t[i]=type(t[i])=="number" and string.format("%.17g",t[i]) or tostring(t[i]) end trace[#trace+1]=table.concat(t,":") end
+local function control()
+local c={alive=true}
+for _,name in ipairs({"SetAnchorMin","SetAnchorMax","SetPivot","SetSizeDelta","SetAnchoredPosition","SetLocalRotation","SetLocalScale","SetActive","SetVisible","SetImage","SetSiblingIndex"}) do
+c[name]=function(self,...) record(name,...) end
+end
+c.SetSizeDelta=function(self,w,h) record("SetSizeDelta",w,h) rawset(self,"width",w) rawset(self,"height",h) end
+c.SetAnchoredPosition=function(self,x,y) record("SetAnchoredPosition",x,y) rawset(self,"x",x) rawset(self,"y",y) end
+c.SetImage=function(self,source,asset) record("SetImage",source,asset) rawset(self,"asset",asset) end
+return setmetatable(c,{__newindex=function(t,k,v) record(k,v) rawset(t,k,v) end})
+end
+game={InstantiateClientUIControl=function(index,parent) record("create",index) local c=control() rawset(c,"parent",parent) nodes[#nodes+1]=c return c end,DestroyClientUIControl=function(c) record("destroy") end}
+Color={FromRGBA=function(...) record("color",...) local t={...} for i=1,#t do t[i]=string.format("%.17g",t[i]) end return table.concat(t,",") end}
+Enum={ImageSource={StaticReference=1},ImageType={Stretch=1,Basic=2}}
+script={object=control()}
+do
+${payload.elements.length ? LuaExport.buildReadableLuaScript(payload) : LuaExport.buildStandaloneLuaScript(payload)}
+end
+OnStart() OnDestroy()
+local expected=trace trace={} nodes={}
+do
+${LuaExport.buildStandaloneLuaScript(payload)}
+end
+OnStart()
+local root=nodes[1]
+assert(root.enableMask==true and root.enableSoftEdge==false and root.reverseMaskArea==false,"root mask flags")
+assert(root.asset==100001 and root.imageColor=="255,255,255,0","transparent square mask asset")
+assert(root.parent==script.object and nodes[2].parent==root,"mask hierarchy")
+assert(math.abs(root.x-(${payload.origin?Number(LuaExport.formatNumber(Number(payload.image_size.width)*(Number(payload.config?.image_scale)||1)))/2-payload.origin.x:0}))<1e-9,"mask follows image centre relative to export origin")
+assert(math.abs(root.x+nodes[2].x)<1e-9 and math.abs(root.y+nodes[2].y)<1e-9,"mask does not shift the artwork")
+assert(#nodes==${payload.elements.length+2},"mask does not add redundant controls")
+assert(math.abs(root.width-(${LuaExport.formatNumber(Number(payload.image_size.width)*(Number(payload.config?.image_scale)||1))}))<1e-9,"mask width")
+assert(math.abs(root.height-(${LuaExport.formatNumber(Number(payload.image_size.height)*(Number(payload.config?.image_scale)||1))}))<1e-9,"mask height")
+for i=3,#nodes do assert(nodes[i].parent==nodes[2],"primitive belongs inside masked parent") end
+OnDestroy()
+assert(#expected==#trace,"trace length")
+for i=1,#expected do assert(expected[i]==trace[i],"trace mismatch "..i.." "..expected[i].." / "..trace[i]) end
+`;
+    const file=path.join(tmpDir,"packed-test.lua");
+    fs.writeFileSync(file,harness);
+    const run=spawnSync(nativeLua,[file],{encoding:"utf8"});
+    check(`packed Lua exact render parity: ${label}`,run.status===0,run.stdout+run.stderr);
+  }
+  check('adaptive compression never grows baseline fixtures',correlatedSize<=18162&&repeatedAfter<=3593&&Buffer.byteLength(LuaExport.buildStandaloneLuaScript(stress))<=21311);
+  const before=Buffer.byteLength(LuaExport.buildReadableLuaScript(stress));
+  const after=Buffer.byteLength(LuaExport.buildStandaloneLuaScript(stress));
+  check("packed stress export saves at least 40%",after<before*0.6,`${before} -> ${after}`);
+  console.log(`Lua stress export: ${before} -> ${after} bytes (${(100-after/before*100).toFixed(1)}% smaller)`);
+} else console.log("(native Lua unavailable — skipping packed render parity)");
 
 fs.rmSync(tmpDir, { recursive: true, force: true });
 console.log(`${passes} passed, ${failures} failed`);

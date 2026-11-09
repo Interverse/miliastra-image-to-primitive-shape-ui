@@ -13,7 +13,7 @@
   </script>
   <title data-i18n="app.pageTitle">Miliastra Wonderland Image Fitter</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='38' cy='42' r='26' fill='%234355B9'/%3E%3Crect x='48' y='44' width='36' height='36' rx='6' fill='%23E8A317' transform='rotate(12 66 62)'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="css/style.css?v=smooth-contours-1">
+  <link rel="stylesheet" href="css/style.css?v=preview-fixes-1">
 </head>
 <body>
   <header class="topbar">
@@ -40,11 +40,12 @@
             <span class="drop-icon" data-i18n="upload.dropIcon">IMG</span>
             <p data-i18n="upload.dropHint">Click, drag &amp; drop, or paste (Ctrl+V) images</p>
           </div>
-          <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp" multiple hidden>
+          <input type="file" id="fileInput" accept="image/*,.json,.css,.svg,application/json,text/css" multiple hidden>
           <div id="fileThumbs" class="file-thumbs"></div>
           <div id="uploadReady" class="upload-ready" hidden aria-live="polite"></div>
           <div id="uploadWarning" class="upload-warning" hidden aria-live="polite" data-i18n="upload.largeWarning"></div>
         </div>
+        <p class="hint" data-i18n="import.hint">Drop images anywhere. Paste JSON/CSS/SVG to reopen.</p>
         <p class="hint focus-thumb-hint" id="focusThumbHint" hidden data-i18n="focus.thumbHint"></p>
         <p class="hint" data-i18n="fitting.formats"></p>
         <p class="hint" data-i18n="upload.multiHint"></p>
@@ -335,6 +336,7 @@
       </section>
       <section class="panel-section">
         <h3 data-i18n="result.export.sectionTitle">Export</h3>
+        <button type="button" id="btnScreenSizing" class="btn-sm" data-i18n="screen.title">Screen size</button>
         <div class="export-name-field">
           <label for="exportFileName" data-i18n="result.export.fileName">Export file name</label>
           <input type="text" id="exportFileName" class="form-input" autocomplete="off">
@@ -410,6 +412,112 @@
         </div>
         <button id="btnPickOrigin" class="btn-sm" data-i18n="result.origin.pick">Pick on canvas</button>
         <button id="btnResetOrigin" class="btn-sm" data-i18n="result.origin.reset">Reset to image center</button>
+      </section>
+
+    </aside>
+
+    <main class="canvas-area">
+      <div id="canvasWrap" class="canvas-wrap">
+        <canvas id="mainCanvas"></canvas>
+        <div id="tooltip" class="tooltip" hidden></div>
+        <div id="layerPill" class="layer-pill" hidden>
+          <button type="button" id="btnLayerUp" class="layer-pill-btn" data-i18n-aria-label="result.edit.layerUp">▲</button>
+          <button type="button" id="btnLayerDown" class="layer-pill-btn" data-i18n-aria-label="result.edit.layerDown">▼</button>
+          <span id="layerPos" class="layer-pill-pos"></span>
+        </div>
+      </div>
+
+      <div id="previewCompare" class="preview-compare" hidden>
+        <p id="previewCompareHint" class="hint preview-hint" data-i18n="result.preview.hint">Click to switch the main view.</p>
+        <button type="button" id="viewFitted" class="preview-item preview-toggle" aria-pressed="true">
+          <span class="preview-label" data-i18n="result.preview.fitted">Fitted result</span>
+          <img id="previewImg" class="preview-thumb" alt="">
+        </button>
+        <button type="button" id="viewOriginal" class="preview-item preview-toggle" aria-pressed="false">
+          <span class="preview-label" data-i18n="result.preview.original">Original</span>
+          <img id="originalThumb" class="preview-thumb" alt="">
+        </button>
+        <div class="preview-item" id="nativePreview" hidden><span class="preview-label" data-i18n="compression.native">Native reference</span><img id="nativeThumb" class="preview-thumb" alt=""></div>
+        <div class="preview-item" id="differencePreview" hidden><span class="preview-label" data-i18n="compression.difference">Difference ×8</span><img id="differenceThumb" class="preview-thumb" alt=""></div>
+      </div>
+
+      <div class="canvas-bar">
+        <span id="coordsDisplay"></span>
+        <span id="elemCountDisplay"></span>
+        <span id="zoomLabel" class="zoom-label">100%</span>
+        <button type="button" id="btnResetView" class="btn-text" data-i18n="result.view.reset">Reset view</button>
+        <label><input type="checkbox" id="showImage"> <span data-i18n="result.canvas.showImage">Original</span></label>
+        <label><input type="checkbox" id="showMask"> <span data-i18n="result.canvas.showMask">Mask</span></label>
+        <label><input type="checkbox" id="showFill" checked> <span data-i18n="result.canvas.showFill">Fill</span></label>
+        <label><input type="checkbox" id="showBorder"> <span data-i18n="result.canvas.showBorder">Border</span></label>
+        <label><input type="checkbox" id="showOrigin" checked> <span data-i18n="result.canvas.showOrigin">Origin</span></label>
+        <label><input type="checkbox" id="cropToImage" checked> <span data-i18n="result.canvas.crop">Crop to image</span></label>
+        <!-- Shown only when the result has a mask: previews exactly how the
+             Client .gia composites (hierarchy order + container mask clip). -->
+        <label id="clientMaskPreviewRow" hidden><input type="checkbox" id="showClientMask"> <span data-i18n="result.canvas.clientMask">Client mask</span></label>
+        <span id="editTools" class="edit-tools">
+          <button type="button" id="btnUndo" class="btn-text" disabled data-i18n="result.edit.undo">Undo</button>
+          <button type="button" id="btnRedo" class="btn-text" disabled data-i18n="result.edit.redo">Redo</button>
+          <button type="button" id="btnDeleteSel" class="btn-text danger" disabled data-i18n="result.edit.delete">Delete</button>
+        </span>
+      </div>
+    </main>
+
+    <aside class="panel panel-right">
+      <section class="panel-section">
+        <button type="button" id="btnBackToJobs" class="btn-tonal button-block" data-i18n="result.back">Back to jobs</button>
+        <h3 data-i18n="result.info.sectionTitle">Selected Primitive</h3>
+        <p class="hint" data-i18n="result.info.hint"></p>
+        <div id="infoEmpty" class="empty-panel">
+          <p data-i18n="result.info.empty.title">No primitive selected</p>
+          <span data-i18n="result.info.empty.text"></span>
+        </div>
+        <div id="infoPanel" class="elem-info" hidden><table>
+          <tr><td data-i18n="result.info.id">ID</td><td id="infoId">—</td></tr>
+          <tr><td data-i18n="result.info.type">Type</td><td id="infoType">—</td></tr>
+          <tr><td data-i18n="result.info.center">Center</td><td id="infoCenter">—</td></tr>
+          <tr><td data-i18n="result.info.relative">Relative to origin</td><td id="infoRelative">—</td></tr>
+          <tr><td data-i18n="result.info.size">Size</td><td id="infoSize">—</td></tr>
+          <tr><td data-i18n="result.info.rotation">Rotation</td><td id="infoRotation">—</td></tr>
+        </table></div>
+        <div id="editPanel" class="edit-panel" hidden>
+          <h3 data-i18n="result.edit.panelTitle">Edit Primitive</h3><div class="form-field"><label for="editShape" data-i18n="result.info.type">Type</label><select id="editShape" class="form-select"><option value="ellipse" data-i18n="shapes.circle">Circle</option><option value="triangle" data-i18n="shapes.triangle">Triangle</option><option value="rectangle" data-i18n="shapes.rect">Rectangle</option></select></div>
+          <div class="config-row config-row--paired">
+            <label>X</label>
+            <input type="number" id="editX" step="0.1" class="num-input">
+            <label>Y</label>
+            <input type="number" id="editY" step="0.1" class="num-input">
+          </div>
+          <div class="config-row config-row--paired">
+            <label id="editSizeALabel">rx</label>
+            <input type="number" id="editSizeA" step="0.1" min="0.01" class="num-input">
+            <label id="editSizeBLabel">ry</label>
+            <input type="number" id="editSizeB" step="0.1" min="0.01" class="num-input">
+          </div>
+          <div class="config-row">
+            <label data-i18n="result.info.rotation">Rotation</label>
+            <input type="number" id="editRot" step="1" class="num-input">
+          </div>
+          <div class="config-row">
+            <label data-i18n="result.edit.color">Color</label>
+            <input type="color" id="editColor" class="color-input">
+            <label data-i18n="result.edit.alpha">Alpha %</label>
+            <input type="number" id="editAlpha" min="0" max="100" step="1" class="num-input">
+          </div>
+          <p class="hint" data-i18n="result.edit.hint"></p>
+        </div>
+      </section>
+      <section class="panel-section">
+        <h3 data-i18n="result.stats.sectionTitle">Statistics</h3>
+        <div class="elem-info"><table>
+          <tr><td data-i18n="result.stats.mode">Mode</td><td id="statMode">—</td></tr>
+          <tr><td data-i18n="result.stats.total">Total</td><td id="statTotal">—</td></tr>
+          <tr><td data-i18n="result.stats.ellipse">Circles</td><td id="statEllipse">—</td></tr>
+          <tr><td data-i18n="shapes.blurredCircle">Blurred radial circle</td><td id="statGaussian">—</td></tr>
+          <tr><td data-i18n="result.stats.rect">Rectangles</td><td id="statRect">—</td></tr>
+          <tr><td data-i18n="result.stats.triangle">Triangles</td><td id="statTriangle">—</td></tr>
+          <tr><td data-i18n="result.stats.imageSize">Image size</td><td id="statImgSize">—</td></tr>
+        </table></div>
       </section>
 
       <section class="panel-section" id="retrySectionFill">
@@ -505,111 +613,6 @@
       </section>
 
       <section class="panel-section">
-        <h3 data-i18n="result.stats.sectionTitle">Statistics</h3>
-        <div class="elem-info"><table>
-          <tr><td data-i18n="result.stats.mode">Mode</td><td id="statMode">—</td></tr>
-          <tr><td data-i18n="result.stats.total">Total</td><td id="statTotal">—</td></tr>
-          <tr><td data-i18n="result.stats.ellipse">Circles</td><td id="statEllipse">—</td></tr>
-          <tr><td data-i18n="shapes.blurredCircle">Blurred radial circle</td><td id="statGaussian">—</td></tr>
-          <tr><td data-i18n="result.stats.rect">Rectangles</td><td id="statRect">—</td></tr>
-          <tr><td data-i18n="result.stats.triangle">Triangles</td><td id="statTriangle">—</td></tr>
-          <tr><td data-i18n="result.stats.imageSize">Image size</td><td id="statImgSize">—</td></tr>
-        </table></div>
-      </section>
-    </aside>
-
-    <main class="canvas-area">
-      <div id="canvasWrap" class="canvas-wrap">
-        <canvas id="mainCanvas"></canvas>
-        <div id="tooltip" class="tooltip" hidden></div>
-        <div id="layerPill" class="layer-pill" hidden>
-          <button type="button" id="btnLayerUp" class="layer-pill-btn" data-i18n-aria-label="result.edit.layerUp">▲</button>
-          <button type="button" id="btnLayerDown" class="layer-pill-btn" data-i18n-aria-label="result.edit.layerDown">▼</button>
-          <span id="layerPos" class="layer-pill-pos"></span>
-        </div>
-      </div>
-
-      <div id="previewCompare" class="preview-compare" hidden>
-        <p class="hint preview-hint" data-i18n="result.preview.hint">Click to switch the main view.</p>
-        <button type="button" id="viewFitted" class="preview-item preview-toggle" aria-pressed="true">
-          <span class="preview-label" data-i18n="result.preview.fitted">Fitted result</span>
-          <img id="previewImg" class="preview-thumb" alt="">
-        </button>
-        <button type="button" id="viewOriginal" class="preview-item preview-toggle" aria-pressed="false">
-          <span class="preview-label" data-i18n="result.preview.original">Original</span>
-          <img id="originalThumb" class="preview-thumb" alt="">
-        </button>
-        <div class="preview-item" id="nativePreview" hidden><span class="preview-label" data-i18n="compression.native">Native reference</span><img id="nativeThumb" class="preview-thumb" alt=""></div>
-        <div class="preview-item" id="differencePreview" hidden><span class="preview-label" data-i18n="compression.difference">Difference ×8</span><img id="differenceThumb" class="preview-thumb" alt=""></div>
-      </div>
-
-      <div class="canvas-bar">
-        <span id="coordsDisplay"></span>
-        <span id="elemCountDisplay"></span>
-        <span id="zoomLabel" class="zoom-label">100%</span>
-        <button type="button" id="btnResetView" class="btn-text" data-i18n="result.view.reset">Reset view</button>
-        <label><input type="checkbox" id="showImage"> <span data-i18n="result.canvas.showImage">Original</span></label>
-        <label><input type="checkbox" id="showMask"> <span data-i18n="result.canvas.showMask">Mask</span></label>
-        <label><input type="checkbox" id="showFill" checked> <span data-i18n="result.canvas.showFill">Fill</span></label>
-        <label><input type="checkbox" id="showBorder"> <span data-i18n="result.canvas.showBorder">Border</span></label>
-        <label><input type="checkbox" id="showOrigin" checked> <span data-i18n="result.canvas.showOrigin">Origin</span></label>
-        <label><input type="checkbox" id="cropToImage" checked> <span data-i18n="result.canvas.crop">Crop to image</span></label>
-        <!-- Shown only when the result has a mask: previews exactly how the
-             Client .gia composites (hierarchy order + container mask clip). -->
-        <label id="clientMaskPreviewRow" hidden><input type="checkbox" id="showClientMask"> <span data-i18n="result.canvas.clientMask">Client mask</span></label>
-        <span id="editTools" class="edit-tools">
-          <button type="button" id="btnUndo" class="btn-text" disabled data-i18n="result.edit.undo">Undo</button>
-          <button type="button" id="btnRedo" class="btn-text" disabled data-i18n="result.edit.redo">Redo</button>
-          <button type="button" id="btnDeleteSel" class="btn-text danger" disabled data-i18n="result.edit.delete">Delete</button>
-        </span>
-      </div>
-    </main>
-
-    <aside class="panel panel-right">
-      <section class="panel-section">
-        <button type="button" id="btnBackToJobs" class="btn-tonal button-block" data-i18n="result.back">Back to jobs</button>
-        <h3 data-i18n="result.info.sectionTitle">Selected Primitive</h3>
-        <p class="hint" data-i18n="result.info.hint"></p>
-        <div id="infoEmpty" class="empty-panel">
-          <p data-i18n="result.info.empty.title">No primitive selected</p>
-          <span data-i18n="result.info.empty.text"></span>
-        </div>
-        <div id="infoPanel" class="elem-info" hidden><table>
-          <tr><td data-i18n="result.info.id">ID</td><td id="infoId">—</td></tr>
-          <tr><td data-i18n="result.info.type">Type</td><td id="infoType">—</td></tr>
-          <tr><td data-i18n="result.info.center">Center</td><td id="infoCenter">—</td></tr>
-          <tr><td data-i18n="result.info.relative">Relative to origin</td><td id="infoRelative">—</td></tr>
-          <tr><td data-i18n="result.info.size">Size</td><td id="infoSize">—</td></tr>
-          <tr><td data-i18n="result.info.rotation">Rotation</td><td id="infoRotation">—</td></tr>
-        </table></div>
-        <div id="editPanel" class="edit-panel" hidden>
-          <h3 data-i18n="result.edit.panelTitle">Edit Primitive</h3><div class="form-field"><label for="editShape" data-i18n="result.info.type">Type</label><select id="editShape" class="form-select"><option value="ellipse" data-i18n="shapes.circle">Circle</option><option value="triangle" data-i18n="shapes.triangle">Triangle</option><option value="rectangle" data-i18n="shapes.rect">Rectangle</option></select></div>
-          <div class="config-row config-row--paired">
-            <label>X</label>
-            <input type="number" id="editX" step="0.1" class="num-input">
-            <label>Y</label>
-            <input type="number" id="editY" step="0.1" class="num-input">
-          </div>
-          <div class="config-row config-row--paired">
-            <label id="editSizeALabel">rx</label>
-            <input type="number" id="editSizeA" step="0.1" min="0.01" class="num-input">
-            <label id="editSizeBLabel">ry</label>
-            <input type="number" id="editSizeB" step="0.1" min="0.01" class="num-input">
-          </div>
-          <div class="config-row">
-            <label data-i18n="result.info.rotation">Rotation</label>
-            <input type="number" id="editRot" step="1" class="num-input">
-          </div>
-          <div class="config-row">
-            <label data-i18n="result.edit.color">Color</label>
-            <input type="color" id="editColor" class="color-input">
-            <label data-i18n="result.edit.alpha">Alpha %</label>
-            <input type="number" id="editAlpha" min="0" max="100" step="1" class="num-input">
-          </div>
-          <p class="hint" data-i18n="result.edit.hint"></p>
-        </div>
-      </section>
-      <section class="panel-section">
         <h3 data-i18n="result.cleanup.sectionTitle">Transparency Cleanup</h3>
         <p class="hint" data-i18n="result.cleanup.hint"></p>
         <button type="button" id="btnCleanTransparency" class="btn-sm" data-i18n="result.cleanup.button">Remove ghost primitives</button>
@@ -675,6 +678,27 @@
     </aside>
   </div>
 
+  <div id="inputDropOverlay" class="input-drop-overlay" hidden aria-hidden="true"><span data-i18n="import.drop">Drop images or JSON/CSS/SVG</span></div>
+  <dialog id="screenSizingDialog" class="screen-sizing-dialog" aria-labelledby="screenSizingTitle">
+    <h3 id="screenSizingTitle" data-i18n="screen.title">Screen size</h3>
+    <div class="screen-devices">
+      <button type="button" class="btn-sm" data-screen-device="0" data-i18n="screen.keyboard">Keyboard / Mouse</button>
+      <button type="button" class="btn-sm" data-screen-device="1" data-i18n="screen.mobile">Mobile</button>
+      <button type="button" class="btn-sm" data-screen-device="2" data-i18n="screen.controller">Controller</button>
+      <button type="button" class="btn-sm" data-screen-device="3" data-i18n="screen.mobileController">Mobile Controller</button>
+    </div>
+    <p class="hint" data-i18n="screen.hint">Drag to move; corner or wheel to scale. Size is saved per device. Position is preview only.</p>
+    <div id="screenSizingStage" class="screen-sizing-stage"><div class="screen-sizing-art"><img id="screenSizingImage" alt="" draggable="false"><button type="button" id="screenSizingHandle" data-i18n-title="screen.width" data-i18n-aria-label="screen.width"></button></div></div>
+    <p id="screenSizingDimensions" class="hint" aria-live="polite"></p>
+    <div class="screen-sizing-controls">
+      <label><span data-i18n="screen.width">Width (px)</span><input id="screenSizingWidth" class="form-input" type="number" min="0.01" step="any"></label>
+      <label><input id="screenSizingSnap" type="checkbox" checked><span data-i18n="screen.snap">Snap to edges</span></label>
+      <label><input id="screenSizingSync" type="checkbox" checked><span data-i18n="screen.sync">Sync zoom</span></label>
+      <button type="button" id="screenSizingSyncNow" class="btn-sm" data-i18n="screen.syncNow">Sync current zoom</button>
+    </div>
+    <div class="screen-sizing-actions"><button type="button" id="screenSizingReset" class="btn-sm" data-i18n="screen.reset">Reset</button><button type="button" id="screenSizingCancel" class="btn-sm" data-i18n="screen.cancel">Cancel</button><button type="button" id="screenSizingConfirm" class="btn-primary" data-i18n="screen.confirm">Confirm</button></div>
+  </dialog>
+
   <!-- locales (order = Genshin official language list; en first as fallback) -->
   <div id="focusEditor" class="focus-editor" hidden>
     <div class="focus-editor-panel" role="dialog" aria-modal="true" aria-labelledby="focusEditorTitle">
@@ -733,11 +757,13 @@
   <script src="js/locales/experimental.js?v=retired-groups-1"></script>
   <script src="js/locales/pause.js?v=1"></script>
   <script src="js/locales/upscale.js?v=3"></script>
+  <script src="js/locales/screen-sizing.js?v=3"></script>
+  <script src="js/locales/import.js?v=1"></script>
   <script src="js/i18n.js?v=25"></script>
   <script src="js/zip.js?v=24"></script>
   <script src="js/gia.js?v=26"></script>
   <script src="js/gia-export.js?v=26"></script>
-  <script src="js/lua-export.js?v=single-template-26"></script>
+  <script src="js/lua-export.js?v=packed-mask-1"></script>
   <script src="js/png-decode.js?v=24"></script>
   <script src="js/gaussian.js?v=25"></script>
   <script src="js/compression-quality.js?v=1"></script>
@@ -746,6 +772,8 @@
   <script src="js/native-edit.js?v=3"></script>
   <script src="js/gizmo-resize.js?v=1"></script>
   <script src="js/focus.js?v=1"></script>
-  <script src="js/app.js?v=smooth-contours-1"></script>
+  <script src="js/screen-sizing.js?v=3"></script>
+  <script src="js/finished-import.js?v=1"></script>
+  <script src="js/app.js?v=preview-fixes-1"></script>
 </body>
 </html>

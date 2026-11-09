@@ -1,6 +1,7 @@
 <!doctype html><html lang="en"><meta charset="utf-8"><title>Primeval integration checks</title>
 <style>body{font:14px system-ui;background:#15171d;color:#e2e6ed;margin:16px}pre{white-space:pre-wrap}iframe{width:100%;height:900px;border:1px solid #678}summary{cursor:pointer}</style>
 <h1 id="status">Running fitting checks…</h1><details open><summary>Report</summary><pre id="report"></pre></details><iframe id="app" src="../../index.html"></iframe>
+<script src="import-smoke.js"></script>
 <script>
 const frame=document.querySelector('#app'),report=document.querySelector('#report'),messages=[];
 const check=(ok,text)=>{if(!ok)throw Error(text);messages.push('PASS '+text);report.textContent=messages.join('\n');};
@@ -122,6 +123,7 @@ frame.addEventListener('load',async()=>{
     const after=canvas.getBoundingClientRect();check(after.width===rect.width&&after.height===rect.height,'canvas size stays fixed while selecting');
     $('viewOriginal').click();
     check($('viewOriginal').getAttribute('aria-pressed')==='true'&&$('viewFitted').getAttribute('aria-pressed')==='false','Original view is highlighted');
+    check(w.getComputedStyle($('canvasWrap')).outlineStyle==='none','Original does not outline the whole canvas');
     const originalPng=new Uint8Array(await(await download('btnExportPNG')).arrayBuffer());
     check(originalPng.length===golden.length&&originalPng.every((v,i)=>v===golden[i]),'Original view does not change the exported PNG');
     $('viewFitted').click();check($('viewFitted').getAttribute('aria-pressed')==='true'&&picked()===cycle[0],'Fitted view restored with the selection kept');
@@ -191,7 +193,77 @@ frame.addEventListener('load',async()=>{
     check(info.containerClass===cls&&info.children.length===41&&info.isClassic===classic,button+' correct controls '+shape);
    }
    $('clientLuaTemplateIndex').value='123';$('clientLuaTemplateIndex').dispatchEvent(new w.Event('input'));
-   const lua=await(await download('btnExportClientLua')).text();check(lua.includes('sourceWidth = 64'),'Lua export '+shape);if(shape==='circle')check(!lua.includes('imageTemplates')&&lua.includes('control:SetImage(Enum.ImageSource.StaticReference, imageAsset)')&&!$('clientLuaTemplateIndex').hidden,'mixed Lua export uses one template and dynamic assets');
+   const lua=await(await download('btnExportClientLua')).text();check(lua.includes('local W,H=64,64')&&lua.includes('PackedReader'),'Lua export '+shape);if(shape==='circle')check(!lua.includes('imageTemplates')&&lua.includes('c:SetImage(Enum.ImageSource.StaticReference,asset)')&&!$('clientLuaTemplateIndex').hidden,'mixed Lua export uses one template and dynamic assets');
+   if(shape==='circle'){
+    const before=JSON.parse(await(await download('btnExportJSON')).text());
+    const sizedGiaButtons=['btnExportGIAOverlimit','btnExportGIAClassic','btnExportClientGIAOverlimit','btnExportClientGIAClassic','btnExportServerGIAOverlimit','btnExportServerGIAClassic'];
+    const baseGias=new Map();
+    for(const button of sizedGiaButtons)baseGias.set(button,w.GIA.describeGia(new Uint8Array(await(await download(button)).arrayBuffer())));
+    $('btnScreenSizing').click();await wait(()=>$('screenSizingDialog').open);
+    check(d.querySelectorAll('[data-screen-device]').length===4,'screen sizing has four devices');
+    check($('screenSizingSync').checked,'zoom sync defaults on');$('screenSizingSync').click();
+    $('screenSizingSnap').click();
+    $('screenSizingWidth').value='320';$('screenSizingWidth').dispatchEvent(new w.Event('change'));
+    d.querySelector('[data-screen-device="1"]').click();
+    check(Number($('screenSizingWidth').value)===51.2,'mobile starts with its own zoom');
+    $('screenSizingWidth').value='200';$('screenSizingWidth').dispatchEvent(new w.Event('change'));
+    d.querySelector('[data-screen-device="2"]').click();
+    check(Number($('screenSizingWidth').value)===76.8,'controller starts with its own zoom');
+    $('screenSizingWidth').value='384';$('screenSizingWidth').dispatchEvent(new w.Event('change'));
+    d.querySelector('[data-screen-device="3"]').click();
+    check(Number($('screenSizingWidth').value)===51.2,'mobile controller has independent zoom despite matching mobile resolution');
+    $('screenSizingWidth').value='256';$('screenSizingWidth').dispatchEvent(new w.Event('change'));
+    const backdropNames=['pc','mobile','controller','mobile-controller'];
+    for(const [device,target] of [[0,320],[1,200],[2,384],[3,256]]){
+      d.querySelector('[data-screen-device="'+device+'"]').click();
+      check(Number($('screenSizingWidth').value)===target,'independent zoom retained for device '+device);
+      const name=backdropNames[device];
+      check(w.getComputedStyle($('screenSizingStage')).backgroundImage.includes('/'+name+'.png'),'correct backdrop for device '+device);
+      const backdrop=new w.Image();backdrop.src=new URL('../../assets/screen-backdrops/'+name+'.png',location.href).href;await backdrop.decode();
+      check(backdrop.naturalWidth>0,'backdrop loads for device '+device);
+      $('screenSizingConfirm').click();
+      const selected=JSON.parse(await(await download('btnExportJSON')).text());
+      check(selected.config.image_scale*selected.image_size.width===target,'JSON uses device '+device+' zoom');
+      check((await(await download('btnExportClientLua')).text()).includes('local WIDTH='+target),'Lua uses device '+device+' zoom');
+      check((await(await download('btnExportCSS')).text()).includes('  width: '+target+'px;'),'CSS uses device '+device+' zoom');
+      const deviceSvg=new w.DOMParser().parseFromString(await(await download('btnExportSVG')).text(),'image/svg+xml');
+      check(Number(deviceSvg.documentElement.getAttribute('width'))===target,'SVG uses device '+device+' zoom');
+      const devicePng=await w.createImageBitmap(await download('btnExportPNG'));
+      check(devicePng.width===target&&devicePng.height===target,'PNG uses device '+device+' zoom');devicePng.close();
+      for(const button of sizedGiaButtons){
+        const info=w.GIA.describeGia(new Uint8Array(await(await download(button)).arrayBuffer())),base=baseGias.get(button),scale=target/64;
+        check(info.children.length===base.children.length&&info.children.every((child,i)=>
+          ['x','y'].every(axis=>Math.abs(child.transform.size[axis]-base.children[i].transform.size[axis]*scale)<.005&&Math.abs(child.transform.offset[axis]-base.children[i].transform.offset[axis]*scale)<.005)),button+' uses device '+device+' zoom');
+      }
+
+      $('btnScreenSizing').click();await wait(()=>$('screenSizingDialog').open);
+    }
+    $('screenSizingConfirm').click();check(!$('screenSizingDialog').open,'confirm closes screen sizing');
+    const after=JSON.parse(await(await download('btnExportJSON')).text());
+    check(JSON.stringify(Object.keys(before))===JSON.stringify(Object.keys(after))&&JSON.stringify(Object.keys(before.elements[0]))===JSON.stringify(Object.keys(after.elements[0])),'sizing preserves JSON schema');
+    check(after.config.image_scale===before.config.image_scale*4&&after.elements[0].size.width===before.elements[0].size.width*4,'JSON scales geometry and existing scale field');
+    check(after.origin.x===before.origin.x*4&&after.elements[1].relative.x===before.elements[1].relative.x*4,'JSON positions use the same scale');
+    const scaledLua=await(await download('btnExportClientLua')).text();check(scaledLua.includes('local W,H=256,256')&&scaledLua.includes('local WIDTH=256'),'Lua uses confirmed native size');
+    const scaledSvg=new w.DOMParser().parseFromString(await(await download('btnExportSVG')).text(),'image/svg+xml');
+    check(Number(scaledSvg.documentElement.getAttribute('width'))===256,'SVG uses confirmed screen size');
+    const png=await w.createImageBitmap(await download('btnExportPNG'));check(png.width===256&&png.height===256,'PNG uses confirmed screen size');png.close();
+    const client=w.GIA.describeGia(new Uint8Array(await(await download('btnExportClientGIAOverlimit')).arrayBuffer()));
+    check(Math.abs(client.container.transform.size.x-256)<.001,'scaled Client GIA remains valid');
+    $('btnScreenSizing').click();await wait(()=>$('screenSizingDialog').open);
+    check(Number($('screenSizingWidth').value)===256&&d.querySelector('[data-screen-device="3"]').getAttribute('aria-pressed')==='true','image session retains size and device');
+    $('screenSizingSyncNow').click();
+    check(!$('screenSizingSync').checked,'one-time sync leaves automatic sync off');
+    d.querySelector('[data-screen-device="0"]').click();check(Number($('screenSizingWidth').value)===320,'manual sync matches apparent size at PC baseline');
+    $('screenSizingSync').click();$('screenSizingWidth').value='400';$('screenSizingWidth').dispatchEvent(new w.Event('change'));
+    d.querySelector('[data-screen-device="2"]').click();check(Number($('screenSizingWidth').value)===480,'automatic sync uses equivalent controller coverage');
+    d.querySelector('[data-screen-device="1"]').click();check(Number($('screenSizingWidth').value)===320,'automatic sync uses equivalent mobile coverage');
+    $('screenSizingCancel').click();
+    check((await(await download('btnExportClientLua')).text()).includes('local WIDTH=256'),'cancel preserves confirmed size');
+    $('btnScreenSizing').click();await wait(()=>$('screenSizingDialog').open);$('screenSizingReset').click();$('screenSizingConfirm').click();
+   }else{
+    $('btnScreenSizing').click();await wait(()=>$('screenSizingDialog').open);
+    check(Number($('screenSizingWidth').value)===64,'new image has independent sizing');$('screenSizingCancel').click();
+   }
    check($('retryPrimevalSpeed').value==='fast','retry retains Maximum Detail');
    check($('retryFitMethod').value==='primeval'&&$('retryShape'+{circle:'Circle',triangle:'Triangle',rect:'Rect'}[shape]).checked,'retry preserves shape '+shape);
   }
@@ -278,6 +350,7 @@ frame.addEventListener('load',async()=>{
   check(completedParallel===2&&!errors.length&&!d.querySelector('.job-error'),'both parallel jobs finish successfully');
   check(!d.querySelector('#imageToolTab, #classicToolTab, #outlineLink, .tool-tabs'),'top bar has no tool tabs or mode switch');
   check(!$('fillShapeSection').hidden,'image fitting stays the main view');
+  await testFinishedImports({w,d,download,wait,check});
   check(!errors.length,'no runtime errors');document.querySelector('#status').textContent='PASS · '+messages.length+' fitting checks';document.body.dataset.result='pass';
  }catch(error){report.textContent+='\nFAIL '+error.stack;document.querySelector('#status').textContent='FAIL';document.body.dataset.result='fail';}
 });

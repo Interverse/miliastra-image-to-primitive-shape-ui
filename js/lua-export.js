@@ -11,7 +11,8 @@
  *     compares the two.
  *
  *   buildStandaloneLuaScript(payload)
- *     What the button actually downloads: one self-contained script with the
+ *     What the button downloads: a losslessly packed self-contained script.
+ *     buildReadableLuaScript retains the reference implementation with the
  *     `PrimitiveImage` runtime library (embedded verbatim below), the data
  *     table as a local, and the OnStart/OnDestroy hooks from the community
  *     Example.lua — no `require` calls, ready to drop into a client script
@@ -541,7 +542,14 @@ return PrimitiveImage
     return Number.isSafeInteger(n) ? n : null;
   }
 
-  function buildStandaloneLuaScript(data, options) {
+  function maskOffset(data) {
+    if(!data.origin)return {x:0,y:0};
+    const scale=Number(data.config?.image_scale)||1;
+    const w=Number(formatNumber(Number(data.image_size.width)*scale)),h=Number(formatNumber(Number(data.image_size.height)*scale));
+    return {x:w/2-Number(data.origin.x||0),y:-h/2-Number(data.origin.y||0)};
+  }
+
+  function buildReadableLuaScript(data, options) {
     options = options || {};
     const dataTable = convertJsonToLuaText(data);
     if (!dataTable.startsWith("return {\n")) throw new Error("unexpected data table");
@@ -563,7 +571,9 @@ return PrimitiveImage
         "--      Image Control Template in your project.",
       ];
 
+    const mask=maskOffset(data);
     const runtime=libraryBody()
+      .replace("        canvas,\n        0,\n        0,", `        canvas,\n        ${-mask.x},\n        ${-mask.y},`)
       .replace("imageAsset = circleAsset", "imageAsset = primitive[8] or circleAsset")
       .replace("control.imageType = Enum.ImageType.Stretch", "if imageAsset == 106057 then\n        control.imageType = Enum.ImageType.Basic\n    else\n        control.imageType = Enum.ImageType.Stretch\n    end");
     return [
@@ -599,13 +609,14 @@ return PrimitiveImage
       "        script.object,",
       `        ${DATA_VARIABLE},`,
       "        {",
-      "            width = 600,        -- display width; height follows the source aspect ratio",
+      `            width = ${formatNumber(Number(data.image_size.width)*(Number(data.config?.image_scale)||1))}, -- display width`,
       "            -- height = 400,    -- set both to stretch freely",
       "            -- x = 0, y = 0,    -- anchored position of the root control",
       "            -- rotation = 0,    -- degrees",
       "            -- opacity = 1,     -- 0–1, multiplies every primitive's alpha",
       "            -- quality = 1,     -- 0.01–1, fraction of primitives to draw",
-      "            -- clip = true,     -- mask primitives to the root rect",
+      "            clip = true,        -- mask primitives to the root rect",
+      ...(mask.x||mask.y?[`            x = ${mask.x}, y = ${mask.y},`]:[]),
       "            -- mirrorX = false, mirrorY = false,",
       "        }",
       "    )",
@@ -621,6 +632,267 @@ return PrimitiveImage
     ].join("\n");
   }
 
+  // Fixed-width column bit packing with optional palettes/delta prediction.
+  // All arithmetic stays within exact JS/Lua integer precision; JSON is untouched.
+  const PACK_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  // Optional LZ backreferences over the packed alphabet. A streaming Lua
+  // reader retains only a 4096-symbol window, never the full decoded image.
+  function compressSymbols(input) {
+    const seen=new Map();let output='';
+    const pair=n=>PACK_ALPHABET[n%64]+PACK_ALPHABET[Math.floor(n/64)];
+    function remember(at){
+      if(at>=4096){const oldKey=input.slice(at-4096,at-4092),old=seen.get(oldKey);if(old){while(old.length&&old[0]<=at-4096)old.shift();if(!old.length)seen.delete(oldKey);}}
+      const key=input.slice(at,at+4),list=seen.get(key)||[];
+      list.push(at);while(list.length>32||list[0]<at-4095)list.shift();seen.set(key,list);
+    }
+    for(let at=0;at<input.length;){
+      const candidates=seen.get(input.slice(at,at+4))||[];let length=0,distance=0;
+      for(let i=candidates.length-1;i>=0;i--){
+        const offset=at-candidates[i];if(offset>4095)break;
+        let n=0;while(n<4095&&at+n<input.length&&input[at+n]===input[at+n-offset])n++;
+        if(n>length){length=n;distance=offset;}if(n===4095)break;
+      }
+      if(length>=6){output+='~'+pair(distance)+pair(length);for(let i=0;i<length;i++)remember(at+i);at+=length;}
+      else {output+=input[at];remember(at++);}
+    }
+    return output;
+  }
+  function packLuaDataV2(data, sourceTable) {
+    const table=sourceTable || convertJsonToLuaText(data);
+    const rows=[...table.matchAll(/^        \{([^}]+)\},$/gm)].map(m=>m[1].split(',').map(Number));
+    const columns=[], encoded=[];
+    const bits=n=>n===0?0:Math.floor(Math.log2(n))+1;
+    const descriptor=c=>`{${c.low},${c.bits},${c.mode}${c.palette?',{'+c.palette.join(',')+'}':''}}`;
+    for(let col=0;col<8;col++){
+      const values=rows.map(row=>row[col]??0);
+      if(values.some(v=>!Number.isSafeInteger(v)))throw Error('Lua export integer exceeds lossless packed range');
+      let low=0,high=0;
+      if(values.length){low=values[0];high=low;for(const v of values){low=Math.min(low,v);high=Math.max(high,v);}}
+      const range=high-low;
+      if(!Number.isSafeInteger(range))throw Error('Lua export integer exceeds lossless packed range');
+      const raw={mode:0,low,bits:bits(range),values:values.map(v=>v-low)};
+      const palette=[...new Set(values)];
+      const indices=new Map(palette.map((v,i)=>[v,i]));
+      const choices=[raw,{mode:2,low:0,bits:bits(Math.max(0,palette.length-1)),palette,values:values.map(v=>indices.get(v))}];
+      let prev=0;
+      const deltas=values.map(v=>{const d=v-prev;prev=v;return d<0?-d*2-1:d*2;});
+      if(deltas.every(Number.isSafeInteger))choices.push({mode:1,low:0,bits:bits(deltas.reduce((a,b)=>Math.max(a,b),0)),values:deltas});
+      choices.sort((a,b)=>(descriptor(a).length+a.bits*rows.length/6)-(descriptor(b).length+b.bits*rows.length/6));
+      columns.push(choices[0]);encoded.push(choices[0].values);
+    }
+    let packed='',buffer=0,available=0;
+    function write(n,width){
+      while(width){const take=Math.min(6-available,width),base=2**take;
+        buffer+=(n%base)*2**available;n=Math.floor(n/base);available+=take;width-=take;
+        if(available===6){packed+=PACK_ALPHABET[buffer];buffer=0;available=0;}
+      }
+    }
+    for(let row=0;row<rows.length;row++)for(let col=0;col<8;col++)write(encoded[col][row],columns[col].bits);
+    if(available)packed+=PACK_ALPHABET[buffer];
+    const compressed=compressSymbols(packed),lz=packed.length-compressed.length>700;
+    if(lz)packed=compressed;
+    return {packed,lz,columns:'{'+columns.map(descriptor).join(',')+'}',count:rows.length,
+      width:table.match(/sourceWidth = ([^,]+),/)[1],height:table.match(/sourceHeight = ([^,]+),/)[1],circle:table.match(/circleAsset = (\d+),/)[1]};
+  }
+
+  const PACKED_READER = `local function PackedReader(s,cols)
+local digits={}
+local alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+for i=1,64 do digits[string.byte(alphabet,i)]=i-1 end
+local at,buffer,available=1,0,0
+local row={0,0,0,0,0,0,0,0}
+return function()
+for col=1,8 do
+local c=cols[col]
+local n,shift,left=0,0,c[2]
+while left>0 do
+if available==0 then buffer=digits[string.byte(s,at)] at=at+1 available=6 end
+local take=math.min(left,available)
+local base=2^take
+n=n+buffer%base*2^shift
+buffer=math.floor(buffer/base) available=available-take left=left-take shift=shift+take
+end
+if c[3]==1 then
+local delta=math.floor(n/2) if n%2==1 then delta=-delta-1 end
+row[col]=row[col]+delta
+elseif c[3]==2 then row[col]=c[4][n+1]
+else row[col]=n+c[1] end
+end
+return row
+end
+end`;
+
+  const LZ_SYMBOL_READER = `local history={}
+local written,remaining,distance=0,0,0
+local function symbol()
+local ch
+if remaining==0 then
+ch=string.sub(s,at,at) at=at+1
+if ch=="~" then
+distance=digits[string.byte(s,at)]+64*digits[string.byte(s,at+1)]
+remaining=digits[string.byte(s,at+2)]+64*digits[string.byte(s,at+3)] at=at+4
+end
+end
+if remaining>0 then ch=history[(written-distance)%4096] remaining=remaining-1 end
+history[written%4096]=ch written=written+1
+return ch
+end
+`;
+
+  // Rice codes spend fewer bits on small values without letting a single
+  // large background primitive set the width of an entire geometry column.
+  const RICE_READER = `local function PackedReader(s,cols)
+local digits={}
+local alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+for i=1,64 do digits[string.byte(alphabet,i)]=i-1 end
+local at,buffer,available=1,0,0
+local values={0,0,0,0,0,0,0,0,0,0,0}
+local row={}
+local function read(left)
+local n,shift=0,0
+while left>0 do
+if available==0 then buffer=digits[string.byte(s,at)] at=at+1 available=6 end
+local take=math.min(left,available)
+local base=2^take
+n=n+buffer%base*2^shift
+buffer=math.floor(buffer/base) available=available-take left=left-take shift=shift+take
+end
+return n
+end
+return function()
+for col=1,#cols do
+local c=cols[col]
+local n
+if c[3]>=3 then
+local q=0 while read(1)==1 do q=q+1 end
+n=q*2^c[2]+read(c[2])
+else n=read(c[2]) end
+if c[3]==1 or c[3]==4 then
+local delta=math.floor(n/2) if n%2==1 then delta=-delta-1 end
+values[col]=values[col]+delta
+elseif c[3]==2 then values[col]=c[4][n+1]
+else values[col]=n+c[1] end
+end
+for i=1,6 do row[i]=values[i] end
+if #cols==11 then
+local r=values[7] local g=r+values[8] local b=g+values[9]
+row[7]=values[10]*16777216+r*65536+g*256+b row[8]=values[11]
+else row[7]=values[7] row[8]=values[8] end
+return row
+end
+end`;
+
+  function packRiceRows(rows) {
+    const columns=[],encoded=[];
+    const descriptor=c=>`{${c.low},${c.bits},${c.mode}${c.palette?',{'+c.palette.join(',')+'}':''}}`;
+    const bits=n=>n===0?0:Math.floor(Math.log2(n))+1;
+    for(let col=0;col<(rows[0]?.length||8);col++){
+      const values=rows.map(row=>row[col]??0);
+      let low=0,high=0;if(values.length){low=high=values[0];for(const v of values){low=Math.min(low,v);high=Math.max(high,v);}}
+      const raw=values.map(v=>v-low),palette=[...new Set(values)],indices=new Map(palette.map((v,i)=>[v,i]));
+      const choices=[{low,bits:bits(high-low),mode:0,values:raw},{low:0,bits:bits(Math.max(0,palette.length-1)),mode:2,palette,values:values.map(v=>indices.get(v))}];
+      let previous=0;const delta=values.map(v=>{const d=v-previous;previous=v;return d<0?-d*2-1:d*2;});
+      if(delta.every(Number.isSafeInteger))choices.push({low:0,bits:bits(delta.reduce((a,b)=>Math.max(a,b),0)),mode:1,values:delta});
+      for(const [numbers,mode,offset] of [[raw,3,low],[delta,4,0]]){
+        if(!numbers.every(Number.isSafeInteger))continue;
+        const max=numbers.reduce((a,b)=>Math.max(a,b),0);
+        let best=null;
+        for(let k=0;k<=bits(max);k++){
+          const base=2**k,cost=numbers.reduce((sum,n)=>sum+Math.floor(n/base)+1+k,0);
+          if(!best||cost<best.cost)best={low:offset,bits:k,mode,values:numbers,cost};
+        }
+        choices.push(best);
+      }
+      for(const c of choices)c.score=descriptor(c).length+(c.cost ?? c.bits*rows.length)/6;
+      choices.sort((a,b)=>a.score-b.score);columns.push(choices[0]);encoded.push(choices[0].values);
+    }
+    let packed='',buffer=0,available=0;
+    function write(n,width){while(width){const take=Math.min(6-available,width),base=2**take;buffer+=(n%base)*2**available;n=Math.floor(n/base);available+=take;width-=take;if(available===6){packed+=PACK_ALPHABET[buffer];buffer=0;available=0;}}}
+    for(let row=0;row<rows.length;row++)for(let col=0;col<columns.length;col++){
+      const c=columns[col],n=encoded[col][row];
+      if(c.mode>=3){const base=2**c.bits,q=Math.floor(n/base);for(let i=0;i<q;i++)write(1,1);write(0,1);write(n%base,c.bits);}else write(n,c.bits);
+    }
+    if(available)packed+=PACK_ALPHABET[buffer];
+    const compressed=compressSymbols(packed),lz=packed.length-compressed.length>700;
+    return {packed:lz?compressed:packed,lz,columns:'{'+columns.map(descriptor).join(',')+'}',reader:RICE_READER,version:3,columnCount:columns.length};
+  }
+
+  function readerFor(art) {
+    const reader=art.reader || PACKED_READER;
+    return art.lz ? reader.replace('local row=',LZ_SYMBOL_READER+'local row=').replace('digits[string.byte(s,at)] at=at+1 available=6','digits[string.byte(symbol())] available=6') : reader;
+  }
+  function packLuaData(data) {
+    const table=convertJsonToLuaText(data),original=packLuaDataV2(data,table);
+    const rows=[...table.matchAll(/^        \{([^}]+)\},$/gm)].map(m=>{const row=m[1].split(',').map(Number);if(row.length===7)row.push(0);return row;});
+    const split=rows.map(row=>{
+      const color=row[6];
+      const a=Math.floor(color/16777216),rgb=color-a*16777216,r=Math.floor(rgb/65536),g=Math.floor((rgb-r*65536)/256),b=rgb-r*65536-g*256;
+      return [...row.slice(0,6),r,g-r,b-g,a,row[7]];
+    });
+    const candidates=[original,{...original,...packRiceRows(rows)},{...original,...packRiceRows(split)}];
+    const size=art=>art.packed.length+art.columns.length+readerFor(art).length;
+    candidates.sort((a,b)=>size(a)-size(b));
+    return candidates[0];
+  }
+
+  function buildStandaloneLuaScript(data, options) {
+    const art=packLuaData(data),index=parseTemplateIndex(options?.imageTemplateIndex),mask=maskOffset(data);
+    // A dedicated renderer replaces the general-purpose library. It keeps all
+    // native setup calls and layer order, but needs no per-control Lua tables.
+    return [
+      `-- Primitive Shaper packed v${art.version||2}. Attach to the parent UI control.`,
+      `local IMAGE_TEMPLATE_INDEX=${index===null?IMAGE_TEMPLATE_PLACEHOLDER:index}`,
+      `local WIDTH=${art.width} -- display width`,
+      `local W,H=${art.width},${art.height}`,
+      `local DATA="${art.packed}"`,
+      `local COLS=${art.columns}`,
+      readerFor(art),
+      `local function image(parent,asset,color)
+local c=game.InstantiateClientUIControl(IMAGE_TEMPLATE_INDEX,parent)
+assert(c,"Image Control Template failed")
+c:SetActive(true) c:SetVisible(true)
+c:SetImage(Enum.ImageSource.StaticReference,asset)
+c.imageColor=color
+c.imageType=asset==106057 and Enum.ImageType.Basic or Enum.ImageType.Stretch
+return c
+end
+local function rect(c,x,y,w,h,r)
+c:SetAnchorMin(0.5,0.5) c:SetAnchorMax(0.5,0.5) c:SetPivot(0.5,0.5)
+c:SetSizeDelta(w,h) c:SetAnchoredPosition(x,y)
+if r~=nil then c:SetLocalRotation(0,0,r) end
+end
+local root
+function OnStart()
+local clear=Color.FromRGBA(255,255,255,0)
+root=image(script.object,100001,clear)
+rect(root,${mask.x?`(${mask.x})*WIDTH/W`:0},${mask.y?`(${mask.y})*WIDTH/W`:0},WIDTH,WIDTH*H/W)
+root.enableMask=true
+root.enableSoftEdge=false
+root.reverseMaskArea=false
+local canvas=image(root,100001,clear)
+rect(canvas,${mask.x?`(${-mask.x})*WIDTH/W`:0},${mask.y?`(${-mask.y})*WIDTH/W`:0},W,H)
+canvas:SetLocalScale(WIDTH/W,WIDTH/W,1)
+local nextPrimitive=PackedReader(DATA,COLS)
+for i=1,${art.count} do
+local p=nextPrimitive()
+local a=math.floor(p[7]/16777216)
+local rgb=p[7]-a*16777216
+local r=math.floor(rgb/65536)
+local g=math.floor((rgb-r*65536)/256)
+local b=rgb-r*65536-g*256
+local asset=p[1]==1 and (p[8]~=0 and p[8] or ${art.circle}) or (p[1]==2 and 100001 or 100003)
+local c=image(canvas,asset,Color.FromRGBA(r,g,b,math.max(0,math.min(255,a))))
+rect(c,p[2]*0.1,p[3]*0.1,p[4]*0.1*2,p[5]*0.1*2,p[6]*0.1)
+c:SetSiblingIndex(i-1)
+end
+end
+function OnDestroy()
+if root and root.alive then game.DestroyClientUIControl(root) end
+root=nil
+end`, '',
+    ].join('\n');
+  }
+
   /* A name inside a `--` comment must not open a long comment or a new line. */
   function luaComment(text) {
     return String(text).replace(/[\r\n]+/g, " ").replace(/\[\[/g, "[ [");
@@ -629,6 +901,8 @@ return PrimitiveImage
   return {
     convertJsonToLuaText,
     buildStandaloneLuaScript,
+    buildReadableLuaScript,
+    packLuaData,
     parseTemplateIndex,
     formatNumber,
     quantizeToTenths,

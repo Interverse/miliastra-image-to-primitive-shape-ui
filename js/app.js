@@ -626,24 +626,68 @@
     }
   });
   fileInput.addEventListener("change", () => {
-    if (fileInput.files && fileInput.files.length) addFiles(Array.from(fileInput.files));
+    if (fileInput.files && fileInput.files.length) acceptInputs(Array.from(fileInput.files));
     fileInput.value = "";
   });
   dropZone.addEventListener("dragover", (event) => { event.preventDefault(); dropZone.classList.add("drag-over"); });
   dropZone.addEventListener("dragleave", (event) => { event.preventDefault(); dropZone.classList.remove("drag-over"); });
-  dropZone.addEventListener("drop", (event) => {
-    event.preventDefault();
-    dropZone.classList.remove("drag-over");
-    if (event.dataTransfer.files) addFiles(Array.from(event.dataTransfer.files));
-  });
-  document.addEventListener("paste", (event) => {
-    if (activeView !== "upload") return;
-    const items = (event.clipboardData || {}).items || [];
-    const files = [];
-    for (const item of items) {
-      if (item.type && item.type.indexOf("image") !== -1) files.push(item.getAsFile());
+  let importQueue=Promise.resolve(),dragDepth=0;
+  const inputOverlay=$('inputDropOverlay');
+  const editable=target=>target?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"])');
+  function dismissInputDialogs(){for(const dialog of document.querySelectorAll('dialog[open]'))dialog.close();if(!focusEditor.hidden)closeFocusEditor(false);}
+  function acceptInputs(files,text=null){
+    const structured=[],images=[],errors=[];
+    for(const file of files.filter(Boolean)){
+      const extension=file.name.split('.').pop().toLowerCase();
+      const format=['json','css','svg'].includes(extension)?extension:({'application/json':'json','text/css':'css','image/svg+xml':'svg'}[file.type]);
+      if(format)structured.push({file,format});
+      else if(file.type.startsWith('image/')||/^(png|jpe?g|webp|gif|bmp|avif)$/.test(extension)){
+        const mime={png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp',gif:'image/gif',bmp:'image/bmp',avif:'image/avif'}[extension];
+        images.push(file.type.startsWith('image/')?file:new File([file],file.name,{type:mime}));
+      }else errors.push(t('import.failed',{name:file.name,error:t('import.unsupported')}));
     }
-    if (files.length) addFiles(files);
+    if(images.length){dismissInputDialogs();addFiles(images);setView('upload');}
+    if(text)structured.push({text,format:FinishedImport.detect(text),name:'clipboard'});
+    importQueue=importQueue.then(async()=>{
+      let last=null;
+      for(const item of structured){
+        const name=item.file?.name || `clipboard.${item.format}`;
+        try{
+          const result=FinishedImport.parse(item.text ?? await item.file.text(),item.format);
+          const blob=await FinishedImport.render(result),file=new File([blob],derivedBaseName(name)+'.png',{type:'image/png'});
+          const config={...captureConfig(file),...result.config,mode:result.mode,fit_method:result.config.fit_method||'primeval',num_primitives:result.config.num_primitives??Math.max(1,result.elements.length)};
+          // Imported geometry has no fitting checkpoint/native quality reference.
+          delete result.config.quality;delete config.quality;
+          const job=createJob(file,URL.createObjectURL(blob),config);
+          job.name=name;job.baseName=derivedBaseName(name);job.result=result;job.status='done';job.progress=job.progressTotal=1;
+          job.importOrigin=result.importOrigin;delete result.importOrigin;
+          jobs.push(job);last=job;
+        }catch(error){const key=error.message?.startsWith('import.')?error.message:'import.render';errors.push(t('import.failed',{name,error:t(key)}));}
+      }
+      if(last){dismissInputDialogs();renderJobs();showResult(last);}
+      if(errors.length)alert(errors.join('\n'));
+    }).catch(error=>alert(t('import.failed',{name:'',error:t('import.render')})));
+  }
+  function fileDrag(event){return [...(event.dataTransfer?.types||[])].includes('Files');}
+  function clearDrop(){dragDepth=0;inputOverlay.hidden=true;dropZone.classList.remove('drag-over');$('classicDropZone').classList.remove('drag-over');}
+  document.addEventListener('dragenter',event=>{if(fileDrag(event)){dragDepth++;inputOverlay.hidden=false;}});
+  document.addEventListener('dragover',event=>{if(fileDrag(event)){event.preventDefault();event.dataTransfer.dropEffect='copy';inputOverlay.hidden=!!event.target.closest?.('#classicDropZone');}else if([...(event.dataTransfer?.types||[])].includes('text/plain')&&!editable(event.target))event.preventDefault();});
+  document.addEventListener('dragleave',()=>{if(--dragDepth<=0)clearDrop();});
+  window.addEventListener('blur',clearDrop);
+  window.addEventListener('dragend',clearDrop);
+  document.addEventListener('keydown',event=>{if(event.key==='Escape')clearDrop();});
+  document.addEventListener('drop',event=>{
+    clearDrop();if(event.defaultPrevented)return; // Dedicated GIA conversion drop owns its files.
+    const files=Array.from(event.dataTransfer?.files||[]),text=event.dataTransfer?.getData('text/plain')||'';
+    if(files.length){event.preventDefault();acceptInputs(files);}
+    else if(!editable(event.target)&&FinishedImport.detect(text)){event.preventDefault();acceptInputs([],text);}
+  });
+  document.addEventListener('paste',event=>{
+    if(event.defaultPrevented)return;
+    const data=event.clipboardData;if(!data)return;
+    const files=Array.from(data.files||[]),text=data.getData('text/plain');
+    if(files.length){event.preventDefault();acceptInputs(files);}
+    else if(!editable(event.target)&&FinishedImport.detect(text)){event.preventDefault();acceptInputs([],text);}
   });
 
   /* ════════════════════ focus editor ════════════════════ */
@@ -2046,6 +2090,12 @@
     $("showMask").disabled = !hasMask;
     $("showMask").parentElement.style.opacity = hasMask ? "1" : "0.45";
 
+    const hasOriginal=hasOriginalSource();
+    $("viewOriginal").hidden=!hasOriginal;
+    $("previewCompareHint").hidden=!hasOriginal;
+    $("showImage").disabled=!hasOriginal;
+    $("showImage").parentElement.hidden=!hasOriginal;
+    if(!hasOriginal){$("showImage").checked=false;R.view="fitted";}
     const compare = $("previewCompare");
     compare.hidden = mode !== "fill";
     if (mode !== "fill") R.view = "fitted";
@@ -2053,11 +2103,14 @@
     if (mode === "fill") {
       const assets = ensureJobAssets(R.job);
       updateFittedThumb();
-      if (assets.base) $("originalThumb").src = assets.base.toDataURL("image/png");
+      if (hasOriginal) $("originalThumb").src = assets.base.toDataURL("image/png");
+      else $("originalThumb").removeAttribute("src");
       $("nativePreview").hidden = !assets.native;
       $("differencePreview").hidden = !assets.difference;
       if(assets.native)$("nativeThumb").src = assets.native.toDataURL("image/png");
+      else $("nativeThumb").removeAttribute("src");
       if(assets.difference)$("differenceThumb").src = assets.difference.toDataURL("image/png");
+      else $("differenceThumb").removeAttribute("src");
     }
   }
 
@@ -2094,6 +2147,7 @@
     // Mirrors the Flask /retry route: same image, old config with overrides.
     const cfg = Object.assign({}, job.config, overrides);
     const newJob = createJob(job.file, job.thumbUrl, cfg);
+    if(job.screenSizing)newJob.screenSizing=structuredClone(job.screenSizing);
     jobs.push(newJob);
     setView("upload");
     pumpQueue();
@@ -2156,7 +2210,7 @@
       job,
       data,
       ppu: (data.config && data.config.pixel_per_unit) || (data.config && data.config.primitive_size) || 1,
-      origin: keepOrigin || { x: data.image_center.x, y: data.image_center.y },
+      origin: keepOrigin || job.importOrigin || { x: data.image_center.x, y: data.image_center.y },
       scale: 1,
       hovered: null,
       selected: keepState && R && R.job === job ? R.selected : null,
@@ -2187,15 +2241,17 @@
   });
 
   /* Fitted result / Original: swaps the main canvas so the two can be compared at the same zoom. */
+  function hasOriginalSource() {
+    return Boolean(R && R.data.config?.engine!=="import-browser" && ensureJobAssets(R.job).base);
+  }
   function syncResultView() {
     const original = Boolean(R && R.view === "original");
     $("viewFitted").setAttribute("aria-pressed", String(!original));
     $("viewOriginal").setAttribute("aria-pressed", String(original));
-    $("canvasWrap").classList.toggle("showing-original", original);
   }
 
   function setResultView(view) {
-    if (!R || R.view === view) return;
+    if (!R || R.view === view || (view === "original" && !hasOriginalSource())) return;
     R.view = view;
     R.hovered = null;
     $("tooltip").hidden = true;
@@ -2481,7 +2537,7 @@
     if (!R || $("previewCompare").hidden) return;
     const job = R.job, assets = ensureJobAssets(job);
     const edited = job.result.primeval_png ? job.primevalEdited : Boolean(job.editUndo && job.editUndo.length);
-    if (!edited && !job.result.primeval_drawing && !job.result.config?.partial) { if (assets.preview) $("previewImg").src = assets.preview.toDataURL("image/png"); return; }
+    if (!edited && !job.result.primeval_drawing && !job.result.config?.partial && assets.preview) { $("previewImg").src = assets.preview.toDataURL("image/png"); return; }
     const { width, height } = R.data.image_size, scale = Math.min(1, 320 / Math.max(width, height));
     const thumb = document.createElement("canvas");
     thumb.width = Math.max(1, Math.round(width * scale)); thumb.height = Math.max(1, Math.round(height * scale));
@@ -2904,6 +2960,7 @@
 
   document.addEventListener("keydown", (event) => {
     if (activeView !== "result" || !R) return;
+    if($("screenSizingDialog").open)return;
     const target = event.target;
     const typing = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" ||
       target.tagName === "SELECT" || target.isContentEditable);
@@ -2966,7 +3023,7 @@
 
   function exportFileName(ext) { return `${currentExportBaseName()}.${ext}`; }
 
-  function buildJsonExportPayload() {
+  function buildUnscaledJsonExportPayload() {
     const data = R.data;
     const originUnits = { x: R.origin.x / R.ppu, y: -R.origin.y / R.ppu };
     const exportBaseName = currentExportBaseName();
@@ -2984,8 +3041,8 @@
         triangle_pivot: element.triangle_pivot,
         center: element.center,
         relative: {
-          x: data.config?.engine==="primeval-browser"?element.center.x-originUnits.x:+(element.center.x - originUnits.x).toFixed(4),
-          y: data.config?.engine==="primeval-browser"?element.center.y-originUnits.y:+(element.center.y - originUnits.y).toFixed(4),
+          x: (data.config?.engine==="primeval-browser"||data.config?.engine==="import-browser")?element.center.x-originUnits.x:+(element.center.x - originUnits.x).toFixed(4),
+          y: (data.config?.engine==="primeval-browser"||data.config?.engine==="import-browser")?element.center.y-originUnits.y:+(element.center.y - originUnits.y).toFixed(4),
         },
         size: element.size,
         rotation: element.rotation,
@@ -3002,9 +3059,33 @@
     };
   }
 
+  function exportScale(job=R.job) {
+    const ppu=job.result.config?.pixel_per_unit || job.result.config?.primitive_size || 1;
+    return ScreenSizing.factor(job.screenSizing,job.result.image_size.width/ppu);
+  }
+  function rasterExportScale() {
+    return R.job.screenSizing ? ScreenSizing.width(R.job.screenSizing,R.data.image_size.width)/R.data.image_size.width : 1;
+  }
+  function buildJsonExportPayload() { return ScreenSizing.payload(buildUnscaledJsonExportPayload(),exportScale()); }
+  const screenSizing=ScreenSizing.create({
+    getImage:async()=>{
+      if(!R)return null;
+      const job=R.job,width=R.data.image_size.width/R.ppu,height=R.data.image_size.height/R.ppu;
+      let svg=buildSvgExportText();
+      if(nativeEditable()&&job.primevalEdited){await ensureNativeEdit(job,R.data);svg=job.nativeEditSvg;}
+      if(R?.job!==job)return null;
+      return {width,height,svg,job};
+    },
+    confirm:(setting,info)=>{info.job.screenSizing=setting;},
+  });
+  $('btnScreenSizing').addEventListener('click',async()=>{
+    if(!R)return;
+    try {await screenSizing.open(R.job.screenSizing);}catch(error){alert(t('result.export.failed',{error:error.message}));}
+  });
+
   function buildJsonExportText() { return JSON.stringify(buildJsonExportPayload(), null, 2); }
 
-  function buildCssExportText() {
+  function buildUnscaledCssExportText() {
     const data = R.data;
     const elements = renderOrderedElements(data);
     const lines = [];
@@ -3080,6 +3161,11 @@
     });
 
     return lines.join("\n") + "\n";
+  }
+
+  function buildCssExportText() {
+    const text=buildUnscaledCssExportText(),scale=rasterExportScale();
+    return scale===1?text:text.replace(/(-?\d+(?:\.\d+)?)px/g,(_,value)=>`${Number(value)*scale}px`);
   }
 
   function buildSvgExportText() {
@@ -3180,10 +3266,11 @@
   /* Current result → the GIA writer's logical image payload. Both the
    * Server and the Client serializer consume this same object, which is
    * what guarantees identical pixel layout, colours and image IDs. */
-  function currentGiaJson() {
-    return convertResultToGiaJson(
+  function currentGiaJson(sized=true) {
+    const payload = convertResultToGiaJson(
       R.data, R.job.config, currentExportBaseName(), R.origin.x, R.origin.y
     );
+    return sized ? ScreenSizing.payload(payload,exportScale()) : payload;
   }
 
   /* Asset Group export — source-image rectangular mask enabled by default. */
@@ -3314,7 +3401,7 @@
   function currentClientMaskRect() {
     if (!R) return null;
     let scene;
-    try { scene = GIA.buildImageScene(currentGiaJson()); } catch (e) { return null; }
+    try { scene = GIA.buildImageScene(currentGiaJson(false)); } catch (e) { return null; }
     const container = scene.clientContainer;
     if (!container || !(container.size_x > 0 && container.size_y > 0)) return null;
     const ppu = R.ppu || 1;
@@ -3503,15 +3590,30 @@
     }
   });
   $("btnExportSVG").addEventListener("click", async () => {
-    if(nativeEditable()&&R.job.primevalEdited){try{await ensureNativeEdit(R.job,R.data);downloadBlob(new Blob([R.job.nativeEditSvg],{type:"image/svg+xml"}),exportFileName("svg"));}catch(error){alert(t("result.export.failed",{error:error.message}));}return;}
+    if(nativeEditable()&&R.job.primevalEdited){try{await ensureNativeEdit(R.job,R.data);downloadBlob(new Blob([ScreenSizing.svg(R.job.nativeEditSvg,rasterExportScale())],{type:"image/svg+xml"}),exportFileName("svg"));}catch(error){alert(t("result.export.failed",{error:error.message}));}return;}
     if (!R) return;
     try {
-      downloadBlob(new Blob([buildSvgExportText()], { type: "image/svg+xml" }), exportFileName("svg"));
+      downloadBlob(new Blob([ScreenSizing.svg(buildSvgExportText(),rasterExportScale())], { type: "image/svg+xml" }), exportFileName("svg"));
     } catch (error) {
       alert(t("result.export.failed", { error }));
     }
   });
   $("btnExportPNG").addEventListener("click", async () => {
+    if(R?.job.screenSizing){
+      try {
+        let svg=buildSvgExportText();
+        if(nativeEditable()&&R.job.primevalEdited){await ensureNativeEdit(R.job,R.data);svg=R.job.nativeEditSvg;}
+        const scale=rasterExportScale(),w=Math.max(1,Math.round(R.data.image_size.width*scale)),h=Math.max(1,Math.round(R.data.image_size.height*scale));
+        const url=URL.createObjectURL(new Blob([ScreenSizing.svg(svg,scale)],{type:'image/svg+xml'}));
+        try {
+          const image=new Image();image.src=url;await image.decode();
+          const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
+          const ctx=canvas.getContext('2d');if(!ctx)throw Error('PNG');ctx.drawImage(image,0,0,w,h);
+          const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
+          if(!blob)throw Error('PNG');downloadBlob(blob,exportFileName('png'));
+        }finally{URL.revokeObjectURL(url);}
+      }catch(error){alert(t('result.export.failed',{error:error.message}));}return;
+    }
     if(nativeEditable()&&R.job.primevalEdited){try{await ensureNativeEdit(R.job,R.data);downloadBlob(new Blob([R.job.nativeEditPng],{type:"image/png"}),exportFileName("png"));}catch(error){alert(t("result.export.failed",{error:error.message}));}return;}
     if (!R) return;
     if(primevalCurrent()){
@@ -3581,7 +3683,7 @@
       for (const job of doneJobs) {
         const data = job.result;
         const origin = { x: data.image_center.x, y: data.image_center.y };
-        const jsonData = convertResultToGiaJson(data, job.config, job.baseName, origin.x, origin.y);
+        const jsonData = ScreenSizing.payload(convertResultToGiaJson(data, job.config, job.baseName, origin.x, origin.y),exportScale(job));
         const giaBytes = GIA.convertJsonToGiaBytes(GiaExport.withAssetGroupMask(jsonData), templates.image, GIA.MODE_IMAGE);
         files.push({ name: uniqueName(job.baseName, "gia"), data: giaBytes });
         files.push({ name: uniqueName(`${job.baseName}_server`, "gia"),
@@ -3597,7 +3699,7 @@
           x: origin.x / ((data.config && data.config.pixel_per_unit) || 1),
           y: -origin.y / ((data.config && data.config.pixel_per_unit) || 1),
         };
-        const payload = {
+        let payload = {
           image_name: job.baseName,
           group_name: job.baseName,
           origin: originUnits,
@@ -3606,6 +3708,7 @@
           mask: data.mask || null,
           elements: data.elements,
         };
+        payload=ScreenSizing.payload(payload,exportScale(job));
         files.push({ name: uniqueName(job.baseName, "json"), data: encoder.encode(JSON.stringify(payload, null, 2)) });
         // ... and the same payload as the self-contained Client Lua script
         files.push({
@@ -3678,6 +3781,7 @@
   classicDropZone.addEventListener("dragover", (event) => { event.preventDefault(); classicDropZone.classList.add("drag-over"); });
   classicDropZone.addEventListener("dragleave", (event) => { event.preventDefault(); classicDropZone.classList.remove("drag-over"); });
   classicDropZone.addEventListener("drop", (event) => {
+    if(Array.from(event.dataTransfer?.files||[]).some(file=>file.type.startsWith('image/')||/\.(json|css|svg|png|jpe?g|webp|gif|bmp|avif)$/i.test(file.name)))return;
     event.preventDefault();
     classicDropZone.classList.remove("drag-over");
     if (event.dataTransfer.files && event.dataTransfer.files[0]) attachClassicGia(event.dataTransfer.files[0]);

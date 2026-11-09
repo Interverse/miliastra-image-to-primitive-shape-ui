@@ -489,18 +489,22 @@ body {
   padding-left: 8px;
 }
 .gia-export-group__note[hidden] { display: none; }
-/* Stacked, full-width buttons: the mode names are long in several of the
-   15 locales and must never break mid-word inside a chip. */
+/* Keep export modes paired; long localized labels may wrap within a button. */
 .gia-export-group .export-action {
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
   margin-bottom: 0;
 }
 .gia-export-group .btn-sm {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: normal;
   color: var(--gia-accent);
   padding: 8px 12px;
   line-height: 1.3;
 }
+#btnExportClientLua { grid-column: 1 / -1; }
 .gia-export-group .btn-sm:hover {
   background: var(--gia-badge-bg);
   border-color: var(--gia-badge-bg);
@@ -1462,7 +1466,6 @@ input[type="range"]::-webkit-slider-thumb {
   background: color-mix(in srgb, var(--md-primary) 14%, transparent);
 }
 .preview-toggle[aria-pressed="true"] .preview-label { color: var(--md-primary); }
-.canvas-wrap.showing-original { outline: 2px solid var(--md-primary); outline-offset: -2px; }
 .preview-thumb {
   width: auto;
   max-inline-size: 100%;
@@ -1617,3 +1620,24 @@ input[type="range"]::-webkit-slider-thumb {
 .generation-preview{display:grid;gap:12px;padding:16px;border:1px solid var(--md-outline-variant);border-radius:16px;margin-bottom:16px}.generation-preview img{width:100%;max-height:420px;object-fit:contain;background:repeating-conic-gradient(#454545 0% 25%,#333 0% 50%) 0/20px 20px}.generation-preview select{min-width:0;width:100%}
 
 .job-card{cursor:pointer}.job-card.preview-selected{outline:2px solid var(--md-primary);outline-offset:-2px}#generationVector{background:repeating-conic-gradient(#454545 0% 25%,#333 0% 50%) 0/20px 20px}#generationVector>svg{display:block;width:100%;height:420px;max-height:50vh}#refinementProgress{width:100%;accent-color:var(--md-primary)}
+
+.screen-sizing-dialog{margin:auto;width:min(1000px,94vw);max-height:94vh;overflow:auto;border:1px solid var(--md-outline-variant);border-radius:20px;padding:20px;background:var(--md-surface);color:var(--md-on-surface)}
+.screen-sizing-dialog::backdrop{background:#0009}.screen-sizing-dialog h3{margin:0 0 12px}.screen-devices{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.screen-devices button{white-space:normal}.screen-devices [aria-pressed="true"]{outline:2px solid var(--md-primary)}
+.screen-sizing-stage{position:relative;aspect-ratio:16/9;background:#333 center/100% 100% no-repeat;overflow:hidden;touch-action:none;border:2px solid var(--md-outline-variant)}
+.screen-sizing-art{display:contents}#screenSizingImage{position:absolute;max-width:none;height:auto;transform:translate(-50%,-50%);cursor:move;user-select:none;outline:1px solid #64c8ff}#screenSizingHandle{position:absolute;width:22px;height:22px;background:#64c8ff;border:2px solid white;border-radius:4px;cursor:nwse-resize;transform:translate(-50%,-50%)}
+.screen-sizing-controls,.screen-sizing-actions{display:flex;gap:16px;align-items:center;flex-wrap:wrap}.screen-sizing-controls label{display:flex;gap:8px;align-items:center}.screen-sizing-controls input[type="number"]{width:130px}.screen-sizing-actions{justify-content:flex-end;margin-top:16px}
+@media(max-width:520px){.screen-sizing-dialog{padding:12px}.screen-devices{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+.screen-sizing-actions .btn-sm,.screen-sizing-actions .btn-primary{width:auto;margin:0;white-space:nowrap}.screen-sizing-actions{gap:8px}.screen-devices .btn-sm{margin:0}.screen-sizing-dialog>.hint{margin:8px 0}.screen-sizing-dialog>.screen-devices{margin-bottom:12px}
+
+.screen-sizing-stage[data-device="0"]{background-image:url("../assets/screen-backdrops/pc.png")}
+
+.screen-sizing-stage[data-device="1"]{background-image:url("../assets/screen-backdrops/mobile.png")}
+
+.screen-sizing-stage[data-device="2"]{background-image:url("../assets/screen-backdrops/controller.png")}
+
+.screen-sizing-stage[data-device="3"]{background-image:url("../assets/screen-backdrops/mobile-controller.png")}
+
+.screen-sizing-controls .btn-sm{width:auto;margin:0}
+
+.input-drop-overlay{position:fixed;inset:12px;z-index:10000;pointer-events:none;display:grid;place-items:center;border:3px dashed var(--md-primary);border-radius:24px;background:color-mix(in srgb,var(--md-surface) 85%,transparent);color:var(--md-on-surface);font-size:20px;text-align:center;padding:24px}.input-drop-overlay[hidden]{display:none}

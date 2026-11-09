@@ -84,9 +84,40 @@ const server=http.createServer((req,res)=>{
    }
   }
   await app.locator('#homeLink').click();await app.locator('.job-card:has(.job-status.done) .job-actions button').first().click();
+  for(const prefix of ['btnExportGIA','btnExportClientGIA','btnExportServerGIA']){
+   const beyond=await app.locator('#'+prefix+'Overlimit').boundingBox(),classic=await app.locator('#'+prefix+'Classic').boundingBox();
+   if(Math.abs(beyond.y-classic.y)>1||beyond.x+beyond.width>classic.x+1)throw Error('Export buttons must be paired with Beyond first: '+prefix);
+  }
   await page.locator('#app').screenshot({path:path.join(output,`site-result-${process.argv[2]||1440}.png`)});
   await app.locator('#mainCanvas').click({position:await app.locator('#mainCanvas').evaluate(e=>({x:e.clientWidth/2,y:e.clientHeight/2}))});
   await page.locator('#app').screenshot({path:path.join(output,`site-gizmos-${process.argv[2]||1440}.png`)});
+  await app.click('#btnScreenSizing');await app.locator('#screenSizingDialog').waitFor({state:'visible'});
+  const widthField=app.locator('#screenSizingWidth');
+  // A real pointer path checks the resize handle and preview-only movement.
+  await app.locator('[data-screen-device="0"]').click();
+  await app.locator('#screenSizingSnap').check();
+  await widthField.fill('1599');await widthField.dispatchEvent('change');
+  if(Number(await widthField.inputValue())!==1600)throw Error('Screen border snap');
+  await app.locator('#screenSizingSnap').uncheck();
+  await widthField.fill('1599');await widthField.dispatchEvent('change');
+  if(Number(await widthField.inputValue())!==1599)throw Error('Screen snap toggle');
+  await widthField.fill('800');await widthField.dispatchEvent('change');
+  const handle=await app.locator('#screenSizingHandle').boundingBox();
+  await page.mouse.move(handle.x+handle.width/2,handle.y+handle.height/2);await page.mouse.down();await page.mouse.move(handle.x+handle.width/2+25,handle.y+handle.height/2+25,{steps:4});await page.mouse.up();
+  const resized=Number(await widthField.inputValue());if(resized<=800)throw Error('Screen handle resize');
+  const image=await app.locator('#screenSizingImage').boundingBox();
+  const beforeMove=await app.locator('#screenSizingImage').evaluate(e=>e.style.left);
+  await page.mouse.move(image.x+image.width/2,image.y+image.height/2);await page.mouse.down();await page.mouse.move(image.x+image.width/2+20,image.y+image.height/2+10,{steps:4});await page.mouse.up();
+  if(Number(await widthField.inputValue())!==resized||beforeMove===await app.locator('#screenSizingImage').evaluate(e=>e.style.left))throw Error('Screen move changed size or failed');
+  const dialogBounds=await app.locator('#screenSizingDialog').evaluate(e=>({width:e.clientWidth,scroll:e.scrollWidth}));
+  if(dialogBounds.scroll>dialogBounds.width+1)throw Error('Screen dialog overflow');
+  await page.locator('#app').screenshot({path:path.join(output,`site-screen-sizing-${process.argv[2]||1440}.png`)});
+  for(let device=0;device<4;device++){
+   await app.locator('[data-screen-device="'+device+'"]').click();
+   await page.locator('#app').screenshot({path:path.join(output,`site-screen-sizing-device-${device}-${process.argv[2]||1440}.png`)});
+  }
+  await app.locator('#screenSizingCancel').click();
+  console.log('PASS screen sizing pointer resize, move, snapping and responsive dialog');
   console.log('PASS '+report.split('\n').length+' checks; upload/result screenshots at '+(process.argv[2]||1440));
  }
  await browser.close();server.close();if(!ok)process.exitCode=1;
