@@ -1,0 +1,159 @@
+"use strict";
+const fs=require('fs'),http=require('http'),path=require('path');const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');const root=require('../runtime-root.cjs');
+const single=process.argv.includes('fallback');
+const server=http.createServer((req,res)=>{if(!single){res.setHeader('Cross-Origin-Opener-Policy','same-origin');res.setHeader('Cross-Origin-Embedder-Policy','require-corp');}const requestPath=decodeURIComponent(new URL(req.url,'http://local').pathname),file=path.resolve(root,'.'+requestPath.replace('/js/vendor/mediabunny/mediabunny.min.mjs','/js/vendor/mediabunny/mediabunny.min.js'));if(!file.startsWith(root+path.sep)){res.writeHead(403);res.end();return;}fs.readFile(file,(err,data)=>{if(err){res.writeHead(404);res.end();return;}res.setHeader('Content-Type',requestPath.endsWith('.mjs')?'text/plain':({'.html':'text/html','.js':'text/javascript','.mjs':'text/plain','.css':'text/css','.wasm':'application/wasm','.gif':'image/gif','.png':'image/png'})[path.extname(file)]||'application/octet-stream');res.end(data);});});
+(async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const launch={headless:true};if(process.env.CHROME_PATH)launch.executablePath=process.env.CHROME_PATH;else if(!fs.existsSync(chromium.executablePath()))launch.channel='chrome';const browser=await chromium.launch(launch);
+try{for(const width of (process.argv.includes('narrow')?[390]:single?[390]:[1280,390])){const page=await browser.newPage({viewport:{width,height:1000},serviceWorkers:single?'block':'allow'});const errors=[];page.on('console',m=>{if(m.type()==='error'||process.env.ANIMATION_TRACE)console.error(m.text());});page.on('pageerror',e=>errors.push(e.message));await page.goto('http://127.0.0.1:'+server.address().port+'/index.html');
+const report=await page.evaluate(async(single)=>{
+ let checks=0;const check=(v,s)=>{if(!v)throw Error(s);checks++;};check(globalThis.crossOriginIsolated!==single,'expected WASM isolation variant');
+ console.log('animation browser: start '+innerWidth);
+ const baseConfig={num_primitives:8,allowed_shapes:['triangle'],primeval_speed:'fastest',primeval_resolution:32,primeval_threads:1,image_scale:1};
+ async function decode(file,config={}){config={...baseConfig,...config};const worker=new Worker('/js/worker-animation.js');return await new Promise((resolve,reject)=>{worker.onerror=e=>{worker.terminate();reject(Error(e.message));};worker.onmessage=({data})=>{if(data.type==='done'){worker.terminate();resolve(data);}else if(data.type==='error'){worker.terminate();reject(Error(data.message+" "+data.detail));}};worker.postMessage({cmd:'process',file,config});});}
+ const gif=new File([await(await fetch('/tests/primeval/fixtures/animation/moving.gif')).blob()],'moving.gif',{type:'image/gif'});
+ const start=performance.now(),first=await decode(gif);check(first.result.animation.frames.length===3,'GIF preserves every frame');
+ check(first.result.animation.durations.every((d,i)=>Math.abs(d-[.07,.11,.08][i])<.000001),'GIF source timing');
+ check(first.result.elements.filter(e=>e.type==='triangle').length===8,'Primeval triangle count per frame');check(first.result.animation.kind==='primeval','animation uses Primeval');
+ check(AnimationCore.elements(first.result.animation,1).every(e=>parseInt(e.color.slice(1,3),16)<10),'GIF disposal does not retain previous red pixels');
+ check(first.result.animation.frames[0].some((p,i)=>p!==first.result.animation.frames[1][i]),'GIF frame colours change');
+ console.log('animation browser: detail');
+ const detail=new File([await(await fetch('/tests/primeval/fixtures/animation/detail.gif')).blob()],'detail.gif',{type:'image/gif'});
+ const detailed=await decode(detail,{num_primitives:32,allowed_shapes:['circle'],primeval_speed:'fastest',primeval_resolution:64,primeval_threads:1,image_scale:2,output_alpha:.5});
+ check(detailed.result.animation.frames.length===12,'Primeval fits every source frame');
+ check(detailed.result.animation.metrics.refined>0,'native warm-start refinement is used');check(detailed.result.animation.metrics.keyframes<12,'frames reuse existing fits');
+ if(innerWidth>1000||single){
+  const concurrent=await decode(detail,{num_primitives:500,allowed_shapes:['mixed'],primeval_resolution:128,primeval_threads:8,primeval_turbo:true,primeval_speed:'fast',output_alpha:.5,image_scale:2,focus:{enabled:false}});
+  check(concurrent.result.animation.frames.length===12,'parallel temporal sequences preserve all frames');
+  check(concurrent.result.animation.frames.every(f=>AnimationCore.elements({...concurrent.result.animation,frames:[f]},0).length>=500),'sequence merging preserves the shape budget');
+  check(concurrent.result.animation.unit===2&&concurrent.result.config.output_alpha===.5,'parallel sequences preserve image scale and opacity');
+  check(concurrent.result.animation.metrics.frameWorkers>=2,'temporal sequences run concurrently on capable machines');
+  check(concurrent.result.animation.metrics.frameWorkers*concurrent.result.animation.metrics.threadsPerFrame<=8,'temporal sequences share the CPU budget');
+  check(concurrent.result.animation.metrics.firstEightMs>0,'initial eight frames have a separate latency measurement');
+  check(Math.abs(concurrent.result.animation.durations.reduce((a,b)=>a+b,0)-detailed.result.animation.durations.reduce((a,b)=>a+b,0))<1e-6,'parallel sequence boundaries preserve exact playback timing');
+ }
+ const independent=await decode(gif,{animation_temporal:false});check(independent.result.animation.metrics.keyframes===3&&independent.result.animation.metrics.refined===0,'temporal checkbox can retain independent fits');
+ check(AnimationCore.elements(detailed.result.animation,6).every(e=>e.type==='ellipse'||e.type==='rectangle'),'circle mode uses ellipses and optional background');
+ check(detailed.result.config.primeval_resolution===64&&detailed.result.config.output_alpha===.5&&detailed.result.config.image_scale===2,'shared detail, opacity and scale options');
+ if(innerWidth>1000){const dense=await decode(gif,{num_primitives:2000,primeval_resolution:512,primeval_turbo:true,primeval_speed:'fast',allowed_shapes:['mixed'],focus:{enabled:true,automatic:false,areas:[[.1,.1,.9,.9]]}});check(dense.result.config.num_primitives===2000&&dense.result.config.primeval_resolution===512,'default count/detail preserved');check(dense.result.animation.frames.every(f=>AnimationCore.elements({...dense.result.animation,frames:[f]},0).length>=2000),'every dense frame retains the full shape count');}
+
+
+ if(innerWidth>1000){
+  const offOptions={animation_temporal:false,allowed_shapes:['mixed'],primeval_turbo:true,primeval_speed:'fast',primeval_resolution:32,primeval_threads:8};
+  const serial=await decode(gif,{...offOptions,animation_parallel:false}),parallel=await decode(gif,offOptions);
+  check(JSON.stringify(serial.result.animation.frames)===JSON.stringify(parallel.result.animation.frames),'parallel independent fits preserve every packed shape value and frame order');
+  check(serial.result.animation.metrics.frameWorkers===1,'serial independent control');
+  check(parallel.result.animation.metrics.frameWorkers*parallel.result.animation.metrics.threadsPerFrame<=Math.min(8,navigator.hardwareConcurrency),'independent fits respect total CPU budget');
+  if((navigator.deviceMemory||4)>=8&&navigator.hardwareConcurrency>=8)check(parallel.result.animation.metrics.frameWorkers===2,'two independent frames fit concurrently on capable machines');
+ }
+
+ const nativeRate=await decode(gif,{animation_fps:15});check(nativeRate.result.animation.metrics.skippedFrames===0,'FPS above source rate keeps all poses');check(nativeRate.result.animation.durations.every((d,i)=>Math.abs(d-[.07,.11,.08][i])<1e-6),'GIF variable timing is preserved when frames fit selected FPS');
+ const lowRate=await decode(gif,{animation_fps:1});check(lowRate.result.animation.frames.length===1,'selected FPS avoids fitting undisplayed frames');check(Math.abs(lowRate.result.animation.durations[0]-.26)<.000001,'FPS sampling preserves total clip duration');check(lowRate.result.animation.metrics.skippedFrames===2,'skipped source frames recorded');
+ const preview=await new Promise((resolve,reject)=>{const worker=new Worker('/js/worker-animation.js');const frames=[];worker.onerror=e=>reject(Error(e.message));worker.onmessage=({data})=>{if(data.type==='previewFrame'){frames.push(data);data.bitmap.close();}else if(data.type==='previewDone'){worker.terminate();resolve({...data,frames});}else if(data.type==='error'){worker.terminate();reject(Error(data.message));}};worker.postMessage({cmd:'preview',file:gif,config:{animation_fps:1}});});
+ check(preview.frames.length===1&&Math.abs(preview.duration-.26)<.000001,'source preview shares the generation FPS schedule');
+ const mixed=await decode(gif,{allowed_shapes:['mixed'],primeval_turbo:true,primeval_speed:'fast',primeval_experiments:['extraRounds'],focus:{enabled:true,automatic:false,areas:[[.1,.1,.9,.9]]}});
+ check(mixed.result.config.primeval_turbo&&mixed.result.config.primeval_experiments.includes('extraRounds'),'Turbo and experiments are forwarded');
+ check(mixed.result.config.allowed_shapes[0]==='mixed'&&mixed.result.config.focus.areas.length===1,'Mixed and manual Focus options retained');
+ const rect=await decode(gif,{allowed_shapes:['rect']});check(AnimationCore.elements(rect.result.animation,1).every(e=>e.type==='rectangle'),'Primeval rectangle mode');
+ // Compare a fitted animation frame to the actual still-image worker output.
+ const imageDecoder=new ImageDecoder({data:await gif.arrayBuffer(),type:'image/gif'});await imageDecoder.tracks.ready;
+ const sample=(await imageDecoder.decode({frameIndex:0})).image,c=new OffscreenCanvas(32,16),cx=c.getContext('2d');cx.drawImage(sample,0,0);sample.close();imageDecoder.close();
+ const pixels=cx.getImageData(0,0,32,16).data;
+ const still=await new Promise((resolve,reject)=>{const worker=new Worker('/js/worker-primeval.js');worker.onmessage=({data})=>{if(data.type==='done'){worker.terminate();resolve(data.result);}else if(data.type==='error'){worker.terminate();reject(Error(data.message));}};worker.onerror=e=>reject(Error(e.message));worker.postMessage({cmd:'process',rgba:pixels.buffer,width:32,height:16,config:{...baseConfig,enable_png_mode:true}});});
+ check(JSON.stringify([...AnimationCore.packFrame(still.elements,null,32,16)])===JSON.stringify([...first.result.animation.frames[0]]),'animation geometry equals the existing Primeval worker for identical pixels/options');
+ console.log('animation browser: video');
+ const legacyModule=await fetch('/js/vendor/mediabunny/mediabunny.min.mjs');check(legacyModule.ok&&legacyModule.headers.get('content-type')==='text/plain','server reproduces Windows Python .mjs MIME mismatch');
+ const M=await import('/js/vendor/mediabunny/mediabunny.min.js');
+ async function video(format,codec,type,width=32,height=16,count=4,moving=false,step=.1){const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;const ctx=canvas.getContext('2d'),target=new M.BufferTarget(),output=new M.Output({format,target}),source=new M.CanvasSource(canvas,{codec,bitrate:100000,...(codec==='avc'?{fullCodecString:'avc1.42001f'}:{})});output.addVideoTrack(source,{frameRate:10});await output.start();for(let i=0;i<count;i++){ctx.fillStyle=moving?'#203040':['#ff0000','#00ff00','#0000ff','#ffffff'][i%4];ctx.fillRect(0,0,width,height);if(moving){ctx.fillStyle='#8090a0';ctx.fillRect(0,2,width,2);ctx.fillStyle='#f09040';ctx.fillRect(4+i*3,8,16,24);}await source.add(i*step,step);}source.close();await output.finalize();return new File([target.buffer],'clip.'+(type==='video/webm'?'webm':'mp4'),{type});}
+ const webm=await video(new M.WebMOutputFormat(),'vp8','video/webm');
+ const decoded=await decode(webm);
+ check(decoded.result.animation.frames.every((frame,i)=>{const p=frame[6],r=Math.floor(p/65536)%256,g=Math.floor(p/256)%256,b=p%256;return i===0?r>200&&g<20&&b<20:i===1?g>200&&r<20&&b<20:i===2?b>200&&r<20&&g<20:Math.min(r,g,b)>200;}),'video presentation order and decoded colours');
+ if(innerWidth>1000||single){const movingVideo=await video(new M.WebMOutputFormat(),'vp8','video/webm',128,64,12,true),parallelVideo=await decode(movingVideo,{num_primitives:500,allowed_shapes:['rect'],primeval_resolution:128,primeval_threads:8,primeval_turbo:true,primeval_speed:'fast'});check(parallelVideo.result.animation.frames.length===12,'parallel video preserves all presentation frames');check(parallelVideo.result.animation.metrics.frameWorkers>=2,'video uses the temporal sequence scheduler');check(Math.abs(parallelVideo.result.animation.durations.reduce((a,b)=>a+b,0)-1.2)<.00001,'video sequence boundaries preserve timing');}
+ check(decoded.result.animation.frames.length===4,'WebM decodes every frame without playback sampling');check(decoded.result.animation.durations.every(d=>Math.abs(d-.1)<.00001),'WebM source timing');
+ const mp4Supported=await VideoEncoder.isConfigSupported({codec:'avc1.42001f',width:32,height:16,bitrate:100000,framerate:10});
+ let longMP4=null,mp4Frames=0;if(mp4Supported.supported){const mp4=await video(new M.Mp4OutputFormat(),'avc','video/mp4');const avc=await decode(mp4);mp4Frames=avc.result.animation.frames.length;check(mp4Frames===4,'MP4/AVC decodes all frames');
+ console.log('animation browser: long MP4');
+ const clip=await video(new M.Mp4OutputFormat(),'avc','video/mp4',320,180,4,false,75),free=new Uint8Array(4*1024*1024);new DataView(free.buffer).setUint32(0,free.length);free.set([102,114,101,101],4);longMP4=new File([clip,free],'five-minutes.mp4',{type:'video/mp4'});
+ const longResult=await decode(longMP4,{animation_fps:15});check(longResult.result.animation.frames.length===4,'long MP4 retains every source frame');check(Math.abs(longResult.result.animation.durations.reduce((n,d)=>n+d,0)-300)<.001,'five-minute MP4 duration is not capped');}
+
+ else console.log('SKIP MP4 encoding fixture: AVC encoder unavailable');
+ let rejected=false;try{await decode(gif,{num_primitives:0,allowed_shapes:['triangle'],primeval_speed:'fastest'});}catch(e){rejected=e.message.startsWith('animation.fitError');}check(rejected,'invalid Primeval count fails explicitly');
+ await new Promise((resolve,reject)=>{const worker=new Worker('/js/worker-animation.js');let finished=false;worker.onmessage=({data})=>{if(data.type==='progress'){worker.terminate();setTimeout(()=>{check(!finished,'cancel terminates animation worker');resolve();},50);}if(data.type==='done')finished=true;if(data.type==='error')reject(Error(data.message));};worker.postMessage({cmd:'process',file:gif,config:{num_primitives:8,allowed_shapes:['triangle'],primeval_speed:'fastest',primeval_resolution:32,primeval_threads:1}});});
+ console.log('animation browser: UI');
+ const $=id=>document.getElementById(id),alerts=[];window.alert=s=>alerts.push(s);
+ const blobs=new Map(),downloads=[],create=URL.createObjectURL.bind(URL);URL.createObjectURL=blob=>{const url=create(blob);blobs.set(url,blob);return url;};const click=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){if(this.download)downloads.push({name:this.download,blob:blobs.get(this.href)});else click.call(this);};
+
+ const NativeWorker=window.Worker,live={starts:[],frames:[],partials:0,sparseReady:null};window.Worker=class extends NativeWorker{constructor(...args){super(...args);let first=null,delaying=false;const queued=[];this.addEventListener('message',event=>{if(!event.isTrusted)return;const {data}=event;if(data.type==='animation-frame-start')live.starts.push(data.sourceFrame);if(data.type==='animation-frame')live.frames.push(data.index);if(data.type==='animation-frame-progress'&&(data.previewSvg||data.previewShapes?.length))live.partials++;if(delaying){event.stopImmediatePropagation();queued.push(data);return;}if(data.type==='animation-frame'&&data.index===0){event.stopImmediatePropagation();first=data;return;}if(data.type==='animation-frame'&&data.index===1&&first){event.stopImmediatePropagation();delaying=true;this.dispatchEvent(new MessageEvent('message',{data}));requestAnimationFrame(()=>requestAnimationFrame(()=>{live.sparseReady=$('animationGenerationReady').textContent;this.dispatchEvent(new MessageEvent('message',{data:first}));first=null;delaying=false;for(const message of queued.splice(0))this.dispatchEvent(new MessageEvent('message',{data:message}));}));}});}};
+ console.log('animation browser: video preview');
+ if(longMP4){const upload=new DataTransfer();upload.items.add(longMP4);document.body.dispatchEvent(new DragEvent('drop',{dataTransfer:upload,bubbles:true,cancelable:true}));const end=performance.now()+10000;while($('animationSourcePlay').disabled){if(performance.now()>end)throw Error('long MP4 preview: '+$('animationSourceStatus').textContent);await new Promise(r=>setTimeout(r,20));}check($('uploadWarning').hidden,'MP4s do not get the still-image size warning');check($('animationSourceStatus').textContent.includes('300.00')&&$('animationSourceStatus').textContent.includes('streamed'),'long MP4 preview streams without buffering the whole clip');check($('animationSourceCanvas').width===320,'streamed MP4 backdrop renders');document.querySelector('.file-thumb-remove').click();}
+ console.log('animation browser: GIF preview');
+ const data=new DataTransfer();data.items.add(gif);document.body.dispatchEvent(new DragEvent('drop',{dataTransfer:data,bubbles:true,cancelable:true}));
+ check(document.querySelector('[data-i18n=\"fitting.formats\"]').textContent==='PNG / JPG / WEBP / Short GIFs and Videos','concise media format wording');check(document.querySelector('[data-i18n=\"import.hint\"]').textContent==='Paste JSON/CSS/SVG to reopen'&&!document.querySelector('[data-i18n=\"upload.multiHint\"]'),'concise reopen wording without redundant batch hint');
+ check($('animationFps').value==='15','default animation FPS');
+ check(!$('animationSettings').hidden,'GIF exposes dedicated animation settings');
+ const previewDeadline=performance.now()+10000;while($('animationSourcePlay').disabled){if(performance.now()>previewDeadline)throw Error('source preview timeout: '+$('animationSourceStatus').textContent);await new Promise(r=>setTimeout(r,20));}
+ check(!$('animationSource').hidden&&$('animationSourceCanvas').width===32,'source canvas plays before generation');
+ $('animationFps').value='1';$('animationFps').dispatchEvent(new Event('input'));await new Promise(r=>setTimeout(r,200));while($('animationSourcePlay').disabled){if(performance.now()>previewDeadline)throw Error('FPS preview update timeout');await new Promise(r=>setTimeout(r,20));}
+ check($('animationSourceStatus').textContent.startsWith('1 '),'FPS input changes the source playback schedule');
+ $('animationFps').value='15';$('animationFps').dispatchEvent(new Event('input'));
+check(!$('fillShapeSection').hidden&&$('fitMethod').value==='primeval','animation uses shared Primeval settings');check($('numPrimsManual').value==='1000'&&$('primevalResolution').value==='512'&&$('focusDetail').checked,'animation retains default 1,000 shapes, 512 detail and Focus');check(!document.getElementById('animationCount'),'no separate tile count');check($('animationTemporal').checked,'temporal optimization defaults on');check($('fileThumbs').querySelector('img').src.startsWith('blob:'),'GIF input remains animated');$('numPrimsManual').value='8';$('primevalSpeed').value='fast';$('primevalSpeed').dispatchEvent(new Event('change'));$('primevalResolution').value='32';$('btnSubmit').click();
+ const deadline=performance.now()+15000;while(!document.querySelector('.job-status.done')){if(alerts.length||document.querySelector('.job-error'))throw Error(alerts.join(' ')||document.querySelector('.job-error').textContent);if(performance.now()>deadline)throw Error('animation UI timeout');await new Promise(r=>setTimeout(r,20));}
+
+ check(live.frames.length===3&&live.frames.every((v,i)=>v===i),'every generated GIF frame streams to the processing preview');check(live.partials>0,'native fitting partials are visible before completion');
+ check(!$('animationGenerationControls').hidden&&$('animationGenerationFrame').max==='2','all completed frames are seekable during generation');check(live.sparseReady===I18N.t('animation.framesReady',{count:1}),'out-of-order completion counts only finished frames');
+ const completedPreview=$('generationPreview').src;$('animationGenerationFrame').value='0';$('animationGenerationFrame').dispatchEvent(new Event('input'));await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));check(!$('animationGenerationFollow').checked,'scrubbing stops auto-follow');check($('generationPreview').src!==completedPreview,'generation filmstrip renders the chosen frame');check($('generationStatus').textContent.includes('1/3'),'generation feedback includes the source frame counter');
+ document.querySelector('.job-actions button').click();check(!$('animationPreview').hidden,'animation result has playback controls');check($('animationPlay').dataset.i18n==='animation.pause','animation starts playing on opening result');
+ check(!$('clientAnimationCompactField').hidden&&!$('clientAnimationCompact').checked&&!$('batchAnimationCompactField').hidden,'compact animation export controls shown');
+ check($('btnExportSVG').hidden&&$('btnExportPNG').hidden&&!$('btnExportJSON').parentElement.hidden&&!$('btnExportFramesJSON').hidden&&$('btnExportClientGIAOverlimit').hidden,'animation offers Lua and JSON with static-only formats hidden');
+ const initial=$('mainCanvas').toDataURL();$('animationFrame').value='2';$('animationFrame').dispatchEvent(new Event('input'));check(initial!==$('mainCanvas').toDataURL(),'scrubbing displays the chosen fitted frame');
+ async function downloaded(n){const end=performance.now()+15000;while(downloads.length<n){if(performance.now()>end||alerts.length)throw Error('export timeout: '+alerts.join(' '));await new Promise(r=>setTimeout(r,20));}}
+ $('clientLuaTemplateIndex').value='123';$('clientLuaTemplateIndex').dispatchEvent(new Event('input'));$('btnExportClientLua').click();await downloaded(1);
+ check(downloads.length===1&&(await downloads[0].blob.text()).includes('function OnUpdate(deltaTime)'),'UI exports the animation Lua runtime');
+ const downloadedLua=await downloads[0].blob.text();check(downloadedLua.includes('GEOMETRY,ROTATION,COMPACT=0.1,0.1,false'),'lossless export default');check(['Play','Stop','Restart'].every(name=>downloadedLua.includes('function '+name+'()')),'download exposes playback methods');
+ $('clientAnimationCompact').checked=true;$('btnExportClientLua').click();await downloaded(2);check((await downloads.at(-1).blob.text()).includes('GEOMETRY,ROTATION,COMPACT=0.5,1,true'),'compact export is explicit');
+
+ $('exportFileName').value='animation-json-test';$('btnExportJSON').click();await downloaded(3);
+ const videoText=await downloads.at(-1).blob.text(),videoJSON=JSON.parse(videoText),videoResult=FinishedImport.parse(videoText,'json');
+ check(downloads.at(-1).name==='animation-json-test.json','whole video JSON filename');
+ check(videoJSON.animation.version===1&&videoJSON.animation.frames.length===3,'whole video contains every frame');
+ check(videoJSON.animation.durations.every((d,i)=>Math.abs(d-[.07,.11,.08][i])<.00001),'whole JSON preserves variable timing');
+ check(videoResult.animation.frames.every((f,i)=>JSON.stringify([...f])===JSON.stringify(videoJSON.animation.frames[i])),'whole JSON reopens bit-exact fitted frames');
+ const schema=['image_name','group_name','origin','image_size','config','mask','elements'];
+ check(JSON.stringify(Object.keys(videoJSON).filter(k=>k!=='animation'))===JSON.stringify(schema),'existing top-level fields stay unchanged');
+ check(videoJSON.elements.every((el,i)=>el.packed_color===videoResult.elements[i].packed_color),'video poster is always the first frame');
+ $('btnExportFramesJSON').click();await downloaded(4);
+ check(downloads.at(-1).name==='animation-json-test_frames.zip','separate frames ZIP filename');
+ const packed=new Uint8Array(await downloads.at(-1).blob.arrayBuffer()),header=new DataView(packed.buffer);let pos=0,frameIndex=0;
+ while(header.getUint32(pos,true)===0x04034b50){
+  const method=header.getUint16(pos+8,true),size=header.getUint32(pos+18,true),n=header.getUint16(pos+26,true),extra=header.getUint16(pos+28,true),name=new TextDecoder().decode(packed.subarray(pos+30,pos+30+n)),content=packed.subarray(pos+30+n+extra,pos+30+n+extra+size);
+  const raw=method===8?new Uint8Array(await new Response(new Blob([content]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer()):content;
+  check(MiniZip.crc32(raw)===header.getUint32(pos+14,true),'frame ZIP checksum');
+  const frameJSON=JSON.parse(new TextDecoder().decode(raw)),frameResult=FinishedImport.parse(new TextDecoder().decode(raw),'json');
+  check(name==='animation-json-test_frame_'+String(frameIndex+1).padStart(4,'0')+'.json','frame ordering and names');
+  check(JSON.stringify(Object.keys(frameJSON))===JSON.stringify(schema)&&!frameJSON.animation,'frame JSON keeps the image layout');
+  const expected=AnimationCore.elements(videoResult.animation,frameIndex,videoResult.animation.unit);
+  check(frameResult.elements.every((el,i)=>el.packed_color===expected[i].packed_color&&el.center.x===expected[i].center.x&&el.center.y===expected[i].center.y),'each JSON contains its own fitted frame');
+  pos+=30+n+extra+size;frameIndex++;
+ }
+ check(frameIndex===3,'all frames exported separately');
+ const cancelCount=downloads.length;$('btnExportFramesJSON').click();$('btnCancelAnimationJSON').click();while($('btnExportFramesJSON').disabled)await new Promise(r=>setTimeout(r,10));check(downloads.length===cancelCount&&!alerts.length,'cancel stops JSON export without partial downloads');
+ const before=downloads.length;for(const id of ['btnExportCSS','btnExportSVG','btnExportPNG'])$(id).click();check(downloads.length===before,'hidden static exports cannot emit an animation as an image');
+ $('batchLuaTemplateIndex').value='123';$('batchLuaTemplateIndex').dispatchEvent(new Event('input'));$('btnDownloadAll').click();await downloaded(before+1);check(downloads.at(-1).name.endsWith('.zip'),'batch animation export');
+ const zip=new Uint8Array(await downloads.at(-1).blob.arrayBuffer()),view=new DataView(zip.buffer);let at=0,names=[];while(at+30<zip.length&&view.getUint32(at,true)===0x04034b50){const length=view.getUint16(at+26,true),extra=view.getUint16(at+28,true),size=view.getUint32(at+18,true);names.push(new TextDecoder().decode(zip.subarray(at+30,at+30+length)));at+=30+length+extra+size;}
+ check(names.length===1&&names[0].endsWith('.lua'),'animation ZIP contains no JSON/GIA/still frames');
+ check(new TextDecoder().decode(zip).includes('GEOMETRY,ROTATION,COMPACT=0.1,0.1,false'),'batch defaults to lossless animation');
+ $('batchAnimationCompact').checked=true;$('btnDownloadAll').click();await downloaded(before+2);check((await downloads.at(-1).blob.text()).includes('GEOMETRY,ROTATION,COMPACT=0.5,1,true'),'batch compact checkbox is honored');
+ $('animationFrame').value='0';$('animationFrame').dispatchEvent(new Event('input'));const seen=new Set();$('animationPlay').click();for(let i=0;i<35;i++){await new Promise(r=>setTimeout(r,10));seen.add($('animationFrame').value);}$('animationPlay').click();check(seen.size===3,'playback advances through all GIF frames and loops');check(!alerts.length,'animation preview runs without errors');
+
+ const reopen=new DataTransfer();reopen.items.add(new File([videoText],'whole-video.json',{type:'application/json'}));document.body.dispatchEvent(new DragEvent('drop',{dataTransfer:reopen,bubbles:true,cancelable:true}));
+ const importDeadline=performance.now()+10000;while(document.querySelectorAll('.job-status.done').length<2){if(performance.now()>importDeadline)throw Error('video JSON reopen timeout '+alerts.join(' '));await new Promise(r=>setTimeout(r,20));}
+ check(!$('animationPreview').hidden&&$('animationFrame').max==='2','whole-video JSON loads as a finished animation');
+ $('animationFrame').value='1';$('animationFrame').dispatchEvent(new Event('input'));check($('animationSummary').textContent.includes('3'),'reopened animation has its full timeline');
+ $('homeLink').click();document.querySelector('.job-card:last-child .job-actions button:last-child').click();document.querySelector('.job-actions button').click();
+ check(document.querySelectorAll('.job-status.done').length===1,'roundtrip test removes its temporary job');
+ for(const lang of I18N.LANGUAGES)for(const key of ['title','hint','loop','play','pause','frame','summary','codec','limit','fitError','temporal','compact','compactHint','fps','fpsHint','sourcePreview','previewLoading','sourceSummary','fpsInvalid','previewLimit','generating','framesReady','follow','fitting','frameProgress','videoSummary','videoJSON','framesJSON','exportingJSON'])check(!!window.LOCALES[lang.code]['animation.'+key],'animation locale '+lang.code);
+ return {checks,milliseconds:Math.round(performance.now()-start),frames:first.result.animation.frames.length+decoded.result.animation.frames.length+mp4Frames,mp4Frames};
+},single);console.log('PASS animation browser '+(single?'single-thread ':'threaded ')+width+'px '+JSON.stringify(report));if(errors.length)throw Error(errors.join('\n'));
+await page.screenshot({path:path.join(root,'reference/research-2026-10/animation-'+width+'.png')});await page.locator('#clientAnimationCompactField').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(root,'reference/research-2026-10/animation-export-'+width+'.png')});await page.evaluate(async()=>{document.getElementById('homeLink').click();const file=new File([await(await fetch('/tests/primeval/fixtures/animation/detail.gif')).blob()],'detail.gif',{type:'image/gif'}),data=new DataTransfer();data.items.add(file);document.body.dispatchEvent(new DragEvent('drop',{dataTransfer:data,bubbles:true,cancelable:true}));document.getElementById('numPrimsManual').value='32';document.getElementById('primevalResolution').value='64';document.getElementById('primevalSpeed').value='turbo';document.getElementById('focusDetail').checked=false;document.getElementById('primevalSpeed').dispatchEvent(new Event('change'));document.getElementById('animationSettings').scrollIntoView({block:'center'});});
+await page.screenshot({path:path.join(root,'reference/research-2026-10/animation-settings-'+width+'.png')});
+await page.evaluate(async()=>{document.getElementById('btnSubmit').click();const deadline=performance.now()+60000;while(document.querySelectorAll('.job-status.done').length<2){if(performance.now()>deadline)throw Error('detailed animation UI timeout');await new Promise(r=>setTimeout(r,20));}document.querySelector('.job-card:last-child .job-actions button').click();document.getElementById('animationFrame').value='6';document.getElementById('animationFrame').dispatchEvent(new Event('input'));});
+await page.screenshot({path:path.join(root,'reference/research-2026-10/animation-detail-'+width+'.png')});await page.locator('#homeLink').click();await page.locator('.generation-preview').scrollIntoViewIfNeeded();await page.evaluate(()=>{const box=document.querySelector('.generation-preview').getBoundingClientRect();for(const id of ['generationPreview','animationGenerationControls','animationGenerationStrip']){const r=document.getElementById(id).getBoundingClientRect();if(r.right>box.right+1)throw Error('Generation preview overflow: '+id);}});await page.screenshot({path:path.join(root,'reference/research-2026-10/animation-generation-'+width+'.png')});await page.close();}
+}finally{await browser.close();server.close();}})().catch(e=>{console.error(e);server.close();process.exitCode=1;});

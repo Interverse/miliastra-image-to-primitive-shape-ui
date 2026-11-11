@@ -57,3 +57,17 @@ third_party/primeval/target/
 .pytest_cache/
 .DS_Store
 Thumbs.db
+# Local replacement scripts generated from user-supplied animation media
+/Lua/optimized_gif_compact.lua
+/Lua/optimized_gif_lossless.lua
+
+/Lua/original_gif_loading_fix.lua
+/Lua/gif_performance.lua
+/Lua/jahoda_client_optimized.lua
+/Lua/jahoda_client_fast.lua
+/Lua/jahoda_client_preloaded.lua
+/Lua/aranara_client_fast.lua
+/Lua/jahoda_client_website.lua
+/Lua/aranara_client_website.lua
+/Lua/jahoda_2_playback_fixed.lua
+/Lua/jahoda_3_playback_fixed.lua

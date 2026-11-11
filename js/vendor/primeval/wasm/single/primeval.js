@@ -47,6 +47,25 @@ export function approximate(input, output, render, on_progress) {
 }
 
 /**
+ * Refine one decoded animation frame without PNG/SVG encoding or greedy search.
+ * @param {Uint8Array} rgba
+ * @param {number} width
+ * @param {number} height
+ * @param {any} previous
+ * @param {any} render
+ * @returns {any}
+ */
+export function refineFrame(rgba, width, height, previous, render) {
+    const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.refineFrame(ptr0, len0, width, height, previous, render);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
  * Render retained/edited geometry with the same rasterizer as fitting output.
  * @param {any} value
  * @param {number} output_size
@@ -186,6 +205,10 @@ function __wbg_get_imports() {
         },
         __wbg_new_from_slice_9a868026ffa4208a: function(arg0, arg1) {
             const ret = new Uint8Array(getArrayU8FromWasm0(arg0, arg1));
+            return ret;
+        },
+        __wbg_new_with_length_3da0ad195f6f63ba: function(arg0) {
+            const ret = new Uint8Array(arg0 >>> 0);
             return ret;
         },
         __wbg_now_aa4ccb83129e9e55: function() {

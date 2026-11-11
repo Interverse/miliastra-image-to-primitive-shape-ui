@@ -10,7 +10,7 @@ const server=http.createServer((req,res)=>{
  if(!file.startsWith(root+path.sep)){res.writeHead(403);res.end();return;}
  fs.readFile(file,(err,data)=>{if(err){res.writeHead(404);res.end();return;}
  if(!isolationOnly&&!fallbackOnly){res.setHeader('Cross-Origin-Opener-Policy','same-origin');res.setHeader('Cross-Origin-Embedder-Policy','require-corp');}
- res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.wasm':'application/wasm','.png':'image/png','.css':'text/css','.gia':'application/octet-stream'})[path.extname(file)]||'application/octet-stream');res.end(data);});
+ res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.mjs':'text/javascript','.wasm':'application/wasm','.png':'image/png','.css':'text/css','.gia':'application/octet-stream'})[path.extname(file)]||'application/octet-stream');res.end(data);});
 });
 (async()=>{
  await new Promise(r=>server.listen(8350,'127.0.0.1',r));

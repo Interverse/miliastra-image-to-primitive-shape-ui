@@ -28,7 +28,7 @@ function experimentalRender(keys){
   if(Object.keys(experimental).length)render.experimental=experimental;
   return render;
 }
-self.onmessage=async({data:msg})=>{
+async function processPrimeval(msg,emit=(...args)=>postMessage(...args)){
   if(msg.cmd!=="process")return;
   const started=performance.now(),config=msg.config || {},stages=[];
   let previous=started;
@@ -40,7 +40,7 @@ self.onmessage=async({data:msg})=>{
     if(!Number.isSafeInteger(count)||count<1)throw Error("Invalid shape count");
     if(allowed.length!==1||!["circle","rect","triangle","mixed"].includes(allowed[0]))throw Error("Choose one Primeval shape mode");
     self.PRIMEVAL_THREADS=Number.isInteger(config.primeval_threads)&&config.primeval_threads>0?config.primeval_threads:Math.min(16,navigator.hardwareConcurrency||1);
-    runtime ??= await import("./vendor/primeval/dist/browser-runtime.js?v=smooth-contours-1");
+    runtime ??= await import("./vendor/primeval/dist/browser-runtime.js?v=animation-default-1");
     const rgba=new Uint8ClampedArray(msg.rgba);
     const transparent=!!config.enable_png_mode&&rgba.some((a,i)=>i%4===3&&a<255);
     const background=!config.enable_png_mode&&config.background_color!=null?String(config.background_color):null;
@@ -48,20 +48,28 @@ self.onmessage=async({data:msg})=>{
     const matte=background?[1,3,5].map(i=>parseInt(background.slice(i,i+2),16)):[240,240,245];
     let fittingPixels=rgba, fittingWidth=msg.width, fittingHeight=msg.height, upscaleMetadata=null;
     if(config.ai_upscale){
-      postMessage({type:"progress",jobId:msg.jobId,step:0,total:count,phase:"upscale"});
+      emit({type:"progress",jobId:msg.jobId,step:0,total:count,phase:"upscale"});
       const {upscale}=await import('./ai-upscale.js');
       const enhanced=await upscale(rgba,msg.width,msg.height);
       fittingPixels=enhanced.rgba;fittingWidth=enhanced.width;fittingHeight=enhanced.height;upscaleMetadata=enhanced.metadata;
+    }
+    if(msg.previousDrawing){
+      let pixels=fittingPixels;
+      if(!transparent){pixels=new Uint8ClampedArray(fittingPixels.length);const rgb=PrimevalResult.matteRGB(fittingPixels,matte);for(let i=0,j=0;i<pixels.length;i+=4,j+=3){pixels[i]=rgb[j];pixels[i+1]=rgb[j+1];pixels[i+2]=rgb[j+2];pixels[i+3]=255;}}
+      const output=await runtime.refineFrameInWorker({rgba:pixels,width:fittingWidth,height:fittingHeight,drawing:msg.previousDrawing,render:{...(msg.temporalErrorTarget!==undefined?{temporalErrorTarget:msg.temporalErrorTarget}:{}),...(msg.temporalFocusTarget!==undefined?{temporalFocusTarget:msg.temporalFocusTarget}:{}),...(background?{background}:{}),shape:{circle:'rotated-ellipse',rect:'rotated-rectangle',triangle:'triangle',mixed:'mixed'}[allowed[0]],count,seed:config.primeval_seed??42,contourSmoothing:config.primeval_turbo?Number(config.primeval_contour_smoothing??1):0,...(config.primeval_turbo&&msg.importance?{importance:msg.importance}:{}),outputSize:Math.max(msg.width,msg.height)}});
+      const width=msg.frameSize.width,height=msg.frameSize.height;
+      const converted=PrimevalResult.drawingToElements(output.drawing,width,height,config);
+      return {elements:converted.elements,image_size:{width,height},image_center:converted.origin,primeval_drawing:output.drawing,temporal_error:output.temporalError,temporal_focus_error:output.focusError,temporal_replacements:output.temporalReplacements||0,temporal_order:[...(output.drawing.background[3]>0?[0]:[]),...output.temporalOrder.map(i=>i+(msg.previousDrawing.background[3]>0?1:0))],config:{...config,pixel_per_unit:1/(Number(config.image_scale)||1),output_has_transparency:transparent,primeval_exact:false,primeval_temporal:true}};
     }
     const input=transparent?await PrimevalResult.encodeRGBA(fittingPixels,fittingWidth,fittingHeight):await PrimevalResult.encodeRGB(PrimevalResult.matteRGB(fittingPixels,matte),fittingWidth,fittingHeight);
     mark("input-prepare");
     const shape={circle:"rotated-ellipse",rect:"rotated-rectangle",triangle:"triangle",mixed:"mixed"}[allowed[0]];
     const detail=Number(config.primeval_resolution??512);
     if(!Number.isInteger(detail)||detail<32||detail>2048)throw Error("Invalid fitting detail");
-    postMessage({type:"progress",jobId:msg.jobId,step:0,total:count,phase:""});
+    emit({type:"progress",jobId:msg.jobId,step:0,total:count,phase:""});
     const output=await runtime.approximateInWorker({input,output:"png",render:{shape,count,contourSmoothing:config.primeval_turbo===true?Number(config.primeval_contour_smoothing??1):0,...(config.primeval_turbo===true&&msg.importance?{importance:msg.importance}:{}),...(config.primeval_turbo===true&&config.primeval_redistribution?{redistribution:config.primeval_redistribution}:{}),...(config.primeval_turbo===true&&config.primeval_redistribution_trials?{redistributionTrials:config.primeval_redistribution_trials}:{}),...(config.primeval_turbo===true&&config.primeval_rect_aspect?{rectAspect:config.primeval_rect_aspect}:{}),...(config.primeval_turbo===true?experimentalRender(config.primeval_experiments):{}),turbo:config.primeval_turbo===true,fast:profile==="fast",fastest:profile==="fastest",alpha:"auto",...(background?{background}:{}),...(transparent?{background:profile==="fastest"?"transparent-fast":config.primeval_alpha_strategy==="greedy"?"transparent":"transparent-reference"}:{}),seed:config.primeval_seed??42,resizeInput:Math.min(detail,Math.max(fittingWidth,fittingHeight)),outputSize:Math.max(msg.width,msg.height)},execution:{onProgress:info=>{
       // Avoid thousands of DOM/structured-clone updates; every engine step runs.
-      if(info.shape||info.previewSvg||info.step===1||info.step%Math.max(1,Math.floor(count/100))===0||info.step===count)postMessage({type:"progress",jobId:msg.jobId,step:info.step,total:info.total,refinementStep:info.refinementStep,refinementTotal:info.refinementTotal,previewOnly:!!info.refinementTotal,previewSvg:info.previewSvg,shapeSvg:info.shape,previewIndex:info.previewIndex,phase:info.refinementTotal?"refine":transparent&&info.step===count?"refine":""});
+      if(info.shape||info.previewSvg||info.step===1||info.step%Math.max(1,Math.floor(count/100))===0||info.step===count)emit({type:"progress",jobId:msg.jobId,step:info.step,total:info.total,refinementStep:info.refinementStep,refinementTotal:info.refinementTotal,previewOnly:!!info.refinementTotal,previewSvg:info.previewSvg,shapeSvg:info.shape,previewIndex:info.previewIndex,phase:info.refinementTotal?"refine":transparent&&info.step===count?"refine":""});
     }}});
     mark("fit-and-native-export-with-startup");
     const png=await PNGDecode.decode(output.data);
@@ -90,6 +98,8 @@ self.onmessage=async({data:msg})=>{
     result.config.primeval_turbo=config.primeval_turbo===true;
     result.config.primeval_contour_smoothing=config.primeval_turbo===true?Number(config.primeval_contour_smoothing??1):0;
     if(config.primeval_turbo===true&&config.primeval_experiments?.length)result.config.primeval_experiments=config.primeval_experiments.filter(key=>key!=='groups');
-    postMessage({type:"done",jobId:msg.jobId,result},[result.image_rgba,result.preview_rgba,result.primeval_png]);
-  }catch(error){postMessage({type:"error",jobId:msg.jobId,message:error?.message || String(error)});}
-};
+    emit({type:"done",jobId:msg.jobId,result},[result.image_rgba,result.preview_rgba,result.primeval_png]);
+    return result;
+  }catch(error){emit({type:"error",jobId:msg.jobId,message:error?.message || String(error)});}
+}
+self.onmessage=({data})=>processPrimeval(data);

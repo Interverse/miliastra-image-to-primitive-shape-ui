@@ -144,3 +144,23 @@ proposal/audit APIs and lab runners. Exact working-tree sources and generated
 vendor files were archived in the site's ignored
 `reference/retired-construction-experiment-2026-11-04/` before removal.
 Ordinary fitting, Focus, native vector progress and pinned Maximum Detail remain.
+
+
+## Animation warm starts
+
+The WASM `refineFrame` entry point accepts decoded RGBA and a retained Primeval
+Drawing. `primeval-render::refine_animation_rgba` and `RgbaModel::seed_temporal`
+run short, adaptive local passes while retaining the selected shape count, assets
+and painter sequence. Temporal candidate scoring uses covered-pixel sums and
+small geometric steps; unweighted error supports the browser's quality guard.
+All altered search branches are gated by a temporal flag, false for ordinary
+Primeval fitting. `renderRetained` shares its drawing parser with the new API.
+Both SIMD single/threaded WASM builds are regenerated with the existing build
+script. Static JSON output and still-image optimization semantics are preserved.
+
+
+The default-quality animation update adds cropped per-layer bases and bounded
+checkpoint replay, motion prediction before refinement, attended-region error,
+Focus-priority repair and batched residual replacement without changing counts.
+Retained native identity maps accompany animation results separately from the
+Drawing/JSON schema. Static refinement retains full bases and its original math.

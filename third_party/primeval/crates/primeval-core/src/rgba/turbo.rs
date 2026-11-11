@@ -227,6 +227,29 @@ impl RgbaModel {
         }
         true
     }
+    /// Replace a small batch of least useful temporal layers with native Turbo
+    /// residual proposals. The total count stays fixed, and exact loss guards
+    /// protect both the full image and attended regions.
+    pub fn repair_temporal(&mut self,replacements:usize,error_limit:f64,focus_limit:f64)->usize{
+        let count=self.layers.len();if count==0||replacements==0{return 0;}
+        let mut worker=WorkerCtx::new(self.width as i32,self.height as i32,crate::rng::round_rng(self.seed,0,29));worker.rgba_reuse=true;
+        let Some(terms)=self.removal_terms(&mut worker,&mut ||false)else{return 0;};
+        let mut ranked:Vec<_>=terms.into_iter().enumerate().collect();ranked.sort_by(|a,b|a.1.0.total_cmp(&b.1.0).then(a.0.cmp(&b.0)));
+        let amount=replacements.min(count);let mut remove=vec![false;count];for (id,_) in ranked.into_iter().take(amount){remove[id]=true;}
+        let old_ids=self.temporal_ids.clone();let old_layers=self.layers.clone();let old_shapes=self.shapes.clone();let old_frozen=self.frozen.clone();let old_canvas=self.current.clone();let old_score=self.score;let old_contour=self.contour_total();let old_error=self.unweighted_error();let old_focus=self.focus_error();
+        self.layers=old_layers.iter().enumerate().filter(|(i,_)|!remove[*i]).map(|(_,s)|s.clone()).collect();
+        self.shapes=old_shapes.iter().enumerate().filter(|(i,_)|!remove[*i]).map(|(_,s)|s.clone()).collect();
+        self.frozen=old_frozen.iter().enumerate().filter(|(i,_)|!remove[*i]).map(|(_,s)|*s).collect();
+        let mut canvas=vec![self.background_pixel();self.target.len()];for (shape,drawn) in self.layers.iter().zip(&self.shapes){Self::paint(&mut canvas,self.width,coverage(shape,&mut worker,true),drawn.color);}
+        self.current=canvas.into_iter().map(|p|p.map(f64::from)).collect();self.score=self.loss(&self.current);for y in 0..self.height as usize{self.update_row(y);}
+        self.temporal_ids=old_ids.iter().enumerate().filter(|(i,_)|!remove[*i]).map(|(_,id)|*id).collect();
+        for (i,id) in old_ids.iter().enumerate(){if remove[i]{self.step_turbo(self.family);self.temporal_ids.push(*id);}}
+        self.refine_observed(2,1,||false,|_,_,_,_|{});
+        if self.score+self.contour_total()<=old_score+old_contour+1e-10&&self.unweighted_error()<=old_error.max(error_limit)+1e-8&&self.focus_error()<=old_focus.max(focus_limit)+1e-8{amount}else{
+            self.temporal_ids=old_ids;self.layers=old_layers;self.shapes=old_shapes;self.frozen=old_frozen;self.current=old_canvas;self.score=old_score;for y in 0..self.height as usize{self.update_row(y);}0
+        }
+    }
+
     /// Loss increase from deleting each layer alone, from the current composite.
     /// Deleting layer i changes a pixel by T*a*(c-B): T is the transmission of the
     /// layers above, B the composite below. T is gathered top-down for a chunk of

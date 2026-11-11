@@ -34,6 +34,8 @@ const isString = (value) => typeof value === "string";
 const isSeed = (value) => typeof value === "number" || typeof value === "bigint";
 function normalizeRender(render) {
     const values = {
+        temporalFocusTarget: field(render,"temporalFocusTarget",v=>Number.isFinite(v)&&v>=0&&v<=1,"must be from 0 to 1"),
+        temporalErrorTarget: field(render,"temporalErrorTarget",v=>Number.isFinite(v)&&v>=0&&v<=1,"must be from 0 to 1"),
         importance: field(render,"importance",v=>v!==null&&typeof v==="object","must be an object"),
         fastest: field(render,"fastest",v=>typeof v==="boolean","must be a boolean"),
         fast: field(render,"fast",v=>typeof v==="boolean","must be a boolean"),

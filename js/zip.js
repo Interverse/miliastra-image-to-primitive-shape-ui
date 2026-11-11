@@ -1,6 +1,6 @@
 /*
  * zip.js — minimal ZIP (STORE method) writer for "download all outputs".
- * No compression; browsers handle stored zips fine and inputs are small.
+ * Existing synchronous downloads use STORE; async frame exports use DEFLATE.
  */
 "use strict";
 
@@ -42,19 +42,22 @@ const MiniZip = (() => {
 
     for (const file of files) {
       const nameBytes = encoder.encode(file.name);
-      const data = file.data instanceof Uint8Array ? file.data : new Uint8Array(file.data);
-      const crc = crc32(data);
+      const data = file.data instanceof Blob || file.data instanceof Uint8Array ? file.data : new Uint8Array(file.data);
+      const storedLength=data instanceof Blob?data.size:data.length,rawLength=file.rawLength??storedLength,method=file.method??0;
+      if(data instanceof Blob&&file.crc===undefined)throw TypeError('Blob entries require a CRC.');
+      const crc = file.crc??crc32(data);
+      if(files.length>65535||nameBytes.length>65535||!Number.isSafeInteger(rawLength)||rawLength<0||rawLength>0xffffffff||storedLength>0xffffffff||offset+30+nameBytes.length+storedLength>0xffffffff)throw Error('ZIP size limit exceeded; no frames were removed.');
 
       const local = new DataView(new ArrayBuffer(30));
       local.setUint32(0, 0x04034b50, true);
       local.setUint16(4, 20, true);           // version needed
       local.setUint16(6, 0x0800, true);       // UTF-8 names
-      local.setUint16(8, 0, true);            // method: store
+      local.setUint16(8, method, true);
       local.setUint16(10, time, true);
       local.setUint16(12, day, true);
       local.setUint32(14, crc, true);
-      local.setUint32(18, data.length, true);
-      local.setUint32(22, data.length, true);
+      local.setUint32(18, storedLength, true);
+      local.setUint32(22, rawLength, true);
       local.setUint16(26, nameBytes.length, true);
       local.setUint16(28, 0, true);
 
@@ -65,21 +68,22 @@ const MiniZip = (() => {
       cd.setUint16(4, 20, true);
       cd.setUint16(6, 20, true);
       cd.setUint16(8, 0x0800, true);
-      cd.setUint16(10, 0, true);
+      cd.setUint16(10, method, true);
       cd.setUint16(12, time, true);
       cd.setUint16(14, day, true);
       cd.setUint32(16, crc, true);
-      cd.setUint32(20, data.length, true);
-      cd.setUint32(24, data.length, true);
+      cd.setUint32(20, storedLength, true);
+      cd.setUint32(24, rawLength, true);
       cd.setUint16(28, nameBytes.length, true);
       cd.setUint32(42, offset, true);
       central.push(new Uint8Array(cd.buffer), nameBytes);
 
-      offset += 30 + nameBytes.length + data.length;
+      offset += 30 + nameBytes.length + storedLength;
     }
 
     let centralSize = 0;
     for (const c of central) centralSize += c.length;
+    if(offset+centralSize+22>0xffffffff)throw Error('ZIP size limit exceeded; no frames were removed.');
 
     const end = new DataView(new ArrayBuffer(22));
     end.setUint32(0, 0x06054b50, true);
@@ -91,5 +95,17 @@ const MiniZip = (() => {
     return new Blob([...chunks, ...central, new Uint8Array(end.buffer)], { type: "application/zip" });
   }
 
-  return { build, crc32 };
+  async function buildAsync(files,{signal,onProgress}={}){
+    const prepared=[];
+    for await(const file of files){
+      signal?.throwIfAborted();const raw=file.data;let compressor=null;
+      if(typeof CompressionStream!=='undefined'){try{compressor=new CompressionStream('deflate-raw');}catch{ /* Older browsers retain STORE. */ }}
+      const data=compressor?await new Response(new Blob([raw]).stream().pipeThrough(compressor)).blob():new Blob([raw]);
+      signal?.throwIfAborted();prepared.push({name:file.name,data,rawLength:raw.length,crc:crc32(raw),method:compressor?8:0});onProgress?.(prepared.length);
+      await new Promise(resolve=>setTimeout(resolve,0));
+    }
+    signal?.throwIfAborted();return build(prepared);
+  }
+  return { build, buildAsync, crc32 };
 })();
+if(typeof module!=='undefined')module.exports=MiniZip;

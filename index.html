@@ -13,7 +13,7 @@
   </script>
   <title data-i18n="app.pageTitle">Miliastra Wonderland Image Fitter</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='38' cy='42' r='26' fill='%234355B9'/%3E%3Crect x='48' y='44' width='36' height='36' rx='6' fill='%23E8A317' transform='rotate(12 66 62)'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="css/style.css?v=preview-fixes-1">
+  <link rel="stylesheet" href="css/style.css?v=animation-sequences-4">
 </head>
 <body>
   <header class="topbar">
@@ -40,15 +40,23 @@
             <span class="drop-icon" data-i18n="upload.dropIcon">IMG</span>
             <p data-i18n="upload.dropHint">Click, drag &amp; drop, or paste (Ctrl+V) images</p>
           </div>
-          <input type="file" id="fileInput" accept="image/*,.json,.css,.svg,application/json,text/css" multiple hidden>
+          <input type="file" id="fileInput" accept="image/*,video/*,.json,.css,.svg,application/json,text/css" multiple hidden>
           <div id="fileThumbs" class="file-thumbs"></div>
           <div id="uploadReady" class="upload-ready" hidden aria-live="polite"></div>
           <div id="uploadWarning" class="upload-warning" hidden aria-live="polite" data-i18n="upload.largeWarning"></div>
         </div>
-        <p class="hint" data-i18n="import.hint">Drop images anywhere. Paste JSON/CSS/SVG to reopen.</p>
+        <fieldset id="animationSettings" class="enhancement-controls" hidden>
+          <legend data-i18n="animation.title">GIF / Video</legend>
+          <p class="hint" data-i18n="animation.hint">Uses Primeval settings below. Lua / JSON; no audio.</p>
+          <label class="animation-fps" for="animationFps"><span data-i18n="animation.fps">FPS</span><input id="animationFps" class="form-input" type="number" min="0" step="1" value="15" required></label>
+          <p class="hint" data-i18n="animation.fpsHint">0 = source rate. Applies to preview, generation and Lua.</p>
+          <div id="animationSource" class="animation-source" hidden><canvas id="animationSourceCanvas" width="320" height="180" data-i18n-aria-label="animation.sourcePreview"></canvas><button id="animationSourcePlay" type="button" class="btn-sm" disabled data-i18n="animation.play">Play</button><p id="animationSourceStatus" class="hint" aria-live="polite"></p></div>
+          <label class="animation-loop"><input id="animationTemporal" type="checkbox" checked><span data-i18n="animation.temporal">Reuse previous frame</span></label>
+          <label class="animation-loop"><input id="animationLoop" type="checkbox" checked><span data-i18n="animation.loop">Loop</span></label>
+        </fieldset>
+        <p class="hint" data-i18n="fitting.formats">PNG / JPG / WEBP / Short GIFs and Videos</p>
+        <p class="hint" data-i18n="import.hint">Paste JSON/CSS/SVG to reopen</p>
         <p class="hint focus-thumb-hint" id="focusThumbHint" hidden data-i18n="focus.thumbHint"></p>
-        <p class="hint" data-i18n="fitting.formats"></p>
-        <p class="hint" data-i18n="upload.multiHint"></p>
       </section>
 
       <section class="panel-section" id="shapeTypeSection">
@@ -281,6 +289,7 @@
           <span data-i18n="batch.luaTemplate">Template index</span>
           <input type="text" id="batchLuaTemplateIndex" inputmode="numeric" autocomplete="off" spellcheck="false" data-i18n-placeholder="batch.luaTemplateOptional" placeholder="optional">
         </label>
+        <label id="batchAnimationCompactField" class="batch-template-field" hidden data-i18n-title="animation.compactHint"><input id="batchAnimationCompact" type="checkbox"><span data-i18n="animation.compact">Compact animation Lua</span></label>
         <button type="button" id="btnDownloadAll" class="btn-tonal" data-i18n="batch.downloadAll" hidden>Download all (ZIP)</button>
         <p id="batchLuaBudgetNote" class="hint" hidden data-i18n="compression.luaBudget"></p>
       </div>
@@ -300,7 +309,7 @@
 
       <section class="generation-preview">
         <div class="generation-preview-heading"><h3 id="generationPreviewTitle" data-i18n="editor.progress">Generation preview</h3><button type="button" id="btnPausePreview" class="btn-tonal" data-i18n="batch.pauseSave" data-i18n-title="batch.pauseSaveHint" hidden>Pause &amp; save</button></div>
-        <p id="previewJobName" class="hint"></p><div id="generationVector" hidden></div><img id="generationPreview" alt="" hidden><p id="generationStatus" class="hint"></p><progress id="refinementProgress" max="1" value="0" hidden aria-labelledby="generationStatus"></progress>
+        <p id="previewJobName" class="hint"></p><div id="generationVector" hidden></div><img id="generationPreview" alt="" hidden><p id="generationStatus" class="hint"></p><div id="animationGenerationControls" hidden><div class="animation-generation-toolbar"><span id="animationGenerationReady" class="hint"></span><label class="check-label"><input type="checkbox" id="animationGenerationFollow" checked><span data-i18n="animation.follow">Follow generation</span></label></div><div id="animationGenerationActive" class="animation-generation-active"></div><input id="animationGenerationFrame" type="range" min="0" max="0" value="0" step="1" data-i18n-aria-label="animation.frame"><div id="animationGenerationStrip" class="animation-generation-strip"><div id="animationGenerationTrack"></div></div></div><progress id="refinementProgress" max="1" value="0" hidden aria-labelledby="generationStatus"></progress>
       </section>
       <div class="job-list" id="jobList"></div>
       <p class="local-note" data-i18n="footer.local"></p>
@@ -345,7 +354,9 @@
         <div class="export-action">
           <button id="btnExportJSON" class="btn-sm" data-i18n="result.export.json">Export JSON</button>
           <button id="btnCopyJSON" class="btn-copy" type="button" data-i18n="result.export.copy">Copy</button>
+          <button id="btnCancelAnimationJSON" class="btn-copy" type="button" data-i18n="batch.cancel" hidden>Cancel</button>
         </div>
+        <button id="btnExportFramesJSON" class="btn-sm" data-i18n="animation.framesJSON" hidden>Frames JSON (ZIP)</button>
         <div class="export-action">
           <button id="btnExportCSS" class="btn-sm" data-i18n="result.export.css">Export CSS</button>
           <button id="btnCopyCSS" class="btn-copy" type="button" data-i18n="result.export.copy">Copy</button>
@@ -383,6 +394,7 @@
           <div class="gia-export-group__field">
             <label for="clientLuaTemplateIndex" data-i18n="result.export.gia.clientLuaTemplate">Image Control Template index</label>
             <input type="text" id="clientLuaTemplateIndex" class="form-input" inputmode="numeric" autocomplete="off" spellcheck="false">
+            <div id="clientAnimationCompactField" hidden><label class="check-label"><input type="checkbox" id="clientAnimationCompact"><span data-i18n="animation.compact">Compact animation Lua</span></label><p class="hint" data-i18n="animation.compactHint">½ px geometry · 1° rotation · 16-bit RGB. Uncheck for lossless.</p></div>
             <p id="clientLuaBudgetNote" class="hint" hidden data-i18n="compression.luaBudget"></p>
             <p class="gia-export-group__desc gia-export-group__desc--field" data-i18n="result.export.gia.clientLuaTemplateHint"></p>
           </div>
@@ -398,10 +410,10 @@
             <button id="btnExportServerGIAClassic" class="btn-sm" data-i18n="result.export.gia.modeClassic">Classic</button>
           </div>
         </div>
-        <p class="hint" data-i18n="result.export.gia.allFormatsNote"></p>
+        <p id="exportAllFormatsNote" class="hint" data-i18n="result.export.gia.allFormatsNote"></p>
       </section>
 
-      <section class="panel-section">
+      <section class="panel-section" id="resultOriginSection">
         <h3 data-i18n="result.origin.sectionTitle">Origin</h3>
         <p class="hint" data-i18n="result.origin.hint"></p>
         <div class="config-row config-row--paired">
@@ -427,6 +439,11 @@
         </div>
       </div>
 
+      <div id="animationPreview" class="animation-preview" hidden>
+        <button type="button" id="animationPlay" class="btn-sm" data-i18n="animation.play">Play</button>
+        <input id="animationFrame" type="range" min="0" max="0" value="0" step="1" data-i18n-aria-label="animation.frame">
+        <span id="animationSummary" class="hint"></span>
+      </div>
       <div id="previewCompare" class="preview-compare" hidden>
         <p id="previewCompareHint" class="hint preview-hint" data-i18n="result.preview.hint">Click to switch the main view.</p>
         <button type="button" id="viewFitted" class="preview-item preview-toggle" aria-pressed="true">
@@ -752,15 +769,16 @@
   <script src="js/locales/it.js?v=33"></script>
 
   <script src="js/locales/compression.js?v=3"></script>
-  <script src="js/locales/fitting.js?v=smooth-contours-1"></script>
+  <script src="js/locales/fitting.js?v=animation-json-1"></script>
   <script src="js/locales/focus.js?v=6"></script>
   <script src="js/locales/experimental.js?v=retired-groups-1"></script>
   <script src="js/locales/pause.js?v=1"></script>
   <script src="js/locales/upscale.js?v=3"></script>
   <script src="js/locales/screen-sizing.js?v=3"></script>
-  <script src="js/locales/import.js?v=1"></script>
+  <script src="js/locales/import.js?v=animation-json-1"></script>
+  <script src="js/locales/animation.js?v=animation-json-1"></script>
   <script src="js/i18n.js?v=25"></script>
-  <script src="js/zip.js?v=24"></script>
+  <script src="js/zip.js?v=25"></script>
   <script src="js/gia.js?v=26"></script>
   <script src="js/gia-export.js?v=26"></script>
   <script src="js/lua-export.js?v=packed-mask-1"></script>
@@ -771,9 +789,18 @@
   <script src="js/progress-result.js?v=1"></script>
   <script src="js/native-edit.js?v=3"></script>
   <script src="js/gizmo-resize.js?v=1"></script>
-  <script src="js/focus.js?v=1"></script>
+  <script src="js/focus.js?v=2"></script>
   <script src="js/screen-sizing.js?v=3"></script>
-  <script src="js/finished-import.js?v=1"></script>
-  <script src="js/app.js?v=preview-fixes-1"></script>
+  <script src="js/finished-import.js?v=2"></script>
+  <script src="js/animation-motion.js?v=5"></script>
+  <script src="js/animation-core.js?v=6"></script>
+  <script src="js/animation-json.js?v=1"></script>
+  <script src="js/animation-codec.js?v=1"></script>
+  <script src="js/animation-order.js?v=1"></script>
+  <script src="js/animation-player-runtime.js?v=3"></script>
+  <script src="js/animation-lua.js?v=12"></script>
+  <script src="js/animation-generation-ui.js?v=2"></script>
+  <script src="js/animation-ui.js?v=11"></script>
+  <script src="js/app.js?v=animation-json-2"></script>
 </body>
 </html>

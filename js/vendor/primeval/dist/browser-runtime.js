@@ -9,7 +9,7 @@
 // one at a time (see `queueStart`); reused workers bypass that gate and retain
 // their instance, pool and panic channel, receiving only the next task.
 import { InternalError, mapNativeError, messageOf } from "./errors.js";
-import { abortError, normalizeRequest } from "./request.js?v=smooth-contours-1";
+import { abortError, normalizeRequest } from "./request.js?v=animation-default-1";
 const IDLE_MS = 10_000;
 let idleMs = IDLE_MS;
 let workersStarted = 0;
@@ -20,16 +20,16 @@ function selectVariant() {
 // Literal URLs, one per variant, so bundlers can see both.
 function wasmUrl(variant) {
     return variant === "threaded"
-        ? new URL("../wasm/threaded/primeval_bg.wasm?v=smooth-contours-1", import.meta.url)
-        : new URL("../wasm/single/primeval_bg.wasm?v=smooth-contours-1", import.meta.url);
+        ? new URL("../wasm/threaded/primeval_bg.wasm?v=animation-default-1", import.meta.url)
+        : new URL("../wasm/single/primeval_bg.wasm?v=animation-default-1", import.meta.url);
 }
 // Literal URLs, one per variant, so bundlers can see both workers.
 function startWorker(variant) {
-    const threadedUrl = new URL("./worker-threaded.js?v=smooth-contours-1", import.meta.url);
+    const threadedUrl = new URL("./worker-threaded.js?v=animation-default-1", import.meta.url);
     if (globalThis.PRIMEVAL_THREADS) threadedUrl.searchParams.set("threads", String(globalThis.PRIMEVAL_THREADS));
     const worker = variant === "threaded"
         ? new Worker(threadedUrl, { type: "module" })
-        : new Worker(new URL("./worker-single.js?v=smooth-contours-1", import.meta.url), { type: "module" });
+        : new Worker(new URL("./worker-single.js?v=animation-default-1", import.meta.url), { type: "module" });
     workersStarted += 1;
     return worker;
 }
@@ -301,7 +301,7 @@ async function runInWorker(task, onProgress, signal) {
         runtime.fail = fail;
         try {
             const request = { type: "run", progress: onProgress !== undefined, task };
-            const transfer = task.kind === "approximate" ? [task.input.buffer] : [];
+            const transfer = (task.kind === "approximate" || task.kind === "refineFrame") ? [task.input.buffer] : [];
             runtime.worker.postMessage(request, transfer);
         }
         catch (error) {
@@ -350,4 +350,12 @@ export function setIdleMsForTests(ms = IDLE_MS) {
  */
 export function workersStartedForTests() {
     return workersStarted;
+}
+
+// Animation-only native local refit, reusing the same WASM instance/thread pool.
+export async function refineFrameInWorker(request){
+ const {render,onProgress,signal}=normalizeRequest({input:new Uint8Array(0),output:'png',render:request.render,execution:request.execution});
+ if(signal?.aborted)throw abortError(signal);
+ const task={kind:'refineFrame',input:new Uint8Array(request.rgba).slice(),width:request.width,height:request.height,drawing:request.drawing,render};
+ return runInWorker(task,onProgress,signal);
 }

@@ -2114,3 +2114,51 @@ mod tests {
         }
     }
 }
+
+/// Animation-only local refit of an existing drawing, from decoded straight RGBA.
+/// Every incumbent shape is retained. Static approximation is unaffected.
+pub fn refine_animation_rgba(rgba:Vec<u8>,width:u32,height:u32,mut drawing:Drawing,render:RenderOptions,contour:f64,attention:Option<(usize,usize,Vec<f32>,f64,f64)>,error_target:f64,focus_target:f64)->Result<(Drawing,f64,f64,usize,Vec<usize>),ApproximateError>{
+    validate_options(&render)?;
+    if width<2||height<2||width>MAX_INPUT_SIDE||height>MAX_INPUT_SIDE||rgba.len()!=width as usize*height as usize*4{return Err(ApproximateError::internal("Invalid animation pixels"));}
+    if drawing.width<2||drawing.height<2||drawing.width>2048||drawing.height>2048{return Err(ApproximateError::internal("Invalid animation working size"));}
+    let mut image=image::Rgba32FImage::new(width,height);
+    for (p,s) in image.pixels_mut().zip(rgba.chunks_exact(4)){let a=f32::from(s[3])/255.0;*p=image::Rgba([f32::from(s[0])/255.0*a,f32::from(s[1])/255.0*a,f32::from(s[2])/255.0*a,a]);}
+    let pixels=if image.dimensions()==(drawing.width,drawing.height){image}else{image::imageops::resize(&image,drawing.width,drawing.height,image::imageops::FilterType::CatmullRom)};
+    let target:Vec<[f64;4]>=pixels.pixels().map(|p|p.0.map(f64::from)).collect();
+    if target.iter().any(|p|p[3]<0.999){drawing.background=Color::new(0,0,0,0);}
+    else if drawing.background.a>0 {
+        drawing.background=match render.background{BackgroundOption::Color(color)=>color,_=>{let mut sums=[0u64;3];for p in rgba.chunks_exact(4){for c in 0..3{sums[c]+=u64::from(p[c]);}}let n=u64::from(width)*u64::from(height);Color::new((sums[0]/n)as u8,(sums[1]/n)as u8,(sums[2]/n)as u8,255)}};
+    }
+    let _aspect=primeval_core::RectAspect::set(64);
+    #[cfg(feature="asset-triangle")]
+    let _angle=primeval_core::TriangleAngle::set(5.0);
+    let mut model=primeval_core::rgba::RgbaModel::new(drawing.width,drawing.height,target,render.seed);
+    model.enable_exact_optimizations();model.set_contour_smoothing(contour).map_err(ApproximateError::internal)?;
+    if let Some((w,h,v,strength,additive))=attention{model.set_attention_terms(w,h,&v,strength,additive,1.0).map_err(ApproximateError::internal)?;}
+    if !model.seed_temporal(&drawing,render.shape){return Err(ApproximateError::internal("Cannot warm-start animation shapes"));}
+    // One short local pass, rather than N greedy searches and the full final portfolio.
+    model.refine_observed(2,1,||false,|_,_,_,_|{});
+    for _ in 0..3{if model.unweighted_error()<=error_target&&model.focus_error()<=focus_target{break;}model.refine_observed(2,1,||false,|_,_,_,_|{});}
+    let mut replacements=0;
+    for _ in 0..4{if model.unweighted_error()<=error_target&&model.focus_error()<=focus_target{break;}let changed=model.repair_temporal((render.count as usize).div_ceil(20),error_target,focus_target);if changed==0{break;}replacements+=changed;}
+    if model.focus_error()>focus_target&&model.boost_temporal_focus(){
+        model.refine_observed(2,1,||false,|_,_,_,_|{});
+        for _ in 0..2{if model.unweighted_error()<=error_target&&model.focus_error()<=focus_target{break;}let changed=model.repair_temporal((render.count as usize).div_ceil(20),error_target,focus_target);if changed==0{break;}replacements+=changed;}
+    }
+    let error=model.unweighted_error();let focus_error=model.focus_error();let order=model.temporal_order();Ok((model.drawing(),error,focus_error,replacements,order))
+}
+
+#[cfg(test)]
+mod animation_tests {
+ use super::*;
+ use primeval_core::{DrawnShape,Geometry};
+ fn incumbent()->Drawing{Drawing{width:16,height:16,background:Color::new(0,0,0,0),shapes:vec![DrawnShape{geometry:Geometry::Rect{x:4.0,y:4.0,width:8.0,height:8.0},color:Color::new(255,0,0,255)}]}}
+ #[test]
+ fn temporal_retains_budget_and_family_and_fits_transparency(){
+  let mut render=RenderOptions::default();render.count=1;render.shape=ShapeKind::RotatedRectangle;render.seed=Some(42);
+  let (next,error,focus_error,_,_)=refine_animation_rgba(vec![0;16*16*4],16,16,incumbent(),render,0.0,None,1.0,1.0).unwrap();
+  assert_eq!(next.shapes.len(),1);assert_eq!((next.width,next.height),(16,16));assert!(error<1e-8&&focus_error<1e-8);assert_eq!(next.background.a,0);assert_eq!(next.shapes[0].color.a,0);
+ }
+ #[test]
+ fn temporal_rejects_malformed_rgba(){assert!(refine_animation_rgba(vec![0;3],16,16,incumbent(),RenderOptions::default(),0.0,None,1.0,1.0).is_err());}
+}

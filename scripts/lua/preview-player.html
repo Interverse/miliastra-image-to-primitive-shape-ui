@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lua playback mock</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#141923;color:#e8edf5;font:15px system-ui;padding:24px;max-width:1500px;margin:auto}h1{font-size:24px;margin:0 0 10px}p{line-height:1.5}button,select,input{font:inherit}button,select{background:#28364b;color:inherit;border:1px solid #55647a;border-radius:6px;padding:8px;cursor:pointer}label{display:inline-flex;align-items:center;gap:8px}nav{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:18px 0}input[type=range]{flex:1;min-width:140px}.views{display:grid;grid-template-columns:1fr 1fr;gap:16px}figure{margin:0;min-width:0}figcaption{margin-bottom:8px}canvas{width:100%;background:#222c3b;border:1px solid #4d5d72;border-radius:6px}#status{padding:12px;border-radius:6px;background:#193d30}.bad{background:#6a2727!important}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#202a3b;padding:14px;border-radius:6px}small{color:#aebcd0} @media(max-width:650px){body{padding:12px}.views{grid-template-columns:1fr}}
+</style>
+<h1>Lua playback mock</h1>
+<p>Runs the saved Lua against an emulated UI API. Checks visible shapes against independently decoded data. Canvas textures are approximations; this does not verify game API behavior or game performance.</p>
+<div id="status" role="status"></div>
+<nav><button id="play">Play</button><button id="prev">Previous</button><button id="next">Next</button><input aria-label="Captured sample" id="scrub" type="range" min="0" value="0"><label>Copies <select id="copies"><option>1</option><option>2</option><option>4</option></select></label><span id="position"></span></nav>
+<div class="views"><figure><figcaption>Actual Lua control state</figcaption><canvas id="actual"></canvas></figure><figure><figcaption>Decoded reference</figcaption><canvas id="expected"></canvas></figure></div>
+<p id="sample"></p><small>The scrubber includes exhaustive frame visits, two loops at 60 Hz and long-stall jumps. Copies repeat captured poses for visual inspection; they do not simulate multiple game instances.</small>
+<details><summary>Diagnostics</summary><pre id="diagnostics"></pre></details>
+<script>
+'use strict';const report=/* REPORT_DATA */;
+const $=id=>document.getElementById(id),status=$('status');let index=0,playing=false,last=0,elapsed=0;
+status.textContent=(report.mismatchCount?`FAIL: ${report.mismatchCount} mismatched fields`:'PASS: all captured visible shapes match')+` · ${report.expected.length} frames · ${report.timeline.length} samples`+(report.native?' · Experimental native Tween model: game semantics unverified':report.mode==='pipeline'?' · Rolling pools':' · Direct updates')+(report.fault?' · Fault injection enabled':'');status.classList.toggle('bad',report.mismatchCount>0);
+$('diagnostics').textContent=JSON.stringify({resources:report.summary,firstMismatches:report.mismatches},null,2);$('scrub').max=report.timeline.length-1;
+function draw(canvas,shapes){
+ const count=Number($('copies').value),columns=count===1?1:2,rows=Math.ceil(count/columns),w=report.width,h=report.height,scale=Math.min(1,1000/(w*columns));
+ canvas.width=Math.ceil(w*columns*scale);canvas.height=Math.ceil(h*rows*scale);const ctx=canvas.getContext('2d');ctx.scale(scale,scale);
+ for(let n=0;n<count;n++){ctx.save();ctx.translate((n%columns)*w,Math.floor(n/columns)*h);ctx.beginPath();ctx.rect(0,0,w,h);ctx.clip();ctx.translate(w/2,h/2);ctx.scale(1,-1);
+  for(const [,asset,x,y,sw,sh,angle,argb] of shapes){ctx.save();ctx.translate(x,y);ctx.rotate(angle*Math.PI/180);ctx.fillStyle=`rgba(${(argb>>>16)&255},${(argb>>>8)&255},${argb&255},${(argb>>>24)/255})`;ctx.beginPath();
+   if(asset===100002){ctx.ellipse(0,0,Math.abs(sw)/2,Math.abs(sh)/2,0,0,Math.PI*2);}else if(asset===100003){ctx.moveTo(0,sh/2);ctx.lineTo(-sw/2,-sh/2);ctx.lineTo(sw/2,-sh/2);ctx.closePath();}else ctx.rect(-sw/2,-sh/2,sw,sh);ctx.fill();ctx.restore();
+  }ctx.restore();
+ }
+}
+function render(){const s=report.timeline[index];$('scrub').value=index;$('position').textContent=`${index+1} / ${report.timeline.length}`;$('sample').textContent=`Frame ${s.frame} (expected ${s.expectedFrame}) · clock ${(s.clock/1e6).toFixed(3)} s · ${s.errors} mismatches · ${s.writes} cumulative UI writes`;draw($('actual'),report.poses[s.pose]);draw($('expected'),report.expected[s.expectedFrame-1]);}
+function pause(){playing=false;$('play').textContent='Play';}
+$('play').onclick=()=>{playing=!playing;$('play').textContent=playing?'Pause':'Play';last=performance.now();elapsed=0;};$('prev').onclick=()=>{pause();index=(index-1+report.timeline.length)%report.timeline.length;render();};$('next').onclick=()=>{pause();index=(index+1)%report.timeline.length;render();};$('scrub').oninput=()=>{pause();index=Number($('scrub').value);render();};$('copies').onchange=render;
+function tick(now){if(playing){elapsed+=now-last;const hold=report.durations[report.timeline[index].frame-1]/1000;if(elapsed>=hold){elapsed%=Math.max(hold,1);index=(index+1)%report.timeline.length;render();}}last=now;requestAnimationFrame(tick);}render();requestAnimationFrame(tick);
+</script></html>

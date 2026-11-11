@@ -76,9 +76,11 @@
   /* ════════════════════ view + mode switching ════════════════════ */
 
   let currentMode = "fill";     // fill | outline
+  let pendingFiles = [];   // [{file, url, focus:{automatic, areas}}]
   let activeView = "upload";    // upload | result | classic
 
   function setView(view) {
+    if(view!=="upload")animationSource.stop();
     activeView = view;
     $("viewUpload").classList.toggle("active", view === "upload");
     $("viewResult").classList.toggle("active", view === "result");
@@ -150,6 +152,7 @@
 
   const numPrimsSlider = $("numPrims");
   const numPrimsManual = $("numPrimsManual");
+  const animationSource=AnimationUI.createSource();let animationInputActive=false,stillPrimitiveCount=numPrimsManual.value,animationPrimitiveCount='1000';
   function validControlCount(input) {
     input.setCustomValidity("");
     const value=Number(input.value);
@@ -483,7 +486,6 @@
 
   const dropZone = $("dropZone");
   const fileInput = $("fileInput");
-  let pendingFiles = [];   // [{file, url, focus:{automatic, areas}}]
 
   /* Focus detail applies to Primeval Turbo; manual areas are per image. */
   function focusApplies() {
@@ -498,8 +500,8 @@
   function syncFocusButtons() {
     const visible=focusApplies(),thumbs=$("fileThumbs");
     document.querySelectorAll("#fileThumbs .file-thumb-focus").forEach(button=>{button.hidden=!visible;});
-    thumbs.classList.toggle("focusable",visible);
-    $("focusThumbHint").hidden=!(visible&&thumbs.children.length);
+    thumbs.classList.toggle("focusable",visible&&pendingFiles.length>0);
+    $("focusThumbHint").hidden=!(visible&&pendingFiles.length>0);
   }
 
   /* Adaptive columns for the preview grid: one large preview for a single
@@ -512,6 +514,16 @@
   }
 
   function updateUploadReady() {
+    const sourceFile=pendingFiles.find(entry=>AnimationUI.isFile(entry.file))?.file??null;
+    const animated=!!sourceFile;
+    if(animated!==animationInputActive){if(animated){stillPrimitiveCount=numPrimsManual.value;numPrimsManual.value=animationPrimitiveCount;}else{animationPrimitiveCount=numPrimsManual.value;numPrimsManual.value=stillPrimitiveCount;}animationInputActive=animated;numPrimsManual.dispatchEvent(new Event('input'));}
+    animationSource.update(sourceFile);$("animationSettings").hidden=!animated;
+    const onlyAnimation=pendingFiles.length>0&&pendingFiles.every(entry=>AnimationUI.isFile(entry.file));
+    if(pendingFiles.some(entry=>AnimationUI.isFile(entry.file))&&($("fitMethod").value!=="primeval"||currentMode!=="fill")){setMode("fill");$("fitMethod").value="primeval";syncShapeLabels();}
+    $("fitMethod").disabled=pendingFiles.some(entry=>AnimationUI.isFile(entry.file));
+    $("fillShapeSection").closest("section").hidden=false;
+    for(const id of ["fillShapeSection","fillParams"])$(id).hidden=currentMode!=="fill";
+    for(const id of ["primitiveListSection","outlineParams"])$(id).hidden=onlyAnimation||currentMode!=="outline";
     const ready = $("uploadReady");
     const thumbs = $("fileThumbs");
     if (!pendingFiles.length) {
@@ -566,14 +578,15 @@
     ready.hidden = false;
     ready.textContent = t("upload.selected", { n: pendingFiles.length });
     dropZone.classList.add("ready");
-    $("uploadWarning").hidden = !pendingFiles.some((entry) => entry.file.size > 3 * 1024 * 1024);
+    $("uploadWarning").hidden = !pendingFiles.some((entry) => !AnimationUI.isFile(entry.file) && entry.file.size > 3 * 1024 * 1024);
   }
 
   function addFiles(files) {
     for (const file of files) {
-      if (!file || !file.type.startsWith("image/")) continue;
-      const entry = { file, url: URL.createObjectURL(file), focus: { enabled: true, automatic: true, areas: [] } };
+      if (!file || (!file.type.startsWith("image/")&&!AnimationUI.isFile(file))) continue;
+      const entry = { file, url: AnimationUI.isFile(file)&&!(/\.gif$/i.test(file.name)||file.type==='image/gif')?AnimationUI.poster:URL.createObjectURL(file), focus: { enabled: true, automatic: true, areas: [] } };
       pendingFiles.push(entry);
+      if(AnimationUI.isFile(file))continue;
       decodeToRGBA(file).then(decoded => {
         entry.hasTransparency = hasTransparentPixels(decoded.data.data);
         if (!pendingFiles.includes(entry)) return;
@@ -641,9 +654,9 @@
       const extension=file.name.split('.').pop().toLowerCase();
       const format=['json','css','svg'].includes(extension)?extension:({'application/json':'json','text/css':'css','image/svg+xml':'svg'}[file.type]);
       if(format)structured.push({file,format});
-      else if(file.type.startsWith('image/')||/^(png|jpe?g|webp|gif|bmp|avif)$/.test(extension)){
-        const mime={png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp',gif:'image/gif',bmp:'image/bmp',avif:'image/avif'}[extension];
-        images.push(file.type.startsWith('image/')?file:new File([file],file.name,{type:mime}));
+      else if(AnimationUI.isFile(file)||file.type.startsWith('image/')||/^(png|jpe?g|webp|gif|bmp|avif)$/.test(extension)){
+        const mime={png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp',gif:'image/gif',bmp:'image/bmp',avif:'image/avif',mp4:'video/mp4',m4v:'video/mp4',mov:'video/quicktime',webm:'video/webm',mkv:'video/x-matroska',ogv:'video/ogg',ts:'video/mp2t'}[extension];
+        images.push(file.type.startsWith('image/')||file.type.startsWith('video/')?file:new File([file],file.name,{type:mime}));
       }else errors.push(t('import.failed',{name:file.name,error:t('import.unsupported')}));
     }
     if(images.length){dismissInputDialogs();addFiles(images);setView('upload');}
@@ -662,7 +675,7 @@
           job.name=name;job.baseName=derivedBaseName(name);job.result=result;job.status='done';job.progress=job.progressTotal=1;
           job.importOrigin=result.importOrigin;delete result.importOrigin;
           jobs.push(job);last=job;
-        }catch(error){const key=error.message?.startsWith('import.')?error.message:'import.render';errors.push(t('import.failed',{name,error:t(key)}));}
+        }catch(error){const key=error.message?.startsWith('import.')||error.message==='animation.limit'?error.message:'import.render';errors.push(t('import.failed',{name,error:t(key)}));}
       }
       if(last){dismissInputDialogs();renderJobs();showResult(last);}
       if(errors.length)alert(errors.join('\n'));
@@ -921,6 +934,7 @@
       cfg.allowed_shapes = shapes.length ? shapes : ["circle"];
       if (primitives.length) cfg.primitives = primitives;
     }
+    if(AnimationUI.isFile(file))Object.assign(cfg,AnimationUI.settings());
     return cfg;
   }
 
@@ -979,6 +993,15 @@
    *       (see tests/parity/decode/README.md).
    */
   async function decodeToRGBA(file) {
+    if(file.type.startsWith('video/')||/\.(mp4|m4v|mov|webm|mkv|ogv|ts)$/i.test(file.name)){
+      const video=document.createElement('video'),url=URL.createObjectURL(file);
+      try{
+        video.preload='auto';video.muted=true;
+        await new Promise((resolve,reject)=>{video.onloadeddata=resolve;video.onerror=()=>reject(Error('Video decode failed'));video.src=url;});
+        const canvas=document.createElement('canvas');canvas.width=video.videoWidth;canvas.height=video.videoHeight;
+        const ctx=canvas.getContext('2d');ctx.drawImage(video,0,0);return {data:ctx.getImageData(0,0,canvas.width,canvas.height),width:canvas.width,height:canvas.height};
+      }finally{video.removeAttribute('src');video.load();URL.revokeObjectURL(url);}
+    }
     const buf = await file.arrayBuffer();
     const bytes = new Uint8Array(buf);
 
@@ -1095,6 +1118,7 @@
       job.config.primeval_threads=Math.max(1,Math.min(16,Math.floor((navigator.hardwareConcurrency||1)/slots)));
     }
     renderJobs();
+    if(AnimationUI.isFile(job.file)){startAnimationJob(job);return;}
     let decoded;
     try {
       decoded = await decodeToRGBA(job.file);
@@ -1140,7 +1164,7 @@
     }
 
     let workerFile = job.config.mode === "outline" ? "js/worker-outline.js?v=structure-priority-7" :
-      job.config.fit_method === "primeval" ? "js/worker-primeval.js?v=smooth-contours-1" :
+      job.config.fit_method === "primeval" ? "js/worker-primeval.js?v=animation-default-1" :
       job.config.fit_method === "compression" ? "js/worker-compress.js?v=3" :
       (job.config.allowed_shapes || []).includes("blurred_circle") ?
         "js/worker-gaussian.js?v=structure-priority-7" : "js/worker-fill.js?v=structure-priority-7";
@@ -1203,6 +1227,23 @@
     }, importance ? [buffer, importance.values.buffer] : [buffer]);
   }
 
+  function startAnimationJob(job){
+    if(!jobs.some(j=>j.id===selectedPreviewJobId&&j.status==='processing'))selectedPreviewJobId=job.id;
+    const worker=new Worker('js/worker-animation.js?v=animation-sequences-4');job.worker=worker;
+    worker.onmessage=({data})=>{
+      if(job.status!=="processing")return;
+      if(data.type.startsWith('animation-frame')){animationGeneration.handle(job,data);scheduleProgressFlush();}
+      else if(data.type==='progress'){job.progress=data.step;job.progressTotal=data.total;scheduleProgressFlush();scheduleGenerationPreview();}
+      else if(data.type==='done'){
+        job.result=data.result;job.config={...job.config,...data.result.config};job.status='done';job.progress=job.progressTotal;
+        job.previewUrl=URL.createObjectURL(new Blob([data.poster],{type:'image/png'}));if(!(/\.gif$/i.test(job.file.name)||job.file.type==='image/gif'))job.thumbUrl=job.previewUrl;
+        worker.terminate();job.worker=null;animationGeneration.finish(job);updateGenerationPreview(job,{});pumpQueue();
+      }else if(data.type==='error'){console.error('Animation fitting failed',data.detail);job.status='error';job.error=t(data.message);worker.terminate();job.worker=null;pumpQueue();}
+    };
+    worker.onerror=()=>{if(job.status==='processing'){job.status='error';job.error=t('animation.codec');worker.terminate();job.worker=null;pumpQueue();}};
+    worker.postMessage({cmd:'process',file:job.file,config:job.config,livePreview:true});
+  }
+
   function cancelJob(job) {
     if (job.status === "queued") {
       job.status = "cancelled";
@@ -1250,6 +1291,8 @@
       alert(t("submit.noFiles"));
       return;
     }
+    if(pendingFiles.some(entry=>AnimationUI.isFile(entry.file)))updateUploadReady();
+    if(pendingFiles.some(entry=>AnimationUI.isFile(entry.file))){const fps=Number($("animationFps").value);if(!Number.isSafeInteger(fps)||fps<0)$("animationFps").setCustomValidity(t('animation.fpsInvalid'));if(!$("animationFps").reportValidity())return;}
     if(currentMode==="fill"&&!validControlCount(numPrimsManual))return;
     if(currentMode==="fill"&&$("fitMethod").value==="primeval"&&!$("primevalResolution").reportValidity())return;
     for (const entry of pendingFiles) {
@@ -1295,6 +1338,7 @@
         fill.style.width = pct + "%";
       }
     }
+    for(const job of jobs)if(job.status==='processing'&&job.generationFrames&&job.statusElement){const state=animationGeneration.view(job);if(state)job.statusElement.textContent=t('animation.frameProgress',{frame:state.sourceFrame,total:state.totalSource});}
     renderOverall();
   }
 
@@ -1315,6 +1359,7 @@
     const hasFinished=jobs.some(job=>["done","paused"].includes(job.status)&&job.result);
     $("btnDownloadAll").hidden = !hasFinished;
     $("batchLuaTemplateField").hidden = !hasFinished;
+    $("batchAnimationCompactField").hidden=!jobs.some(job=>["done","paused"].includes(job.status)&&job.result?.animation);
     $("batchLuaBudgetNote").hidden = !jobs.some(job=>["done","paused"].includes(job.status)&&job.result&&!compressionLuaFits(job.result));
     if (!jobs.length) return;
     let totalProgress = 0;
@@ -1330,6 +1375,7 @@
   }
 
   let selectedPreviewJobId=null,previewFramePending=false;
+  const animationGeneration=AnimationGenerationUI.create({getJob:()=>jobs.find(j=>j.id===selectedPreviewJobId),update:(state,data)=>updateGenerationPreview(state,data),refresh:()=>scheduleGenerationPreview()});
   function renderGenerationPreview(){
     const job=jobs.find(j=>j.id===selectedPreviewJobId)||jobs.find(j=>j.status==='processing')||jobs[0];
     selectedPreviewJobId=job?.id||null;
@@ -1337,14 +1383,16 @@
     $('previewJobName').textContent=job?.name||'';
     $('btnPausePreview').hidden=job?.status!=='processing';
     $('btnPausePreview').disabled=!canPauseJob(job);
+    const display=animationGeneration.view(job)||job;animationGeneration.render(job);
     const vector=$('generationVector'),img=$('generationPreview');
-    vector.hidden=!job?.previewVector;img.hidden=!!job?.previewVector||!job?.previewUrl;
-    if(job?.previewVector&&vector.firstChild!==job.previewVector)vector.replaceChildren(job.previewVector);
-    if(job?.previewUrl&&img.src!==job.previewUrl)img.src=job.previewUrl;
-    const refining=job?.refinementTotal>0&&job.status==='processing';
-    const fraction=refining?job.refinementStep/job.refinementTotal:job?.progress/Math.max(1,job?.progressTotal||1);
+    vector.hidden=!display?.previewVector;img.hidden=!!display?.previewVector||!display?.previewUrl;
+    if(display?.previewVector&&vector.firstChild!==display.previewVector)vector.replaceChildren(display.previewVector);
+    if(display?.previewUrl&&img.src!==display.previewUrl)img.src=display.previewUrl;
+    const refining=display?.refinementTotal>0&&job.status==='processing'&&!display.completed;
+    const fraction=refining?display.refinementStep/display.refinementTotal:job?.progress/Math.max(1,job?.progressTotal||1);
     $('generationStatus').textContent=job?(refining?t('compression.phase.refine'):statusLabel(job.status))+' · '+Math.min(100,Math.round(100*fraction))+'%':'';
-    $('refinementProgress').hidden=!refining;$('refinementProgress').max=job?.refinementTotal||1;$('refinementProgress').value=job?.refinementStep||0;
+    const animatedStatus=animationGeneration.status(job);if(animatedStatus)$('generationStatus').textContent=animatedStatus;
+    $('refinementProgress').hidden=!refining;$('refinementProgress').max=display?.refinementTotal||1;$('refinementProgress').value=display?.refinementStep||0;
     document.querySelectorAll('#jobList .job-card').forEach(card=>card.classList.toggle('preview-selected',card.dataset.jobId===selectedPreviewJobId));
   }
   function scheduleGenerationPreview(){if(previewFramePending)return;previewFramePending=true;requestAnimationFrame(()=>{previewFramePending=false;renderGenerationPreview();});}
@@ -1373,6 +1421,7 @@
       const svg=PrimevalResult.elementsToSvg(job.result.elements,width,height,job.result.config);
       job.previewVector=new DOMParser().parseFromString(svg,'image/svg+xml').documentElement;
       job.previewUrl=null;
+    }else if(msg.previewSvg&&msg.directSvg){job.previewVector=new DOMParser().parseFromString(msg.previewSvg,'image/svg+xml').documentElement;job.previewUrl=null;
     }else if(msg.previewSvg){
       const root=new DOMParser().parseFromString(msg.previewSvg,'image/svg+xml').documentElement;
       if(root.localName==='svg'){
@@ -1391,6 +1440,7 @@
       if(node){const native=nativeProgressNode(node,job.previewWidth,job.previewHeight,job.config),old=job.previewLayers[msg.previewIndex];if(native){if(old)old.replaceWith(native);else job.previewVector.append(native);job.previewLayers[msg.previewIndex]=native;}}
     }else if(msg.previewRGBA){job.previewVector=null;job.previewUrl=rgbaToCanvas(msg.previewRGBA,msg.previewWidth,msg.previewHeight).toDataURL();}
     else if(job.result?.preview_rgba){job.previewVector=null;job.previewUrl=rgbaToCanvas(job.result.preview_rgba,job.result.image_size.width,job.result.image_size.height).toDataURL();}
+    for(const shape of msg.previewShapes||[])updateGenerationPreview(job,shape);
     scheduleGenerationPreview();
   }
   function renderJobs() {
@@ -1432,7 +1482,7 @@
         job.status==="processing"&&job.phase==="model" ? t("batch.phase.model") :
         job.status==="processing"&&job.phase==="focus" ? t("batch.phase.focus") :
         job.status==="processing"&&job.phase==="upscale" ? t("upscale.phase") : statusLabel(job.status);
-      statusRow.appendChild(status);
+      job.statusElement=status;statusRow.appendChild(status);
       if (["done","paused"].includes(job.status) && job.result) {
         const info = document.createElement("span");
         info.textContent = t("batch.elements", { n: job.result.elements_count }) +
@@ -1545,6 +1595,7 @@
   const canvas = $("mainCanvas");
   const screenCtx = canvas.getContext("2d");
   let ctx = screenCtx; // drawing target: swapped temporarily for PNG export
+  const animationPreview=AnimationUI.create({getState:()=>R,draw:()=>renderCanvas()});
   let R = null; // active render context {job, data, ppu, origin, scale, hovered, selected, outputHasTransparency}
 
   /* ── zoom/pan view state ──
@@ -1840,7 +1891,10 @@
       ctx.clip();
     }
     // Shapes are always drawn as vectors at the current zoom, never as a resized bitmap.
-    if (!original) {
+    if (!original && data.animation) {
+      // Draw the current Primeval frame using the same renderer as still images.
+      if (thumbRendering || $("showFill").checked) AnimationUI.paint(R, ctx);
+    } else if (!original) {
       const elementIndices = new Map();
       data.elements.forEach((element,index)=>{if(!elementIndices.has(element))elementIndices.set(element,index);});
       renderOrderedElements(data).forEach((element) => {
@@ -1958,6 +2012,7 @@
 
   // Every shape under the point, topmost first. Nothing is pickable while the original is shown.
   function hitStack(x, y) {
+    if(R?.data.animation)return [];
     const data = R.data, stack = [];
     if (R.view === "original") return stack;
     for (let i = data.elements.length - 1; i >= 0; i--) {
@@ -2063,6 +2118,22 @@
   });
   function updateStats() {
     const data = R.data;
+    const animated=!!data.animation;
+    $("clientAnimationCompactField").hidden=!animated;
+    $("viewResult").classList.toggle("animation-result",animated);
+    if(animated)$("showClientMask").checked=false;
+    $("exportFileName").parentElement.querySelector(".hint").hidden=animated;
+    $("btnExportJSON").parentElement.hidden=false;$("btnCopyJSON").hidden=animated;$("btnExportFramesJSON").hidden=!animated;
+    const jsonLabel=animated?"animation.videoJSON":"result.export.json";$("btnExportJSON").dataset.i18n=jsonLabel;$("btnExportJSON").textContent=t(jsonLabel);
+    for(const id of ["btnExportCSS","btnCopyCSS"])$(id).parentElement.hidden=animated;
+    for(const id of ["btnExportSVG","btnExportPNG"])$(id).hidden=animated;
+    for(const group of document.querySelectorAll("#viewResult .gia-export-group")){const client=!!group.querySelector("#btnExportClientLua");group.hidden=animated&&!client;if(client){$("btnExportClientGIAOverlimit").hidden=animated;$("btnExportClientGIAClassic").hidden=animated;}}
+    $("retrySectionFill").hidden=animated||R.job.config.mode==="outline";$("retrySectionOutline").hidden=animated||R.job.config.mode!=="outline";
+    $("btnCleanTransparency").closest("section").hidden=animated;
+    $("resultOriginSection").hidden=animated;$("exportAllFormatsNote").hidden=animated;
+    const clientGroup=$("btnExportClientLua").closest(".gia-export-group"),title=clientGroup.querySelector(".gia-export-group__title");
+    title.dataset.i18n=animated?"result.export.gia.clientLua":"result.export.gia.clientTitle";title.textContent=t(title.dataset.i18n);
+    clientGroup.querySelector(".gia-export-group__desc").hidden=animated;
     const elements = visibleElements(data);
     const gaussianCount = elements.filter(Gaussian.isGaussian).length;
     const ellipseCount = elements.filter((el) => normalizeType(el.type) === "ellipse" && !Gaussian.isGaussian(el)).length;
@@ -2074,7 +2145,7 @@
       ? t(fillVariant === "png" ? "result.mode.fillPng" : "result.mode.fill")
       : t("result.mode.outline");
 
-    $("statMode").textContent = data.config?.engine === "primeval-browser" ? "Primeval" : data.config?.engine === "compression-browser" ? t("compression.name") : gaussianCount ? "GaussianImage" : modeText;
+    $("statMode").textContent = animated ? t("animation.title") : data.config?.engine === "primeval-browser" ? "Primeval" : data.config?.engine === "compression-browser" ? t("compression.name") : gaussianCount ? "GaussianImage" : modeText;
     $("statTotal").textContent = String(elements.length);
     $("statEllipse").textContent = String(ellipseCount);
     $("statGaussian").textContent = String(gaussianCount);
@@ -2097,7 +2168,7 @@
     $("showImage").parentElement.hidden=!hasOriginal;
     if(!hasOriginal){$("showImage").checked=false;R.view="fitted";}
     const compare = $("previewCompare");
-    compare.hidden = mode !== "fill";
+    compare.hidden = mode !== "fill"||animated;
     if (mode !== "fill") R.view = "fitted";
     syncResultView();
     if (mode === "fill") {
@@ -2231,6 +2302,7 @@
     updateClientGiaNote();
     $("cleanupStatus").textContent = "";
     $("coordsDisplay").textContent = t("result.canvas.coords", { coords: "—" });
+    animationPreview.show();
     renderCanvas(); // setView already forced layout; render synchronously so
                     // the canvas is correct even in background tabs
 
@@ -3023,16 +3095,14 @@
 
   function exportFileName(ext) { return `${currentExportBaseName()}.${ext}`; }
 
-  function buildUnscaledJsonExportPayload() {
-    const data = R.data;
-    const originUnits = { x: R.origin.x / R.ppu, y: -R.origin.y / R.ppu };
-    const exportBaseName = currentExportBaseName();
+  function buildUnscaledJsonExportPayload(data=R.data,context=R,exportBaseName=currentExportBaseName()) {
+    const originUnits = { x: context.origin.x / context.ppu, y: -context.origin.y / context.ppu };
     return {
       image_name: exportBaseName || null,
       group_name: exportBaseName || null,
       origin: originUnits,
       image_size: data.image_size,
-      config: data.config?.engine==="primeval-browser"||data.config?.partial?{...R.job.config,...data.config}:R.job.config || data.config,
+      config: data.config?.engine==="primeval-browser"||data.config?.partial?{...context.job.config,...data.config}:context.job.config || data.config,
       mask: data.mask || null,
       elements: renderOrderedElements(data).map((element, index) => ({
         id: element.id != null ? element.id : index,
@@ -3275,7 +3345,7 @@
 
   /* Asset Group export — source-image rectangular mask enabled by default. */
   async function exportGia(classic) {
-    if (!R) return;
+    if (!R || R.data.animation) return;
     try {
       const templates = await loadTemplates();
       const jsonData = currentGiaJson();
@@ -3292,7 +3362,7 @@
   }
 
   async function exportServerGia(classic) {
-    if (!R) return;
+    if (!R || R.data.animation) return;
     try {
       const templates = await loadTemplates();
       let bytes = GIA.convertJsonToGiaBytes(currentGiaJson(), templates.server, GIA.MODE_SERVER_IMAGE);
@@ -3318,7 +3388,7 @@
   }
 
   async function exportClientGia(classic) {
-    if (!R) return;
+    if (!R || R.data.animation) return;
     try {
       const templates = await loadTemplates();
       const jsonData = currentGiaJson();
@@ -3372,18 +3442,19 @@
   /* Client Lua export: one self-contained script — PrimitiveImage runtime
    * library + the Export JSON payload as a data table (port of the community
    * primitive_shaper_to_lua.py converter) + OnStart/OnDestroy hooks. */
-  function exportClientLua() {
+  async function exportClientLua() {
     if (!R) return;
     const imageTemplateIndex = LuaExport.parseTemplateIndex($("clientLuaTemplateIndex").value);
     if(imageTemplateIndex===null)return;
+    const name=currentExportBaseName();$("btnExportClientLua").disabled=true;
     try {
-      const text = LuaExport.buildStandaloneLuaScript(buildJsonExportPayload(), { imageTemplateIndex });
-      downloadBlob(new Blob([text], { type: "text/x-lua" }), `${currentExportBaseName()}_client.lua`);
+      const text = R.data.animation ? await AnimationLua.buildAsync(R.data.animation,{imageTemplateIndex,compact:$("clientAnimationCompact").checked,width:ScreenSizing.width(R.job.screenSizing,R.data.image_size.width/R.ppu)}) : LuaExport.buildStandaloneLuaScript(buildJsonExportPayload(), { imageTemplateIndex });
+      downloadBlob(new Blob([text], { type: "text/x-lua" }), `${name}_client.lua`);
     } catch (error) {
       alert(t("result.export.gia.clientFailed", {
         error: error && error.message ? error.message : error,
       }));
-    }
+    } finally { $("btnExportClientLua").disabled=false; }
   }
 
   /* Every Client export has a parent image, so the mask toggle is always
@@ -3573,8 +3644,36 @@
     }, 1200);
   }
 
+  let jsonExportController=null;
+  async function exportAnimationJSON(separate){
+    if(!R?.data.animation||jsonExportController)return;
+    const context={...R,data:{...R.data},origin:{...R.origin}},animation=context.data.animation,scale=exportScale(context.job),base=currentExportBaseName();
+    const controller=new AbortController();jsonExportController=controller;
+    const button=$(separate?"btnExportFramesJSON":"btnExportJSON");
+    $("btnExportJSON").disabled=true;$("btnExportFramesJSON").disabled=true;$("btnCancelAnimationJSON").hidden=false;
+    const framePayload=(index,name)=>ScreenSizing.payload(buildUnscaledJsonExportPayload({...context.data,elements:AnimationCore.elements(animation,index,Number(context.data.config.image_scale)||1)},context,name),scale);
+    const options={signal:controller.signal,onProgress:frame=>{button.textContent=t('animation.exportingJSON',{frame,total:animation.frames.length});}};
+    try{
+      let blob,name;
+      if(separate){
+        const encoder=new TextEncoder(),digits=Math.max(4,String(animation.frames.length).length);
+        async function* files(){for(let i=0;i<animation.frames.length;i++){controller.signal.throwIfAborted();const stem=`${base}_frame_${String(i+1).padStart(digits,'0')}`;yield {name:stem+'.json',data:encoder.encode(JSON.stringify(framePayload(i,stem),null,2))};}}
+        blob=await MiniZip.buildAsync(files(),options);name=base+'_frames.zip';
+      }else{
+        blob=await AnimationJson.blob(animation,framePayload(0,base),(Number(context.data.config.image_scale)||1)*scale,options);name=base+'.json';
+      }
+      controller.signal.throwIfAborted();downloadBlob(blob,name);
+    }catch(error){if(error.name!=='AbortError')alert(t('result.export.failed',{error:error.message||error}));}
+    finally{
+      jsonExportController=null;$("btnExportJSON").disabled=false;$("btnExportFramesJSON").disabled=false;$("btnCancelAnimationJSON").hidden=true;
+      const label=R?.data.animation?'animation.videoJSON':'result.export.json';$("btnExportJSON").dataset.i18n=label;$("btnExportJSON").textContent=t(label);$("btnExportFramesJSON").textContent=t('animation.framesJSON');
+    }
+  }
+  $("btnCancelAnimationJSON").addEventListener("click",()=>jsonExportController?.abort());
+  $("btnExportFramesJSON").addEventListener("click",()=>exportAnimationJSON(true));
   $("btnExportJSON").addEventListener("click", () => {
     if (!R) return;
+    if(R.data.animation){exportAnimationJSON(false);return;}
     try {
       downloadBlob(new Blob([buildJsonExportText()], { type: "application/json" }), exportFileName("json"));
     } catch (error) {
@@ -3582,7 +3681,7 @@
     }
   });
   $("btnExportCSS").addEventListener("click", () => {
-    if (!R) return;
+    if (!R || R.data.animation) return;
     try {
       downloadBlob(new Blob([buildCssExportText()], { type: "text/css" }), exportFileName("css"));
     } catch (error) {
@@ -3590,6 +3689,7 @@
     }
   });
   $("btnExportSVG").addEventListener("click", async () => {
+    if(R?.data.animation)return;
     if(nativeEditable()&&R.job.primevalEdited){try{await ensureNativeEdit(R.job,R.data);downloadBlob(new Blob([ScreenSizing.svg(R.job.nativeEditSvg,rasterExportScale())],{type:"image/svg+xml"}),exportFileName("svg"));}catch(error){alert(t("result.export.failed",{error:error.message}));}return;}
     if (!R) return;
     try {
@@ -3599,6 +3699,7 @@
     }
   });
   $("btnExportPNG").addEventListener("click", async () => {
+    if(R?.data.animation)return;
     if(R?.job.screenSizing){
       try {
         let svg=buildSvgExportText();
@@ -3633,7 +3734,7 @@
     }, "image/png");
   });
   $("btnCopyJSON").addEventListener("click", async () => {
-    if (!R) return;
+    if (!R || R.data.animation) return;
     try {
       await copyTextToClipboard(buildJsonExportText());
       setTemporaryButtonState($("btnCopyJSON"), t("result.export.copied"), "is-success");
@@ -3642,7 +3743,7 @@
     }
   });
   $("btnCopyCSS").addEventListener("click", async () => {
-    if (!R) return;
+    if (!R || R.data.animation) return;
     try {
       await copyTextToClipboard(buildCssExportText());
       setTemporaryButtonState($("btnCopyCSS"), t("result.export.copied"), "is-success");
@@ -3661,13 +3762,15 @@
   /* ─────────────── download all (ZIP) ─────────────── */
 
   $("btnDownloadAll").addEventListener("click", async () => {
+    if($("btnDownloadAll").disabled)return;
     const doneJobs = jobs.filter((job) => ["done","paused"].includes(job.status) && job.result);
     if (!doneJobs.length) {
       alert(t("batch.downloadAllNothing"));
       return;
     }
     try {
-      const templates = await loadTemplates();
+      $("btnDownloadAll").disabled=true;
+      const templates = doneJobs.some(job=>!job.result.animation)?await loadTemplates():null;
       // Optional: null keeps the TODO placeholder in every Lua script.
       const imageTemplateIndex = LuaExport.parseTemplateIndex($("batchLuaTemplateIndex").value);
       const files = [];
@@ -3682,6 +3785,7 @@
       const encoder = new TextEncoder();
       for (const job of doneJobs) {
         const data = job.result;
+        if(data.animation){files.push({name:uniqueName(`${job.baseName}_client`,"lua"),data:encoder.encode(await AnimationLua.buildAsync(data.animation,{imageTemplateIndex,compact:$("batchAnimationCompact").checked,width:ScreenSizing.width(job.screenSizing,data.image_size.width/((data.config&&data.config.pixel_per_unit)||1))}))});continue;}
         const origin = { x: data.image_center.x, y: data.image_center.y };
         const jsonData = ScreenSizing.payload(convertResultToGiaJson(data, job.config, job.baseName, origin.x, origin.y),exportScale(job));
         const giaBytes = GIA.convertJsonToGiaBytes(GiaExport.withAssetGroupMask(jsonData), templates.image, GIA.MODE_IMAGE);
@@ -3719,7 +3823,7 @@
       downloadBlob(MiniZip.build(files), "shaper_results.zip");
     } catch (error) {
       alert(t("result.export.failed", { error: error && error.message ? error.message : error }));
-    }
+    } finally { $("btnDownloadAll").disabled=false; }
   });
 
   /* ════════════════════ GIA mode conversion tool ════════════════════ */
@@ -3781,7 +3885,7 @@
   classicDropZone.addEventListener("dragover", (event) => { event.preventDefault(); classicDropZone.classList.add("drag-over"); });
   classicDropZone.addEventListener("dragleave", (event) => { event.preventDefault(); classicDropZone.classList.remove("drag-over"); });
   classicDropZone.addEventListener("drop", (event) => {
-    if(Array.from(event.dataTransfer?.files||[]).some(file=>file.type.startsWith('image/')||/\.(json|css|svg|png|jpe?g|webp|gif|bmp|avif)$/i.test(file.name)))return;
+    if(Array.from(event.dataTransfer?.files||[]).some(file=>AnimationUI.isFile(file)||file.type.startsWith('image/')||/\.(json|css|svg|png|jpe?g|webp|gif|bmp|avif)$/i.test(file.name)))return;
     event.preventDefault();
     classicDropZone.classList.remove("drag-over");
     if (event.dataTransfer.files && event.dataTransfer.files[0]) attachClassicGia(event.dataTransfer.files[0]);

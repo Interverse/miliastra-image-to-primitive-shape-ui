@@ -52,7 +52,13 @@ const FinishedImport=(()=>{
   function json(text){
     let data;try{data=JSON.parse(text);}catch{fail();}
     if(!data||!data.image_size||!Array.isArray(data.elements))fail();
-    return finish(data.image_size.width,data.image_size.height,data.elements,data.config||{},data.origin,data.mask);
+    const result=finish(data.image_size.width,data.image_size.height,data.elements,data.config||{},data.origin,data.mask);
+    if(data.animation!==undefined){
+      const animation=AnimationJson.restore(data.animation);
+      if(animation.width!==result.image_size.width||animation.height!==result.image_size.height||Math.abs(animation.unit-result.config.image_scale)>1e-8*Math.max(1,animation.unit))fail();
+      result.animation=animation;result.elements=AnimationCore.elements(animation,0,animation.unit);result.elements_count=result.elements.length;
+    }
+    return result;
   }
   const point=(m,x,y)=>({x:m.a*x+m.c*y+m.e,y:m.b*x+m.d*y+m.f});
   function matrix(text){
@@ -172,7 +178,7 @@ const FinishedImport=(()=>{
     return finish(w,h,elements);
   }
   function detect(text){const t=text.trim();return t.startsWith('{')?'json':/^(?:<\?xml[^>]*>\s*)?(?:<!--[\s\S]*?-->\s*)*<svg[\s>]/i.test(t)?'svg':t.includes('.shaper-container')?'css':null;}
-  function parse(text,format){try{return ({json,css,svg}[format||detect(text)]||(()=>fail()))(text);}catch(error){if(error.message.startsWith('import.'))throw error;fail();}}
+  function parse(text,format){try{return ({json,css,svg}[format||detect(text)]||(()=>fail()))(text);}catch(error){if(error.message.startsWith('import.')||error.message==='animation.limit')throw error;fail();}}
   async function render(result){
     const {width,height}=result.image_size,canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
     if(canvas.width!==width||canvas.height!==height)fail('import.render');const ctx=canvas.getContext('2d');if(!ctx)fail('import.render');

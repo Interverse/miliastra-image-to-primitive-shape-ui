@@ -11,7 +11,7 @@ const server=http.createServer((req,res)=>{
  if(!file.startsWith(site+path.sep)){res.writeHead(403);res.end();return;}
  fs.readFile(file,(err,data)=>{if(err){res.writeHead(404);res.end();return;}
   res.setHeader('Cross-Origin-Opener-Policy','same-origin');res.setHeader('Cross-Origin-Embedder-Policy','require-corp');
-  res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.wasm':'application/wasm','.css':'text/css','.png':'image/png'})[path.extname(file)]||'application/octet-stream');res.end(data);
+  res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.mjs':'text/javascript','.wasm':'application/wasm','.css':'text/css','.png':'image/png'})[path.extname(file)]||'application/octet-stream');res.end(data);
  });
 });
 (async()=>{
@@ -51,6 +51,19 @@ const server=http.createServer((req,res)=>{
    assert.ok(focus&&focus.width>0&&focus.height>0&&focus.max===1,'automatic focus runs from the artifact');
    const mixed=records.filter(r=>r.shape==='mixed');assert.equal(mixed[0].drawing,mixed[1].drawing);assert.deepEqual(mixed[0].png,mixed[1].png);
    for(const r of records){if(r.shape==='mixed'){assert.equal(r.count,9);continue;}assert.equal(r.backend,"wasm");assert.equal(r.count,41);assert.deepEqual(Buffer.from(r.png),fs.readFileSync(path.join(__dirname,'fixtures',r.shape+'.png')));}
+   const gif=fs.readFileSync(path.join(__dirname,'fixtures/animation/moving.gif')).toString('base64');
+   const animationFrames=await page.evaluate(async gif=>{
+    const file=new File([Uint8Array.from(atob(gif),c=>c.charCodeAt(0))],'moving.gif',{type:'image/gif'});
+    const media=await import(new URL('js/vendor/mediabunny/mediabunny.min.js',location.href));
+    async function decode(file){const worker=new Worker(new URL('js/worker-animation.js',location.href));
+     return await new Promise((resolve,reject)=>{worker.onerror=e=>{worker.terminate();reject(Error(e.message));};worker.onmessage=({data})=>{if(data.type==='error'){worker.terminate();reject(Error(data.message));}if(data.type==='done'){worker.terminate();resolve(data.result.animation.frames.length);}};worker.postMessage({cmd:'process',file,config:{num_primitives:8,allowed_shapes:['triangle'],primeval_speed:'fastest',primeval_resolution:32,primeval_threads:1}});});
+    }
+    const gifCount=await decode(file),canvas=new OffscreenCanvas(32,16),ctx=canvas.getContext('2d');
+    const target=new media.BufferTarget(),output=new media.Output({target,format:new media.WebMOutputFormat()}),source=new media.CanvasSource(canvas,{codec:'vp8',bitrate:100000});output.addVideoTrack(source,{frameRate:10});await output.start();
+    for(let i=0;i<2;i++){ctx.fillStyle=i?'blue':'red';ctx.fillRect(0,0,32,16);await source.add(i*.1,.1);}source.close();await output.finalize();
+    return {gif:gifCount,video:await decode(new File([target.buffer],'clip.webm',{type:'video/webm'}))};
+   },gif);
+   assert.deepEqual(animationFrames,{gif:3,video:2},'GIF/video workers and decoder load from a Pages project subpath');
    console.log('PASS deployment artifact: project subpath, all three shapes, WASM, Mixed, exact PNGs and automatic focus');
    await context.close();
   }

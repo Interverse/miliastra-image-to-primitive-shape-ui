@@ -161,6 +161,10 @@ fn numbers(values: impl IntoIterator<Item = f64>) -> JsValue {
 /// Render retained/edited geometry with the same rasterizer as fitting output.
 #[wasm_bindgen(js_name = renderRetained)]
 pub fn render_retained(value:JsValue,output_size:u32)->Result<JsValue,JsValue>{
+    let drawing=read_drawing(value)?;
+    encode_retained(&drawing,output_size)
+}
+fn read_drawing(value:JsValue)->Result<Drawing,JsValue>{
     let get=|v:&JsValue,key:&str|Reflect::get(v,&key.into());
     let number=|v:JsValue|v.as_f64().filter(|v|v.is_finite()).ok_or_else(||JsValue::from_str("Invalid geometry number"));
     let color=|v:JsValue|->Result<primeval_core::Color,JsValue>{let a=Array::from(&v);if a.length()!=4{return Err("Invalid color".into());}let mut c=[0u8;4];for i in 0..4{let n=number(a.get(i))?;if !(0.0..=255.0).contains(&n){return Err("Invalid color".into());}c[i as usize]=n.round()as u8;}Ok(primeval_core::Color::new(c[0],c[1],c[2],c[3]))};
@@ -178,6 +182,9 @@ pub fn render_retained(value:JsValue,output_size:u32)->Result<JsValue,JsValue>{
         };
         drawing.shapes.push(primeval_core::DrawnShape{geometry,color:color(get(&item,"color")?)?});
     }
+    Ok(drawing)
+}
+fn encode_retained(drawing:&Drawing,output_size:u32)->Result<JsValue,JsValue>{
     let result=result_object(primeval_render::render_drawing(&drawing,output_size,primeval_render::OutputFormat::Png).map_err(|e|js_error(&e))?);
     let svg=primeval_render::render_drawing(&drawing,output_size,primeval_render::OutputFormat::Svg).map_err(|e|js_error(&e))?;
     if let primeval_render::ApproximateResult::Svg{data,..}=svg{Reflect::set(&result,&"svg".into(),&data.into())?;}Ok(result)
@@ -273,4 +280,25 @@ fn js_error(error: &ApproximateError) -> JsValue {
 /// usable value, so the result is ignored.
 fn set(object: &Object, key: &str, value: JsValue) {
     let _ = Reflect::set(object, &JsValue::from_str(key), &value);
+}
+
+/// Refine one decoded animation frame without PNG/SVG encoding or greedy search.
+#[wasm_bindgen(js_name = refineFrame)]
+pub fn refine_frame(rgba:Vec<u8>,width:u32,height:u32,previous:JsValue,render:JsValue)->Result<JsValue,JsValue>{
+ let drawing=read_drawing(previous)?;
+ let options=normalize_request(Vec::new(),"png",read_render(&render)?).map_err(|e|js_error(&e))?.render;
+ let contour=Reflect::get(&render,&"contourSmoothing".into())?.as_f64().unwrap_or(0.0);
+ let importance=Reflect::get(&render,&"importance".into())?;
+ let attention=if importance.is_undefined(){None}else{
+  let get=|key:&str|Reflect::get(&importance,&key.into());
+  let number=|key:&str|->Result<f64,JsValue>{get(key)?.as_f64().filter(|v|v.is_finite()).ok_or_else(||TypeError::new("Invalid importance map").into())};
+  let w=number("width")?;let h=number("height")?;let strength=number("strength")?;
+  let additive=get("additive")?.as_f64().unwrap_or(0.0);let values=js_sys::Float32Array::new(&get("values")?).to_vec();
+  if w<1.0||h<1.0||w.fract()!=0.0||h.fract()!=0.0||w*h!=values.len()as f64{return Err("Invalid importance map".into());}
+  Some((w as usize,h as usize,values,strength,additive))
+ };
+ let error_target=Reflect::get(&render,&"temporalErrorTarget".into())?.as_f64().filter(|v|v.is_finite()&&*v>=0.0&&*v<=1.0).unwrap_or(1.0);
+ let focus_target=Reflect::get(&render,&"temporalFocusTarget".into())?.as_f64().filter(|v|v.is_finite()&&*v>=0.0&&*v<=1.0).unwrap_or(1.0);
+ let (drawing,error,focus_error,replacements,order)=primeval_render::refine_animation_rgba(rgba,width,height,drawing,options,contour,attention,error_target,focus_target).map_err(|e|js_error(&e))?;
+ let result=Object::new();set(&result,"drawing",drawing_object(&drawing));set(&result,"temporalError",error.into());set(&result,"focusError",focus_error.into());set(&result,"temporalReplacements",(replacements as f64).into());set(&result,"temporalOrder",numbers(order.into_iter().map(|i|i as f64)));set(&result,"data",Uint8Array::new_with_length(0).into());Ok(result.into())
 }

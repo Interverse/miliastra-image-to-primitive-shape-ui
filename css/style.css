@@ -1617,7 +1617,7 @@ input[type="range"]::-webkit-slider-thumb {
   .batch-header > h2 { flex-basis: 100%; }
 }
 
-.generation-preview{display:grid;gap:12px;padding:16px;border:1px solid var(--md-outline-variant);border-radius:16px;margin-bottom:16px}.generation-preview img{width:100%;max-height:420px;object-fit:contain;background:repeating-conic-gradient(#454545 0% 25%,#333 0% 50%) 0/20px 20px}.generation-preview select{min-width:0;width:100%}
+.generation-preview{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;padding:16px;border:1px solid var(--md-outline-variant);border-radius:16px;margin-bottom:16px}.generation-preview img{width:100%;max-height:420px;object-fit:contain;background:repeating-conic-gradient(#454545 0% 25%,#333 0% 50%) 0/20px 20px}.generation-preview select{min-width:0;width:100%}
 
 .job-card{cursor:pointer}.job-card.preview-selected{outline:2px solid var(--md-primary);outline-offset:-2px}#generationVector{background:repeating-conic-gradient(#454545 0% 25%,#333 0% 50%) 0/20px 20px}#generationVector>svg{display:block;width:100%;height:420px;max-height:50vh}#refinementProgress{width:100%;accent-color:var(--md-primary)}
 
@@ -1641,3 +1641,52 @@ input[type="range"]::-webkit-slider-thumb {
 .screen-sizing-controls .btn-sm{width:auto;margin:0}
 
 .input-drop-overlay{position:fixed;inset:12px;z-index:10000;pointer-events:none;display:grid;place-items:center;border:3px dashed var(--md-primary);border-radius:24px;background:color-mix(in srgb,var(--md-surface) 85%,transparent);color:var(--md-on-surface);font-size:20px;text-align:center;padding:24px}.input-drop-overlay[hidden]{display:none}
+
+.animation-preview {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--md-outline-variant);
+}
+.animation-preview .btn-sm { width: auto; margin: 0; }
+.animation-preview input { flex: 1; min-width: 100px; accent-color: var(--md-primary); }
+.animation-preview .hint { flex-basis: 100%; margin: 0; }
+#animationSettings {
+  margin-top: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 12px;
+}
+#animationSettings .hint { margin: 0; }
+.animation-loop { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.animation-loop input { margin: 0; accent-color: var(--md-primary); }
+
+#viewResult.animation-result .panel-right>.panel-section:first-child>:not(#btnBackToJobs),#viewResult.animation-result #editTools,#viewResult.animation-result #clientMaskPreviewRow{display:none}
+
+/* Animation export options follow the shared checkbox controls. */
+#batchAnimationCompact { width: auto; padding: 0; accent-color: var(--md-primary); }
+#clientAnimationCompactField .hint { margin-top: 4px; }
+#clientAnimationCompactField .check-label { display: flex; align-items: center; gap: 8px; }
+#clientAnimationCompactField input { margin: 0; }
+
+.animation-fps { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.animation-fps input { width: 90px; }
+.animation-source { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.animation-source canvas { width: 100%; height: auto; max-height: 180px; object-fit: contain; background: #171921; border-radius: 8px; }
+.animation-source .hint { margin: 0; flex: 1; }
+.animation-source .btn-sm { width: auto; }
+
+.animation-generation-toolbar,.animation-generation-active { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.animation-generation-toolbar { justify-content:space-between; margin:8px 0; }
+.animation-generation-toolbar .check-label { display:flex; gap:6px; align-items:center; font-size:12px; }
+.animation-generation-active .btn-sm { width:auto; }
+#animationGenerationFrame { width:100%; accent-color:var(--md-primary); }
+.animation-generation-strip { overflow-x:auto; height:94px; margin-top:6px; }
+#animationGenerationTrack { position:relative; height:84px; }
+.animation-generation-thumb { position:absolute; width:72px; padding:3px; border:1px solid var(--md-outline-variant); border-radius:6px; background:transparent; color:var(--md-on-surface); cursor:pointer; }
+.animation-generation-thumb[aria-pressed="true"] { border-color:var(--md-primary); }
+.animation-generation-thumb img { width:64px; height:64px; object-fit:contain; display:block; }
+.animation-generation-thumb span { font-size:10px; }

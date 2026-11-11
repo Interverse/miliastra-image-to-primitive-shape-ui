@@ -19,9 +19,10 @@
   for(const [lang,label]of Object.entries(progressLabels))window.LOCALES[lang]["editor.progress"]=label;
   const subtitle={en:"Fit images with shapes","zh-CN":"用图形拟合图片","zh-TW":"以圖形擬合圖片",ja:"図形で画像を再現",ko:"도형으로 이미지 재현",fr:"Recréer les images avec des formes",de:"Bilder mit Formen nachbilden",es:"Recrea imágenes con formas",pt:"Recrie imagens com formas",ru:"Изображения из фигур",th:"สร้างภาพด้วยรูปทรง",vi:"Tái tạo ảnh bằng hình",id:"Bentuk gambar dari geometri",tr:"Görselleri şekillerle oluşturun",it:"Ricrea immagini con forme"};
   const batch={en:"Add several images to process a batch.","zh-CN":"添加多张图片以批量处理。","zh-TW":"加入多張圖片以批次處理。",ja:"複数の画像をまとめて処理。",ko:"여러 이미지를 추가해 일괄 처리하세요.",fr:"Ajoutez plusieurs images pour un traitement par lot.",de:"Mehrere Bilder zur Stapelverarbeitung hinzufügen.",es:"Añade varias imágenes para procesarlas por lotes.",pt:"Adicione várias imagens para processar em lote.",ru:"Добавьте несколько изображений для пакетной обработки.",th:"เพิ่มหลายภาพเพื่อประมวลผลเป็นชุด",vi:"Thêm nhiều ảnh để xử lý hàng loạt.",id:"Tambahkan beberapa gambar untuk diproses sekaligus.",tr:"Toplu işlem için birden fazla görsel ekleyin.",it:"Aggiungi più immagini per elaborarle in gruppo."};
+  const mediaFormats={"en":"Short GIFs and Videos","zh-CN":"短 GIF 和视频","zh-TW":"短 GIF 與影片","ja":"短い GIF・動画","ko":"짧은 GIF 및 동영상","fr":"GIF et vidéos courts","de":"Kurze GIFs und Videos","es":"GIF y vídeos cortos","pt":"GIFs e vídeos curtos","ru":"Короткие GIF и видео","vi":"GIF và video ngắn","id":"GIF dan video pendek","it":"GIF e video brevi","th":"GIF และวิดีโอสั้น","tr":"Kısa GIF ve videolar"};
   for(const lang of Object.keys(legacy)){
     window.LOCALES[lang]["fitting.subtitle"]=subtitle[lang];
     window.LOCALES[lang]["fitting.batch"]=batch[lang];
-    window.LOCALES[lang]["fitting.formats"]="PNG / JPG / WEBP";
+    window.LOCALES[lang]["fitting.formats"]="PNG / JPG / WEBP / "+mediaFormats[lang];
   }
 })();

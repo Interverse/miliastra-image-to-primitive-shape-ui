@@ -16,7 +16,8 @@
 
   function analysisWorker() {
     if (worker) return worker;
-    worker = new Worker("js/worker-importance.js?v=2", {type: "module"});
+    const base=typeof document!=="undefined"?new URL("js/",document.baseURI):new URL("./",self.location.href);
+    worker = new Worker(new URL("worker-importance.js?v=2",base), {type: "module"});
     worker.onmessage = ({data}) => {
       const request = pending.get(data.id);
       if (!request) return;
@@ -86,5 +87,5 @@
     return {width: mapWidth, height: mapHeight, values, strength: STRENGTH, additive: ADDITIVE};
   }
 
-  window.Focus = {analyze, combine, CANCELLED, MODEL, STRENGTH, ADDITIVE};
+  globalThis.Focus = {analyze, combine, CANCELLED, MODEL, STRENGTH, ADDITIVE};
 })();

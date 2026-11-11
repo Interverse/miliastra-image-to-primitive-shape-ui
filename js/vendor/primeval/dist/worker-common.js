@@ -48,7 +48,7 @@ export function requestRunner(glue, startPool) {
                 glue.__panicForTests(task.site === "pool");
                 throw new Error("the test panic did not panic");
             }
-            const result = glue.approximate(task.input, task.output, task.render, request.progress ? (info) => post({ type: "progress", info }) : undefined);
+            const result = task.kind === "refineFrame" ? glue.refineFrame(task.input, task.width, task.height, task.drawing, task.render) : glue.approximate(task.input, task.output, task.render, request.progress ? (info) => post({ type: "progress", info }) : undefined);
             post({ type: "result", result }, [result.data.buffer]);
         }
         catch (error) {
