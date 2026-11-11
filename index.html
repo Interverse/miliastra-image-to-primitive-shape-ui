@@ -13,7 +13,7 @@
   </script>
   <title data-i18n="app.pageTitle">Miliastra Wonderland Image Fitter</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='38' cy='42' r='26' fill='%234355B9'/%3E%3Crect x='48' y='44' width='36' height='36' rx='6' fill='%23E8A317' transform='rotate(12 66 62)'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="css/style.css?v=animation-sequences-4">
+  <link rel="stylesheet" href="css/style.css?v=animation-methods-2">
 </head>
 <body>
   <header class="topbar">
@@ -391,13 +391,26 @@
                  disabled until a valid one is typed. -->
             <button id="btnExportClientLua" class="btn-sm" disabled data-i18n="result.export.gia.clientLua">Lua Script</button>
           </div>
-          <div class="gia-export-group__field">
+          <div class="gia-export-group__field lua-export-section">
             <label for="clientLuaTemplateIndex" data-i18n="result.export.gia.clientLuaTemplate">Image Control Template index</label>
             <input type="text" id="clientLuaTemplateIndex" class="form-input" inputmode="numeric" autocomplete="off" spellcheck="false">
-            <div id="clientAnimationCompactField" hidden><label class="check-label"><input type="checkbox" id="clientAnimationCompact"><span data-i18n="animation.compact">Compact animation Lua</span></label><p class="hint" data-i18n="animation.compactHint">½ px geometry · 1° rotation · 16-bit RGB. Uncheck for lossless.</p></div>
-            <p id="clientLuaBudgetNote" class="hint" hidden data-i18n="compression.luaBudget"></p>
             <p class="gia-export-group__desc gia-export-group__desc--field" data-i18n="result.export.gia.clientLuaTemplateHint"></p>
+            <p id="clientLuaBudgetNote" class="hint" hidden data-i18n="compression.luaBudget"></p>
           </div>
+          <div id="clientAnimationCompactField" class="lua-export-section lua-export-options" hidden>
+            <label class="check-label"><input type="checkbox" id="clientAnimationCompact"><span data-i18n="animation.compact">Compact animation Lua</span></label>
+            <p class="hint" data-i18n="animation.compactHint">½ px geometry · 1° rotation · 16-bit RGB. Uncheck for lossless.</p>
+          </div>
+          <section id="animationLuaMethods" class="lua-export-section animation-lua-methods" aria-labelledby="animationLuaMethodsTitle" hidden>
+            <h4 id="animationLuaMethodsTitle" data-i18n="animation.methodsTitle">Playback controls</h4>
+            <dl>
+              <dt><code>Play()</code></dt><dd data-i18n="animation.methodPlay">Resume playback</dd>
+              <dt><code>Stop()</code></dt><dd data-i18n="animation.methodStop">Hold the current frame</dd>
+              <dt><code>Restart()</code></dt><dd data-i18n="animation.methodRestart">Rewind and play</dd>
+            </dl>
+            <p data-i18n="animation.methodsHint">From another script:</p>
+            <code class="animation-lua-methods__example">animationScript:Invoke("Play")</code>
+          </section>
         </div>
         <div class="gia-export-group gia-export-group--server">
           <div class="gia-export-group__head">
@@ -776,7 +789,7 @@
   <script src="js/locales/upscale.js?v=3"></script>
   <script src="js/locales/screen-sizing.js?v=3"></script>
   <script src="js/locales/import.js?v=animation-json-1"></script>
-  <script src="js/locales/animation.js?v=animation-json-1"></script>
+  <script src="js/locales/animation.js?v=animation-methods-1"></script>
   <script src="js/i18n.js?v=25"></script>
   <script src="js/zip.js?v=25"></script>
   <script src="js/gia.js?v=26"></script>
@@ -801,6 +814,6 @@
   <script src="js/animation-lua.js?v=12"></script>
   <script src="js/animation-generation-ui.js?v=2"></script>
   <script src="js/animation-ui.js?v=11"></script>
-  <script src="js/app.js?v=animation-json-2"></script>
+  <script src="js/app.js?v=animation-methods-1"></script>
 </body>
 </html>

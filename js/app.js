@@ -2120,6 +2120,7 @@
     const data = R.data;
     const animated=!!data.animation;
     $("clientAnimationCompactField").hidden=!animated;
+    $("animationLuaMethods").hidden=!animated;
     $("viewResult").classList.toggle("animation-result",animated);
     if(animated)$("showClientMask").checked=false;
     $("exportFileName").parentElement.querySelector(".hint").hidden=animated;
