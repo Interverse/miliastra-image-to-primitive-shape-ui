@@ -10,7 +10,8 @@ output for this method.
 | File | Purpose |
 | --- | --- |
 | `js/splat-core.js` | Kernel, initializer, loss, Adam, redistribution, element and JSON conversion |
-| `js/worker-splat.js` | Job worker: downsampling, progress, previews, pause checkpoints, threads |
+| `js/splat-gpu.js` | WebGPU fitter: upstream's tiled GPU passes, used when available |
+| `js/worker-splat.js` | Job worker: backend choice, downsampling, progress, previews, pause checkpoints, threads |
 | `js/worker-splat-band.js` | Helper that computes loss and gradients for a band of rows |
 | `js/splat-preview.js` | WebGL2 raster for the editor, with a CPU fallback |
 | `js/splat-export.js` | Packed Lua script and JSON fields |
@@ -31,16 +32,40 @@ same learning rates. Splats are moved from low-loss to high-loss areas every
 200 steps. Unlike upstream, no move happens after the last step, so every
 splat is fitted before export.
 
-Upstream runs on the GPU with tile bins. Here each step walks every splat's
-rotated rectangle row by row, which gives the same result. The image is split
-into row bands, one per helper worker. With cross-origin isolation the bands
-share memory; without it the parameters and gradients are copied each step.
-Helpers start from a blob, because some embedded browsers block nested workers
-loaded by URL. If helpers cannot start, the job runs on one thread.
+With WebGPU, `splat-gpu.js` runs upstream's passes (tile binning, render,
+backward, Adam, redistribution) with three browser changes: immediates become
+uniform buffers, f32 atomics become a workgroup reduction plus
+compare-exchange, and loss weights sit after the reference so the backward pass
+stays within 8 storage buffers. Bin overflow follows upstream: skipped passes,
+a doubled bin buffer and replayed iterations. Buffers larger than the device
+allows fail with `SPLAT_GPU_LIMIT`; other WebGPU failures fall back to the CPU.
+`config.splat_backend` records `webgpu` or `cpu`.
 
-Rough speed on a 16-thread desktop: 2,000 splats, 3,000 steps, 512 × 256 image
-in about 40 seconds. Cost grows with the number of pixels the splats cover, so
-large "Detail (px)" values and high counts take longer.
+Without WebGPU, each step walks every splat's rotated rectangle row by row,
+which gives the same result. The image is split into row bands, one per helper
+worker. With cross-origin isolation the bands share memory; without it the
+parameters and gradients are copied each step. Helpers start from a blob,
+because some embedded browsers block nested workers loaded by URL. If helpers
+cannot start, the job runs on one thread.
+
+Speed, 2,000 splats and 3,000 steps on a 231 × 233 image (RTX-class GPU,
+16-thread CPU): WebGPU about 6 s for the whole job, the CPU bands about 38 s,
+upstream's native build about 7 s. One GPU step matches the CPU fitter to about
+1e-5 and moves the same splats when redistributing (`tests/splat/gpu_parity.html`).
+
+Accuracy: the final loss varies several-fold between seeds and between runs, in
+upstream too (2e-4 to 1e-3 on that image). Without redistribution the port and
+upstream match statistically. With it, from identical starting splats over 8
+seeds, the port's median was about 2.5× upstream's in one comparison and 1.6×
+in another; the steps themselves and one redistribution match upstream, so the
+remaining difference is not yet explained. Upstream's model change to image
+106057 itself costs some quality at equal counts. `tests/splat/quality.html`
+runs one job through the worker for manual comparisons.
+
+## Animations
+
+GIF/video inputs default to Splat. Animation fits keep scale at 1 so each splat
+fits the 8-field animation frame as kind 4; see `animation.md`.
 
 ## Editor
 

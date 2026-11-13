@@ -14,7 +14,7 @@ function expectedFrame(frame,meta,preloaded){
   const co=Math.abs(Math.cos(frame[a+5]*Math.PI/1800)),si=Math.abs(Math.sin(frame[a+5]*Math.PI/1800));
   const rx=(frame[a+3]*co+frame[a+4]*si)*.05,ry=(frame[a+3]*si+frame[a+4]*co)*.05;
   if(x+rx < -w/2-2||x-rx>w/2+2||y+ry < -h/2-2||y-ry>h/2+2)continue;
-  slots.push([frame[a+7]+1,[100002,100001,100003][kind-1],frame[a+1]*scale,frame[a+2]*scale,frame[a+3]*scale,frame[a+4]*scale,frame[a+5]*.1,frame[a+6]]);
+  slots.push([frame[a+7]+1,[100002,100001,100003,106057][kind-1],frame[a+1]*scale,frame[a+2]*scale,frame[a+3]*scale,frame[a+4]*scale,frame[a+5]*.1,frame[a+6]]);
  }
  slots.sort((a,b)=>a[0]-b[0]);if(preloaded)for(const s of slots)s[0]=++dense;return slots;
 }

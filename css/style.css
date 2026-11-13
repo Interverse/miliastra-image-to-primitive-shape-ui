@@ -590,6 +590,7 @@ body {
   border-color: transparent;
 }
 .batch-template-field input.is-invalid { border-style: solid; border-color: var(--md-error); }
+.batch-template-field input[type="number"] { width: 72px; }
 
 /* ============================================================
    Drop zone
@@ -1709,3 +1710,6 @@ input[type="range"]::-webkit-slider-thumb {
 .animation-generation-thumb[aria-pressed="true"] { border-color:var(--md-primary); }
 .animation-generation-thumb img { width:64px; height:64px; object-fit:contain; display:block; }
 .animation-generation-thumb span { font-size:10px; }
+
+/* Pixel-perfect previews: scale bitmaps with hard pixel edges. */
+img.pixelated, .pixelated img, .pixelated canvas { image-rendering: pixelated; }

@@ -1,10 +1,12 @@
-/* Primeval animation states. Static JSON/export schemas are untouched. */
+/* Primeval and Splat animation states. Static JSON/export schemas are untouched.
+ * Shape kinds: 1 ellipse, 2 rectangle, 3 triangle, 4 Splat (image 106057; animation
+ * Splat fits keep scale at 1, so a frame needs no extra fields). */
 "use strict";
 const AnimationCore=(()=>{
  // Retained fitted states, not decoded video pixels. Allow long clips on capable
  // devices; retain an explicit resource limit instead of removing source frames.
  const MEMORY=Math.min(1024,Math.max(256,(globalThis.navigator?.deviceMemory||4)*128))*1024*1024,FIELDS=8;
- const types=['','ellipse','rectangle','triangle'];
+ const types=['','ellipse','rectangle','triangle','splat'];
  function packFrame(elements,previous,width,height,unit=1,inherit=false){
   const records=elements.map((e,order)=>[types.indexOf(e.type),Math.round((e.center.x/unit-width/2)*10),Math.round((e.center.y/unit+height/2)*10),Math.round((e.type==='ellipse'?e.size.rx*2:e.size.width)/unit*10),Math.round((e.type==='ellipse'?e.size.ry*2:e.size.height)/unit*10),Math.round((e.rotation?.z||0)*10),e.packed_color>>>0,order]);
   if(records.some(r=>r[0]<1))throw Error('Unsupported animation shape');
@@ -31,7 +33,7 @@ const AnimationCore=(()=>{
  }
  function elements(animation,index,unit=1){const frame=animation.frames[index],out=[];
   for(let at=0;at<frame.length;at+=FIELDS){const kind=frame[at];if(!kind)continue;const type=types[kind],x=(frame[at+1]/10+animation.width/2)*unit,y=(frame[at+2]/10-animation.height/2)*unit,w=frame[at+3]/10*unit,h=frame[at+4]/10*unit,p=frame[at+6];
-   out.push({id:at/FIELDS,type,shape:type==='rectangle'?'rect':type==='ellipse'?'circle':'triangle',center:{x,y},relative:{x:x-animation.width*unit/2,y:y+animation.height*unit/2},size:type==='ellipse'?{rx:w/2,ry:h/2}:{width:w,height:h},rotation:{x:0,y:0,z:frame[at+5]/10},color:'#'+(p%16777216).toString(16).padStart(6,'0'),alpha:Math.floor(p/16777216)/255,packed_color:p,image_asset_ref:kind===1?100002:kind===2?100001:100003,...(type==='triangle'?{triangle_pivot:'box'}:{}),order:frame[at+7]});
+   out.push({id:at/FIELDS,type,shape:type==='rectangle'?'rect':type==='ellipse'?'circle':type==='splat'?'splat':'triangle',center:{x,y},relative:{x:x-animation.width*unit/2,y:y+animation.height*unit/2},size:type==='ellipse'?{rx:w/2,ry:h/2}:{width:w,height:h},rotation:{x:0,y:0,z:frame[at+5]/10},color:'#'+(p%16777216).toString(16).padStart(6,'0'),alpha:Math.floor(p/16777216)/255,packed_color:p,image_asset_ref:[0,100002,100001,100003,106057][kind],...(type==='splat'?{primitive_type:'splat',image_type:'Stretch',scale:{x:1,y:1}}:{}),...(type==='triangle'?{triangle_pivot:'box'}:{}),order:frame[at+7]});
   }
   return out.sort((a,b)=>a.order-b.order);
  }

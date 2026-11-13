@@ -33,7 +33,7 @@ Color.ToRGBA=function(c)return math.floor(c/65536)%256,math.floor(c/256)%256,c%2
 local expected=${expected}
 local function verify(f)
  local group=nil local active=0 if "${mode}"=="fast" then group=nodes[1] else for _,g in ipairs(nodes[1].children) do if g.active and g.visible then group=g active=active+1 end end assert(active==1,"torn visibility") end
- local state=expected[f] local byOrder={} local assets={100002,100001,100003}
+ local state=expected[f] local byOrder={} local assets={100002,100001,100003,106057}
  for id=1,${count} do local a=(id-1)*8 if state[a+1]~=0 and math.floor(state[a+7]/16777216)>0 then local co,si=math.abs(math.cos(state[a+6]*.1*math.pi/180)),math.abs(math.sin(state[a+6]*.1*math.pi/180));local rx,ry=(state[a+4]*co+state[a+5]*si)*.05,(state[a+4]*si+state[a+5]*co)*.05;local x,y=state[a+2]*.1,state[a+3]*.1;if x+rx>=${-width/2-2} and x-rx<=${width/2+2} and y+ry>=${-height/2-2} and y-ry<=${height/2+2} then byOrder[state[a+8]+1]=id end end end
  local dense=0 for slot=1,${count} do local id=byOrder[slot] if id then dense=dense+1 end local index="${mode}"=="preloaded" and dense or slot local c=group.children[index] if not id then if "${mode}"~="preloaded" then assert(not c.visible,"visible empty slot") end else local a=(id-1)*8 assert(c and c.visible and c.asset==assets[state[a+1]],"asset") assert(math.abs(c.x-state[a+2]*${scale})<.00001 and math.abs(c.y-state[a+3]*${scale})<.00001,"position") assert(math.abs(c.w*(c.sx or 1)-state[a+4]*${scale})<.00001 and math.abs(c.h*(c.sy or 1)-state[a+5]*${scale})<.00001,"size") assert(math.abs(c.r-state[a+6]*.1)<.00001,"rotation") assert(c.imageColor==state[a+7],"colour") end end
  if "${mode}"=="preloaded" then assert(#group.children==dense,"extra cached primitives") end

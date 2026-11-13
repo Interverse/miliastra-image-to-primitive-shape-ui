@@ -1,0 +1,42 @@
+<!doctype html><meta charset="utf-8"><title>Splat GPU parity</title>
+<script src="/js/png-decode.js"></script><script src="/js/splat-core.js"></script><script src="/js/splat-gpu.js"></script>
+<script>
+/* WebGPU fitter versus SplatCore on the same start: one step, a step with a
+ * redistribution, and a short fit (opaque and transparent images). */
+(async () => {
+  const out = {};
+  try {
+    const png = await PNGDecode.decode(new Uint8Array(await (await fetch("/tests/primeval/fixtures/input.png")).arrayBuffer()));
+    const W = png.width, H = png.height;
+    const holed = png.rgba.slice();
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if ((x - 32) ** 2 + (y - 32) ** 2 > 700) holed[(y * W + x) * 4 + 3] = 0;
+    for (const [name, rgba] of [["opaque", png.rgba], ["transparent", holed]]) {
+      const target = SplatCore.premultiply(rgba), init = SplatCore.initialize(target, W, H, 150, 3);
+      const pair = async () => [SplatCore.createFitter(target, W, H, init.params.slice(), init.background),
+        await SplatGpu.createFitter(target, W, H, init.params.slice(), init.background, { core: SplatCore })];
+      const diff = (a, b) => { let d = 0; for (let i = 0; i < a.length; i++) d = Math.max(d, Math.abs(a[i] - b[i]) / Math.max(1, Math.abs(a[i]))); return d; };
+      let [cpu, gpu] = await pair();
+      if (!gpu) { out.gpu = "unavailable"; break; }
+      await cpu.run(1, 1, 0, 1); await gpu.run(1, 1, 0, 1); await gpu.sync();
+      const step = diff(cpu.params, gpu.params), lossCpu = cpu.lastLoss, lossGpu = gpu.lastLoss;
+      const pa = cpu.render(), pb = await gpu.render();
+      const render = diff(pa, pb);
+      gpu.destroy();
+      [cpu, gpu] = await pair();
+      await cpu.run(2, 1, 1, 9); await gpu.run(2, 1, 1, 9); await gpu.sync();
+      let moved = 0;
+      for (let i = 0; i < cpu.count; i++) {
+        const k = i * SplatCore.STRIDE;
+        if (Math.abs(cpu.params[k] - gpu.params[k]) > 0.05 || Math.abs(cpu.params[k + 1] - gpu.params[k + 1]) > 0.05) moved++;
+      }
+      gpu.destroy();
+      [cpu, gpu] = await pair();
+      const t0 = performance.now(); await cpu.run(300, 1, 200, 1); const cpuMs = performance.now() - t0;
+      const t1 = performance.now(); await gpu.run(300, 1, 200, 1); const gpuMs = performance.now() - t1;
+      out[name] = { step, render, lossCpu, lossGpu, redistributeMismatch: moved / cpu.count, fitCpu: cpu.loss(), fitGpu: await gpu.loss(), cpuMs, gpuMs };
+      gpu.destroy();
+    }
+  } catch (error) { out.error = String(error.stack || error); }
+  document.body.dataset.result = JSON.stringify(out);
+})();
+</script>

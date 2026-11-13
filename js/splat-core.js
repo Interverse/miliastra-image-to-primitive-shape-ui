@@ -707,7 +707,7 @@ const SplatCore = (() => {
 
   return {
     REF_HEIGHT, RAMP_CAP, ASSET, BACKGROUND_ASSET, STRIDE, LR,
-    rampCap, render, toRGBA8, premultiply, downsample, initialize, createFitter, createBand, balanceRows, shapeWeights,
+    rng, rampCap, render, toRGBA8, premultiply, downsample, initialize, createFitter, createBand, balanceRows, shapeWeights,
     toElements, backgroundElement, fromElements, renderElements, toIr, isSplat, colorOf, hash, profile: (t) => { const u = clamp(t, 0, 1); return u * (0.5 + u * (1.5 - u)); },
   };
 })();

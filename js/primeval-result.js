@@ -68,8 +68,38 @@
     const compressed=new Uint8Array(await new Response(stream).arrayBuffer());
     return new Uint8Array(await new Blob([new Uint8Array([137,80,78,71,13,10,26,10]),chunk("IHDR",header),chunk("IDAT",compressed),chunk("IEND",new Uint8Array())]).arrayBuffer());
   }
-  function drawElements(ctx,elements,unit=1){
-    for(const e of elements){
+  /* Consecutive Splat shapes are rasterized together (soft edges blend per
+   * pixel), with WebGL on the page and SplatCore's CPU renderer in workers.
+   * `frame` is the image size in context units; the soft-corner cap scales
+   * with the image height. */
+  let splatTarget=null;
+  function drawSplats(ctx,batch,unit,frame){
+    // Top-level consts of other scripts are not properties of the global object.
+    const Core=typeof SplatCore!=="undefined"?SplatCore:null,Preview=typeof SplatPreview!=="undefined"?SplatPreview:null;
+    if(!Core)return;
+    if(!frame){
+      let x1=0,y1=0;
+      for(const e of batch){const r=Math.hypot(e.size.width,e.size.height)/unit;x1=Math.max(x1,e.center.x/unit+r);y1=Math.max(y1,-e.center.y/unit+r);}
+      frame={width:Math.ceil(x1),height:Math.ceil(y1)};
+    }
+    if(Preview&&typeof document!=="undefined"){
+      splatTarget=Preview.draw(batch,frame.width,frame.height,1/unit,splatTarget);
+      ctx.drawImage(splatTarget,0,0,frame.width,frame.height);return;
+    }
+    const m=ctx.getTransform(),scale=Math.min(Math.hypot(m.a,m.b)||1,2048/Math.max(frame.width,frame.height,1));
+    const w=Math.max(1,Math.round(frame.width*scale)),h=Math.max(1,Math.round(frame.height*scale));
+    const {params,count}=Core.fromElements(batch,1/unit,scale);
+    const {pixels}=Core.render(params,count,w,h,[0,0,0,0],Core.rampCap(h));
+    const surface=new OffscreenCanvas(w,h);surface.getContext("2d").putImageData(new ImageData(Core.toRGBA8(pixels,w,h),w,h),0,0);
+    ctx.drawImage(surface,0,0,frame.width,frame.height);
+  }
+  function drawElements(ctx,elements,unit=1,frame=null){
+    for(let i=0;i<elements.length;i++){
+      if(elements[i].type==="splat"){
+        let j=i;while(j<elements.length&&elements[j].type==="splat")j++;
+        drawSplats(ctx,elements.slice(i,j),unit,frame);i=j-1;continue;
+      }
+      const e=elements[i];
       ctx.save();ctx.translate(e.center.x/unit,-e.center.y/unit);ctx.rotate(-(e.rotation?.z||0)*Math.PI/180);
       ctx.globalAlpha=e.alpha;ctx.fillStyle=e.color;ctx.beginPath();
       if(e.type==="ellipse")ctx.ellipse(0,0,e.size.rx/unit,e.size.ry/unit,0,0,Math.PI*2);

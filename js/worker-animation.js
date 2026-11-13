@@ -1,11 +1,19 @@
 "use strict";
-importScripts('animation-sequences.js?v=3','animation-motion.js?v=5','animation-fit-pool.js?v=3','animation-media.js?v=1','animation-progress.js?v=1','animation-core.js?v=6','worker-primeval.js?v=animation-detail-2','focus.js?v=2');
+importScripts('animation-sequences.js?v=7','animation-motion.js?v=5','animation-fit-pool.js?v=3','animation-media.js?v=1','animation-progress.js?v=1','animation-core.js?v=7','worker-primeval.js?v=animation-detail-3','focus.js?v=2','splat-core.js?v=4','splat-gpu.js?v=1','pixel-perfect.js?v=3');
 self.onmessage=async({data:msg})=>{
  if(!['process','preview'].includes(msg.cmd))return;
  const started=performance.now();let fitPool=null;
  try{
   const {file}=msg;let config=msg.config;const preview=msg.cmd==='preview',fps=Number(config.animation_fps??0);
   if(!Number.isSafeInteger(fps)||fps<0)throw Error('animation.fpsInvalid');
+  // Splat: contiguous frame segments fit in parallel workers (each with its own
+  // WebGPU device, or one CPU thread). Each frame runs the full step count either
+  // way, so segments only add a fresh start at each boundary.
+  if(!preview&&!msg.sequence&&config.fit_method==='splat'&&config.animation_parallel!==false){
+   const prepared=await AnimationSequences.prepare(file,config),cores=navigator.hardwareConcurrency||1;
+   const workers=[1,2,4,8].includes(msg.sequenceWorkers)?msg.sequenceWorkers:Math.max(1,Math.min(4,Math.floor(cores/2),Math.floor(prepared.rows.length/3)));
+   if(workers>1){await AnimationSequences.run(msg,prepared,{workers,budget:cores,threads:1,prefix:0,latencyThreads:1},started);return;}
+  }
   if(!preview&&!msg.sequence&&config.animation_temporal!==false&&config.primeval_turbo===true){
    const cpu=AnimationSequences.budget(config);
    if(config.animation_parallel!==false&&cpu>=4&&Number(config.num_primitives??2000)>=500&&Number(config.primeval_resolution??512)>=128){
@@ -25,7 +33,7 @@ self.onmessage=async({data:msg})=>{
   function detail(rgba,w,h,result,drawing=false,importance=null){
    const outWidth=drawing?animation.width:result.image_size.width,outHeight=drawing?animation.height:result.image_size.height,scale=Math.min(1,384/Math.max(outWidth,outHeight)),qw=Math.max(1,Math.round(outWidth*scale)),qh=Math.max(1,Math.round(outHeight*scale));if(!qualityCanvas||qualityCanvas.width!==qw||qualityCanvas.height!==qh)qualityCanvas=new OffscreenCanvas(qw,qh);const context=qualityCanvas.getContext('2d',{willReadFrequently:true});context.clearRect(0,0,qualityCanvas.width,qualityCanvas.height);
    const elements=drawing?PrimevalResult.drawingToElements(result,animation.width,animation.height,config).elements:result.elements;
-   PrimevalResult.drawElements(context,elements,animation.unit/scale);
+   PrimevalResult.drawElements(context,elements,animation.unit/scale,{width:qw,height:qh});
    return AnimationMotion.detailQuality(rgba,w,h,context.getImageData(0,0,qualityCanvas.width,qualityCanvas.height).data,qualityCanvas.width,qualityCanvas.height,importance);
   }
   async function drain(){
@@ -39,6 +47,81 @@ self.onmessage=async({data:msg})=>{
    frameReady(frame,task.sourceIndex,task.timestamp,task.duration);completedSource=task.sourceIndex;self.postMessage({type:'progress',step:task.sourceIndex,total:expected,phase:'animation',metrics:{...metrics}});
   }
   let lastIndependent=null;
+  /* Splat frames: WebGPU fitter (CPU fallback) with scale kept at 1, so each
+   * splat is one kind-4 record. With Reuse previous frame, a frame starts from
+   * the previous frame's splats without redistribution and keeps their slots. */
+  function originCenter(width,height){
+   const origin=config.origin||{},custom=origin.type==='custom';
+   return {x:origin.type==='top_left'?0:custom?Number(origin.x):width/2,y:origin.type==='top_left'?0:custom?Number(origin.y):height/2};
+  }
+  /* Pixel-perfect frames: exact rectangles (kind 2, see pixel-perfect.js), no fitting. */
+  async function pixelFrame(rgba,width,height,timestamp,duration,transparent,identical){
+   const sourceIndex=sourceFrames;frameStart(sourceIndex);
+   const repeat=identical&&animation.frames.length;
+   const frame=repeat?animation.frames.at(-1):AnimationCore.packFrame(PixelPerfect.process(rgba,width,height,{...config,image_scale:animation.unit}).elements,animation.frames.at(-1),animation.width,animation.height,animation.unit,false);
+   metrics[repeat?'repeated':'keyframes']++;animation.hasTransparency||=transparent;
+   if(!first){
+    first={image_center:originCenter(width,height),primeval_png:(await PrimevalResult.encodeRGBA(rgba,width,height)).buffer};
+    frameConfig={engine:'pixel-browser',fit_method:'pixel',allowed_shapes:['rect'],pixel_per_unit:1/animation.unit,unit_scale:animation.unit,image_scale:animation.unit};
+   }
+   if((animation.frames.length+1)*Math.max(frame.length,animation.controls*8)*8>AnimationCore.MEMORY)throw Error('animation.limit');
+   animation.controls=Math.max(animation.controls,frame.length/8);
+   animation.frames.push(frame);animation.timestamps.push(timestamp);animation.durations.push(duration);
+   frameReady(frame,sourceIndex,timestamp,duration);previousPixels=rgba;
+   self.postMessage({type:'progress',step:sourceIndex,total:expected||animation.frames.length+1,phase:'animation',metrics:{...metrics}});
+  }
+  let splatState=null;
+  const splatCount=Number(config.num_primitives??1000),splatIterations=Math.round(Number(config.splat_iterations)||3000);
+  const splatResolution=Math.max(32,Math.round(Number(config.splat_resolution)||512)),splatSeed=Number.isFinite(Number(config.splat_seed))?Number(config.splat_seed):0;
+  if(config.fit_method==='splat'&&(!Number.isSafeInteger(splatCount)||splatCount<1||!Number.isSafeInteger(splatIterations)||splatIterations<1))throw Error('animation.fitError');
+  async function splatFrame(rgba,width,height,timestamp,duration,transparent,identical){
+   const sourceIndex=sourceFrames;frameStart(sourceIndex);
+   let frame;
+   if(identical&&animation.frames.length){frame=animation.frames.at(-1);metrics.repeated++;}
+   else{
+    const fitStarted=performance.now(),ratio=Math.min(1,splatResolution/Math.max(width,height));
+    const fw=Math.max(1,Math.round(width*ratio)),fh=Math.max(1,Math.round(height*ratio));
+    const target=SplatCore.downsample(SplatCore.premultiply(rgba),width,height,fw,fh);
+    const warm=temporal&&splatState&&splatState.fw===fw&&splatState.fh===fh;
+    const start=warm?{params:splatState.params.slice(),background:splatState.background}:SplatCore.initialize(target,fw,fh,splatCount,splatSeed);
+    const lr={scale:0};let fitter=null;
+    if(config.splat_backend!=='cpu'){try{fitter=await SplatGpu.createFitter(target,fw,fh,start.params,start.background,{core:SplatCore,lr});}catch(error){if(/SPLAT_GPU_LIMIT/.test(error.message))throw error;}}
+    if(!fitter)fitter=SplatCore.createFitter(target,fw,fh,start.params,start.background,{lr});
+    metrics.splatBackend=fitter.backend||'cpu';
+    try{
+     // Live preview: the frame's current render about twice a second. Every
+     // splat exists from the first step, so all shapes count as placed.
+     let lastPreview=-Infinity;
+     await fitter.run(splatIterations,1,warm?0:200,splatSeed,{each:async i=>{
+      if(i%25===0||i===splatIterations)self.postMessage({type:'progress',step:sourceIndex-1+i/splatIterations,total:expected||animation.frames.length+1,phase:'animation'});
+      if(live&&i<splatIterations&&(i===1||performance.now()-lastPreview>=500)){
+       lastPreview=performance.now();const rgba=SplatCore.toRGBA8(await fitter.render(),fw,fh);
+       self.postMessage({type:'animation-frame-progress',sourceFrame:sourceIndex,totalSource:expected,shapeCount:splatCount,step:splatCount,total:splatCount,phase:'fit',
+        previewRGBA:rgba.buffer,previewWidth:fw,previewHeight:fh},[rgba.buffer]);
+      }
+      return true;}});
+     if(fitter.sync)await fitter.sync();
+    }finally{fitter.destroy?.();}
+    splatState={params:Float64Array.from(fitter.params),background:start.background,fw,fh};
+    const unit=animation.unit,elements=SplatCore.toElements(splatState.params,splatCount,fw,fh,width,height,unit,config.output_alpha??1);
+    const background=SplatCore.backgroundElement(start.background,width,height,unit);if(background)elements.unshift(background);
+    frame=AnimationCore.packFrame(elements,animation.frames.at(-1),animation.width,animation.height,unit,!!warm);
+    if(warm)metrics.refined++;else{metrics.keyframes++;keyFrame=animation.frames.length;}
+    metrics[warm?'refitMs':'fullFitMs']+=performance.now()-fitStarted;
+    animation.hasTransparency||=transparent;
+    if(!first){
+     const preview=SplatCore.renderElements(elements,width,height,1/unit,1).rgba;
+     first={image_center:originCenter(width,height),primeval_png:(await PrimevalResult.encodeRGBA(preview,width,height)).buffer};
+     frameConfig={engine:'splat-browser',fit_method:'splat',allowed_shapes:['splat'],splat_iterations:splatIterations,splat_resolution:splatResolution,
+      splat_animation_scale:'fixed',pixel_per_unit:1/unit,unit_scale:unit,image_scale:unit,training_size:{width:fw,height:fh}};
+    }
+   }
+   if((animation.frames.length+1)*Math.max(frame.length,animation.controls*8)*8>AnimationCore.MEMORY)throw Error('animation.limit');
+   animation.controls=Math.max(animation.controls,frame.length/8);
+   animation.frames.push(frame);animation.timestamps.push(timestamp);animation.durations.push(duration);
+   frameReady(frame,sourceIndex,timestamp,duration);previousPixels=rgba;
+   self.postMessage({type:'progress',step:sourceIndex,total:expected||animation.frames.length+1,phase:'animation',metrics:{...metrics}});
+  }
   async function independent(rgba,width,height,timestamp,duration,transparent,identical){
    if(!fitPool){const plan=AnimationFitPool.plan(config,width,height);fitPool=new AnimationFitPool.Pool(plan);metrics.frameWorkers=plan.workers;metrics.threadsPerFrame=plan.threads;}
    const sourceIndex=sourceFrames;frameStart(sourceIndex);
@@ -76,6 +159,8 @@ self.onmessage=async({data:msg})=>{
 
    let transparent=false;for(let i=3;i<rgba.length;i+=4)if(rgba[i]<255){transparent=true;break;}
    let identical=!!previousPixels&&!seededPrediction;if(identical){const a=new Uint32Array(rgba.buffer,rgba.byteOffset,rgba.byteLength/4),b=new Uint32Array(previousPixels.buffer,previousPixels.byteOffset,previousPixels.byteLength/4);for(let i=0;i<a.length;i++)if(a[i]!==b[i]){identical=false;break;}}
+   if(config.fit_method==='pixel'){await pixelFrame(rgba,width,height,timestamp,duration,transparent,identical);return;}
+   if(config.fit_method==='splat'){await splatFrame(rgba,width,height,timestamp,duration,transparent,identical);return;}
    if(!temporal){await independent(rgba,width,height,timestamp,duration,transparent,identical);return;}
    frameStart(sourceFrames);const stream=live?new AnimationProgress.Stream(data=>self.postMessage(data),{sourceFrame:sourceFrames,totalSource:expected,shapeCount:Number(config.num_primitives)||2000}):null;
    let frame;
@@ -187,7 +272,7 @@ self.onmessage=async({data:msg})=>{
   const elements=AnimationCore.elements(animation,0,animation.unit);
   const poster=first.primeval_png;
   const result={mode:'fill',image_size:{width:animation.width,height:animation.height},image_center:first.image_center,elements,elements_count:elements.length,elapsed_seconds:Math.round((performance.now()-started)/10)/100,
-   config:{...config,...frameConfig,primeval_threads:msg.config.primeval_threads,engine:'animation-browser',fit_method:'primeval',output_has_transparency:!!animation.hasTransparency},mask:null,image_rgba:null,animation};
+   config:{...config,...frameConfig,primeval_threads:msg.config.primeval_threads,engine:'animation-browser',fit_method:['splat','pixel'].includes(config.fit_method)?config.fit_method:'primeval',output_has_transparency:!!animation.hasTransparency},mask:null,image_rgba:null,animation};
   const seed=msg.requestSeed?{previousDrawing,previousPixels:previousPixels.buffer,automaticMap,referenceError,referenceFocusError,referenceComplexity,referenceFocusComplexity,referenceDetail,frame:animation.frames.at(-1),width:animation.width,height:animation.height,poster,image_center:first.image_center,config:frameConfig}:undefined;
   self.postMessage({type:'done',result,poster,...(seed?{seed}:{})},[...new Set([poster,...animation.frames.map(frame=>frame.buffer),...(seed?[seed.previousPixels]:[])])]);
  }catch(error){fitPool?.close(error);self.postMessage({type:'error',message:error.message?.startsWith('animation.')?error.message:'animation.fitError',detail:error.stack||String(error)});}

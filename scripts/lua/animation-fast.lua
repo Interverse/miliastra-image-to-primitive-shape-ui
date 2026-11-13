@@ -34,9 +34,15 @@ variantStart=function()
  commands={} skipCommands={} slots={} groups={} commonSlot=nil SHARED_METHODS=true initStage=1 initFrame=1 initSlot=1 initDistance=1 initial=startFrame() cycleStart=0 nextDue=ends[initial]
 end
 variantPreview=function() return initStage<=2 or initStage==21 end
+-- Items that fit in the remaining loading budget; one batch fills a whole update.
+local function share(batch,from)
+ local stop=math.min(N,from+math.max(1,math.floor(remaining*batch/LOAD_BATCH))-1)
+ remaining=remaining-(stop-from+1)*LOAD_BATCH/batch return stop
+end
 variantLoad=function()
+ remaining=remaining-1
  if initStage==1 then
-  local stop=math.min(N,initSlot+SPAWN_BATCH-1) for id=initSlot,stop do
+  local stop=share(SPAWN_BATCH,initSlot) for id=initSlot,stop do
    local control=image(root) controls[id]=control
    local s={control,control.SetImage,control.SetVisible,control.SetAnchoredPosition,TRANSFORM_GEOMETRY and control.SetLocalScale or control.SetSizeDelta,control.SetLocalRotation} slots[id]=s
    for field=2,6 do if type(s[field])~="function" or s[field]~=slots[1][field] then SHARED_METHODS=false break end end
@@ -45,7 +51,7 @@ variantLoad=function()
   end
   initSlot=stop+1 if initSlot>N then initStage=2 initSlot=1 end
  elseif initStage==2 then
-  local stop=math.min(N,initSlot+ORDER_BATCH-1)
+  local stop=share(ORDER_BATCH,initSlot)
   for id=initSlot,stop do
    controls[id]:SetSiblingIndex(math.floor(id-1))
    if PROFILE_LUA_ONLY then local shadow={imageColor=transparent} controls[id]=shadow slots[id]={shadow,profileNoop,profileNoop,profileNoop,profileNoop,profileNoop} end
@@ -56,7 +62,7 @@ variantLoad=function()
    initStage=repair and 21 or 3 initSlot=1
   end
  elseif initStage==21 then
-  local stop=math.min(N,initSlot+SPAWN_BATCH-1)
+  local stop=share(SPAWN_BATCH,initSlot)
   for id=initSlot,stop do
    local control=controls[id] control:SetActive(true) control:SetVisible(false) control:SetAnchorMin(.5,.5) control:SetAnchorMax(.5,.5) control:SetPivot(.5,.5)
    control.imageType=Enum.ImageType.Stretch control.enableMask=false if TRANSFORM_GEOMETRY then control:SetSizeDelta(1,1) end
@@ -71,12 +77,12 @@ variantLoad=function()
    while initFrame<=#keys do
     local previous=(initFrame-2)%#ends+1 local duration=ends[previous]-(ends[previous-1] or 0)
     if duration<total/#ends then break end
-    initFrame=initFrame+1 skipped=skipped+1 if skipped==64 then return end
+    initFrame=initFrame+1 skipped=skipped+1 remaining=remaining-LOAD_BATCH/64 if remaining<=0 then return end
    end
    if initFrame>#keys then initStage=4 return end
   end
   local frame,prior=keys[initFrame],keys[(initFrame-1-initDistance)%#keys+1]
-  local stop=math.min(N,initSlot+COMPILE_BATCH-1) for id=initSlot,stop do compile(frame,prior,groups,id) end
+  local stop=share(COMPILE_BATCH,initSlot) for id=initSlot,stop do compile(frame,prior,groups,id) end
   initSlot=stop+1 if initSlot>N then
    local list={} for mask=1,63 do if groups[mask] then assert(dispatch[mask],"Unsupported changed-field mask") list[#list+1]=dispatch[mask] list[#list+1]=groups[mask] end end
    if initDistance==1 then commands[initFrame]=list else skipCommands[initFrame]=list end groups={}

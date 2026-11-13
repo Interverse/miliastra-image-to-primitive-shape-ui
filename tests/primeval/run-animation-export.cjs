@@ -27,3 +27,13 @@ try{
  const upgraded=path.join(dir,'upgraded.lua');fs.writeFileSync(upgraded,require('../../scripts/upgrade-animation-player.cjs').upgrade(original).code);run(upgraded,'seek');
  console.log('PASS website startup and lossless material planning: '+JSON.stringify({callbacksBefore:callbacks(before),callbacksAfter:callbacks(after),...planning}));
 }finally{fs.rmSync(dir,{recursive:true,force:true});}
+{
+ // LOAD_SPEED scales the work each game update spends loading; playback stays exact.
+ const {capture}=require('../../scripts/preview-lua-player.cjs');
+ const small={...animation,controls:20,frames:frames.map((frame,f)=>frame.slice(0,20*8).map((v,i)=>i%8===7?(Math.floor(i/8)+f)%20:v))};
+ assert.ok(Player.build(small,{imageTemplateIndex:123}).includes('local LOAD_SPEED=1 '),'header exposes LOAD_SPEED');
+ assert.throws(()=>Player.build(small,{loadSpeed:0}),/animation.limit/);
+ const startup=Object.fromEntries([0.5,1,2].map(speed=>{const r=capture(Player.build(small,{imageTemplateIndex:123,loadSpeed:speed}));assert.equal(r.mismatchCount,0,'speed '+speed);return [speed,r.summary?.startupCallbacks??r.startupCallbacks];}));
+ assert.ok(startup[2]<startup[1]&&startup[1]<startup[0.5]&&startup[1]<=12,JSON.stringify(startup));
+ console.log('PASS LOAD_SPEED startup updates: '+JSON.stringify(startup));
+}

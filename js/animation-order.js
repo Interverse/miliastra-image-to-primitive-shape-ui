@@ -1,6 +1,8 @@
 /* Lossless painter-order planning; only disjoint padded draw bounds may cross. */
 'use strict';
 const AnimationOrder=(()=>{
+// Shape kinds 1-3 (Primeval) and 4 (Splat); index 0 is an empty slot.
+const KINDS=5;
 function bounds(frame,id,meta){
  const a=id*8;if(!frame[a]||Math.floor(frame[a+6]/16777216)===0)return null;
  const geometry=meta.compact?.5:.1,rotation=meta.compact?1:.1,w=frame[a+3]*geometry,h=frame[a+4]*geometry;if(w<=0||h<=0)return null;
@@ -33,13 +35,13 @@ function measure(frames,orders,meta){let writes=0,images=0,runs=0;const N=meta.d
  for(let f=meta.lines.LOOP.trim()==='true'?0:1;f<frames.length;f++){const prev=(f+frames.length-1)%frames.length;for(let slot=0;slot<N;slot++){const id=orders[f][slot],old=orders[prev][slot],cost=changes(frames[f],id,frames[prev],old,!!boxes[f][id],!!boxes[prev][old]);writes+=cost.writes;images+=cost.images;}}return {writes,images,runs};
 }
 function schedule(frame,prior,previous,g,meta,imageBias,runBias=0){
- const N=meta.dimensions[3],position=new Int32Array(N),degree=g.indegree.slice(),ready=new Uint8Array(N),bits=Array.from({length:4},()=>new Uint32Array(Math.ceil(N/32))),byPosition=previous,priorVisible=Array.from({length:N},(_,id)=>!!bounds(prior,id,meta));previous.forEach((id,i)=>position[id]=i);
- const indices=Array.from({length:4},()=>new Map());for(let id=0;id<N;id++)if(g.boxes[id])for(const c of [3,5,6]){const a=id*8,key=c+':'+(c===3?frame[a+3]+','+frame[a+4]:frame[a+c]),index=indices[frame[a]];let bucket=index.get(key);if(!bucket){bucket=[];index.set(key,bucket);}bucket.push(id);}
+ const N=meta.dimensions[3],position=new Int32Array(N),degree=g.indegree.slice(),ready=new Uint8Array(N),bits=Array.from({length:KINDS},()=>new Uint32Array(Math.ceil(N/32))),byPosition=previous,priorVisible=Array.from({length:N},(_,id)=>!!bounds(prior,id,meta));previous.forEach((id,i)=>position[id]=i);
+ const indices=Array.from({length:KINDS},()=>new Map());for(let id=0;id<N;id++)if(g.boxes[id])for(const c of [3,5,6]){const a=id*8,key=c+':'+(c===3?frame[a+3]+','+frame[a+4]:frame[a+c]),index=indices[frame[a]];let bucket=index.get(key);if(!bucket){bucket=[];index.set(key,bucket);}bucket.push(id);}
  const add=id=>{ready[id]=1;const p=position[id];bits[frame[id*8]][p>>>5]|=1<<(p&31);};for(let id=0;id<N;id++)if(g.boxes[id]&&degree[id]===0)add(id);
  const nearby=(kind,start,direction)=>{const set=bits[kind];let word=start>>>5;for(;word>=0&&word<set.length;word+=direction){let value=set[word];if(word===(start>>>5))value&=direction>0?(-1<<(start&31)):(-1>>>(31-(start&31)));if(value){const bit=direction>0?31-Math.clz32(value&-value):31-Math.clz32(value);return byPosition[word*32+bit];}}return -1;};
  const result=[],candidates=new Set(),active=g.boxes.reduce((n,b)=>n+!!b,0);
  for(let slot=0;slot<active;slot++){
-  candidates.clear();for(let kind=1;kind<=3;kind++){const left=nearby(kind,slot,-1),right=nearby(kind,slot,1);if(left>=0)candidates.add(left);if(right>=0)candidates.add(right);}
+  candidates.clear();for(let kind=1;kind<KINDS;kind++){const left=nearby(kind,slot,-1),right=nearby(kind,slot,1);if(left>=0)candidates.add(left);if(right>=0)candidates.add(right);}
   const old=previous[slot],b=old*8,kind=prior[b];if(priorVisible[old])for(const c of [3,5,6]){const key=c+':'+(c===3?prior[b+3]+','+prior[b+4]:prior[b+c]),bucket=indices[kind]?.get(key);if(bucket){let added=0;for(const id of bucket)if(ready[id]){candidates.add(id);if(++added===8)break;}}}
   let best=-1,bestScore=Infinity;for(const id of candidates){const cost=changes(frame,id,prior,old,true,priorVisible[old]),score=cost.writes+cost.images*imageBias+(result.length&&frame[id*8]!==frame[result.at(-1)*8]?runBias:0)+Math.abs(position[id]-slot)*1e-6+(id===old?0:1e-7);if(score<bestScore){best=id;bestScore=score;}}
   if(best<0)throw Error('Invalid draw-order dependency graph');result.push(best);ready[best]=0;const p=position[best];bits[frame[best*8]][p>>>5]&=~(1<<(p&31));

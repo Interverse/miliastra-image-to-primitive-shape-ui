@@ -13,7 +13,7 @@
   </script>
   <title data-i18n="app.pageTitle">Miliastra Wonderland Image Fitter</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='38' cy='42' r='26' fill='%234355B9'/%3E%3Crect x='48' y='44' width='36' height='36' rx='6' fill='%23E8A317' transform='rotate(12 66 62)'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="css/style.css?v=animation-methods-2">
+  <link rel="stylesheet" href="css/style.css?v=load-speed-1">
 </head>
 <body>
   <header class="topbar">
@@ -47,7 +47,7 @@
         </div>
         <fieldset id="animationSettings" class="enhancement-controls" hidden>
           <legend data-i18n="animation.title">GIF / Video</legend>
-          <p class="hint" data-i18n="animation.hint">Uses Primeval settings below. Lua / JSON; no audio.</p>
+          <p class="hint" data-i18n="animation.hint">Uses the Splat or Primeval settings below. Lua / JSON; no audio.</p>
           <label class="animation-fps" for="animationFps"><span data-i18n="animation.fps">FPS</span><input id="animationFps" class="form-input" type="number" min="0" step="1" value="15" required></label>
           <p class="hint" data-i18n="animation.fpsHint">0 = source rate. Applies to preview, generation and Lua.</p>
           <div id="animationSource" class="animation-source" hidden><canvas id="animationSourceCanvas" width="320" height="180" data-i18n-aria-label="animation.sourcePreview"></canvas><button id="animationSourcePlay" type="button" class="btn-sm" disabled data-i18n="animation.play">Play</button><p id="animationSourceStatus" class="hint" aria-live="polite"></p></div>
@@ -68,6 +68,7 @@
             <select id="fitMethod" class="num-input">
               <option value="primeval">Primeval</option>
               <option value="splat">Splat</option>
+              <option value="pixel" data-i18n="pixel.method">Pixel-perfect</option>
               <option value="gaussian">Gaussian</option>
               <option value="legacy" data-i18n="fitting.legacy">Legacy</option>
             </select>
@@ -138,6 +139,7 @@
             </div>
           </div>
           <p class="hint splat-hint" id="splatHint" hidden data-i18n="splat.hint">Uses soft-edged rectangles. Only a Lua script is made for the game, with no GIA files. You can also save the JSON.</p>
+          <p class="hint" id="pixelHint" hidden data-i18n="pixel.hint">Copies every pixel exactly with rectangles. Chosen automatically for images under 1,000 visible pixels.</p>
           <div id="splatSettings" class="form-stack" hidden>
             <div class="form-field">
               <label for="splatIterations" data-i18n="fillParams.gaussianIterations">Fitting steps</label>
@@ -302,6 +304,7 @@
           <input type="text" id="batchLuaTemplateIndex" inputmode="numeric" autocomplete="off" spellcheck="false" data-i18n-placeholder="batch.luaTemplateOptional" placeholder="optional">
         </label>
         <label id="batchAnimationCompactField" class="batch-template-field" hidden data-i18n-title="animation.compactHint"><input id="batchAnimationCompact" type="checkbox"><span data-i18n="animation.compact">Compact animation Lua</span></label>
+        <label id="batchAnimationLoadSpeedField" class="batch-template-field" hidden data-i18n-title="pixel.loadSpeedHint"><span data-i18n="pixel.loadSpeed">Load speed</span><input id="batchAnimationLoadSpeed" type="number" min="0.01" step="any" value="10" required></label>
         <button type="button" id="btnDownloadAll" class="btn-tonal" data-i18n="batch.downloadAll" hidden>Download all (ZIP)</button>
         <p id="batchLuaBudgetNote" class="hint" hidden data-i18n="compression.luaBudget"></p>
       </div>
@@ -409,6 +412,11 @@
             <input type="text" id="clientLuaTemplateIndex" class="form-input" inputmode="numeric" autocomplete="off" spellcheck="false">
             <p class="gia-export-group__desc gia-export-group__desc--field" data-i18n="result.export.gia.clientLuaTemplateHint"></p>
             <p id="clientLuaBudgetNote" class="hint" hidden data-i18n="compression.luaBudget"></p>
+          </div>
+          <div id="clientAnimationLoadSpeedField" class="gia-export-group__field lua-export-section" hidden>
+            <label for="clientAnimationLoadSpeed" data-i18n="pixel.loadSpeed">Load speed</label>
+            <input type="number" id="clientAnimationLoadSpeed" class="form-input" min="0.01" step="any" value="10" required>
+            <p class="gia-export-group__desc gia-export-group__desc--field" data-i18n="pixel.loadSpeedHint">Higher loads faster. Lower it if the game shows an execution timeout error.</p>
           </div>
           <div id="clientAnimationCompactField" class="lua-export-section lua-export-options" hidden>
             <label class="check-label"><input type="checkbox" id="clientAnimationCompact"><span data-i18n="animation.compact">Compact animation Lua</span></label>
@@ -569,7 +577,7 @@
         <div class="form-field">
           <label for="retryFitMethod" data-i18n="compression.method">Method</label>
           <select id="retryFitMethod" class="num-input">
-            <option value="primeval">Primeval</option><option value="splat">Splat</option><option value="gaussian">Gaussian</option><option value="legacy" data-i18n="fitting.legacy">Legacy</option>
+            <option value="primeval">Primeval</option><option value="splat">Splat</option><option value="pixel" data-i18n="pixel.method">Pixel-perfect</option><option value="gaussian">Gaussian</option><option value="legacy" data-i18n="fitting.legacy">Legacy</option>
           </select>
         </div>
         <div class="shape-checks" id="retryShapeChecks">
@@ -625,6 +633,7 @@
           </div>
         </div>
         <p class="hint splat-hint" id="retrySplatHint" hidden data-i18n="splat.hint">Uses soft-edged rectangles. Only a Lua script is made for the game, with no GIA files. You can also save the JSON.</p>
+        <p class="hint" id="retryPixelHint" hidden data-i18n="pixel.hint">Copies every pixel exactly with rectangles. Chosen automatically for images under 1,000 visible pixels.</p>
         <div id="retrySplatSettings" class="form-stack" hidden>
           <div class="form-field">
             <label for="retrySplatIterations" data-i18n="fillParams.gaussianIterations">Fitting steps</label>
@@ -814,35 +823,37 @@
   <script src="js/locales/upscale.js?v=3"></script>
   <script src="js/locales/screen-sizing.js?v=3"></script>
   <script src="js/locales/import.js?v=animation-json-1"></script>
-  <script src="js/locales/animation.js?v=animation-methods-1"></script>
+  <script src="js/locales/animation.js?v=splat-animation-1"></script>
   <script src="js/locales/splat.js?v=1"></script>
+  <script src="js/locales/pixel.js?v=3"></script>
   <script src="js/i18n.js?v=25"></script>
   <script src="js/zip.js?v=25"></script>
   <script src="js/gia.js?v=26"></script>
   <script src="js/gia-export.js?v=26"></script>
   <script src="js/lua-export.js?v=splat-1"></script>
-  <script src="js/splat-core.js?v=3"></script>
+  <script src="js/splat-core.js?v=4"></script>
+  <script src="js/pixel-perfect.js?v=3"></script>
   <script src="js/splat-export.js?v=1"></script>
   <script src="js/splat-preview.js?v=2"></script>
   <script src="js/png-decode.js?v=24"></script>
   <script src="js/gaussian.js?v=25"></script>
   <script src="js/compression-quality.js?v=1"></script>
-  <script src="js/primeval-result.js?v=5"></script>
+  <script src="js/primeval-result.js?v=6"></script>
   <script src="js/progress-result.js?v=1"></script>
   <script src="js/native-edit.js?v=3"></script>
   <script src="js/gizmo-resize.js?v=1"></script>
   <script src="js/focus.js?v=2"></script>
-  <script src="js/screen-sizing.js?v=3"></script>
+  <script src="js/screen-sizing.js?v=4"></script>
   <script src="js/finished-import.js?v=splat-1"></script>
   <script src="js/animation-motion.js?v=5"></script>
-  <script src="js/animation-core.js?v=6"></script>
-  <script src="js/animation-json.js?v=1"></script>
+  <script src="js/animation-core.js?v=7"></script>
+  <script src="js/animation-json.js?v=2"></script>
   <script src="js/animation-codec.js?v=1"></script>
-  <script src="js/animation-order.js?v=1"></script>
-  <script src="js/animation-player-runtime.js?v=3"></script>
-  <script src="js/animation-lua.js?v=12"></script>
-  <script src="js/animation-generation-ui.js?v=2"></script>
-  <script src="js/animation-ui.js?v=11"></script>
-  <script src="js/app.js?v=splat-3"></script>
+  <script src="js/animation-order.js?v=2"></script>
+  <script src="js/animation-player-runtime.js?v=6"></script>
+  <script src="js/animation-lua.js?v=16"></script>
+  <script src="js/animation-generation-ui.js?v=3"></script>
+  <script src="js/animation-ui.js?v=12"></script>
+  <script src="js/app.js?v=load-speed-1"></script>
 </body>
 </html>

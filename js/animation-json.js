@@ -10,7 +10,7 @@ const AnimationJson=(()=>{
   if(frames.length*controls*8*8>core().MEMORY)throw Error('animation.limit');
   const decoded=frames.map(frame=>{
    if(!Array.isArray(frame)||frame.length%8||frame.length>controls*8||!frame.every(Number.isSafeInteger))invalid();
-   const ranks=new Set();for(let at=0;at<frame.length;at+=8){const kind=frame[at],rank=frame[at+7];if(kind<0||kind>3||frame[at+3]<0||frame[at+4]<0||frame[at+6]<0||frame[at+6]>4294967295)invalid();if(kind){if(rank<0||rank>=controls||ranks.has(rank))invalid();ranks.add(rank);}}
+   const ranks=new Set();for(let at=0;at<frame.length;at+=8){const kind=frame[at],rank=frame[at+7];if(kind<0||kind>4||frame[at+3]<0||frame[at+4]<0||frame[at+6]<0||frame[at+6]>4294967295)invalid();if(kind){if(rank<0||rank>=controls||ranks.has(rank))invalid();ranks.add(rank);}}
    return new Float64Array(frame);
   });
   return {kind:'primeval',width,height,controls,unit,fps,loop,durations:durations.slice(),frames:decoded};

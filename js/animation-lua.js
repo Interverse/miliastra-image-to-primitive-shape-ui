@@ -97,7 +97,7 @@ local moveCounts={${packed.orders.map(a=>a.length).concat(packed.loopOrder.lengt
 local root,controls,colors,keys,ends,pools,front,pending,empty,transparent
 local total,current,clock,ready,loading,job,work,shownDue,displayClock,estimate,uiBudget
 local digits,prefixes,at,buffer,bits,state,oldState,components,stage,bookAt,slot,f,c,run,remaining,fixed,changed
-local assets={100002,100001,100003}
+local assets={100002,100001,100003,106057}
 local function take(count)
  while bits<count do local d=digits[string.byte(DATA,at)] assert(d,"Invalid animation data") buffer=buffer+d*2^bits bits=bits+6 at=at+1 end
  local power=2^count local value=buffer%power buffer=math.floor(buffer/power) bits=bits-count return value
@@ -304,20 +304,32 @@ end
   names.forEach((name,i)=>{const alias='_Q'+i;if(!tokens.includes(alias))aliases.set(name,alias);});
   let out='',previous='';for(let i=0;i<tokens.length;i++){let token=tokens[i];if(aliases.has(token)&&tokens[i-1]!=='.'&&tokens[i-1]!==':'&&!(tokens[i+1]==='='&&(tokens[i-1]==='{'||tokens[i-1]===',')))token=aliases.get(token);if(previous&&(/[\w]$/.test(previous)&&/^\w/.test(token)||/[.\d]$/.test(previous)&&token[0]==='.'||previous==='-'&&token==='-'||previous==='['&&(token==='['||token==='=')))out+=' ';out+=token;previous=token;}return out;
  }
+ /* Splat soft corners are a fixed 64 of 900 units (image 106057), so clips with
+  * Splat shapes (kind 4) play on a 900-unit-tall canvas, as the Splat Lua
+  * export does. Display size and shape proportions are unchanged. */
+ const SPLAT_CANVAS_HEIGHT=900;
+ function splatCanvas(animation){
+  if(!animation.frames.some(frame=>{for(let at=0;at<frame.length;at+=8)if(frame[at]===4)return true;return false;}))return animation;
+  const k=SPLAT_CANVAS_HEIGHT/animation.height;
+  return {...animation,width:animation.width*k,height:SPLAT_CANVAS_HEIGHT,frames:animation.frames.map(frame=>Float64Array.from(frame,(v,i)=>{
+   const c=i%8;return c>=1&&c<=4&&frame[i-c]?Math.round(v*k):v;
+  }))};
+ }
  function buildFast(animation,options={}){
   const codec=typeof AnimationCodec!=='undefined'?AnimationCodec:require('./animation-codec.js');
   const runtime=typeof AnimationPlayerRuntime!=='undefined'?AnimationPlayerRuntime:require('./animation-player-runtime.js');
-  const compact=options.compact===true;let input=compact?compactAnimation(animation):animation;
+  const compact=options.compact===true,canvas=splatCanvas(animation);let input=compact?compactAnimation(canvas):canvas;
   const index=LuaExport.parseTemplateIndex(options.imageTemplateIndex)??LuaExport.IMAGE_TEMPLATE_PLACEHOLDER,width=options.width??animation.width;
   const fps=Number(options.fps??animation.fps??0);
   if(!Number.isSafeInteger(fps)||fps<0)throw Error('animation.fpsInvalid');
+  const loadSpeed=Number(options.loadSpeed??1);if(!(loadSpeed>0&&Number.isFinite(loadSpeed)))throw Error('animation.limit');
   if(!Number.isFinite(width)||width<=0||!Number.isFinite(animation.width)||animation.width<=0||!Number.isFinite(animation.height)||animation.height<=0||!Number.isSafeInteger(animation.controls)||animation.controls<1||!animation.frames.length||animation.frames.length!==animation.durations.length)throw Error('animation.limit');
   for(const frame of input.frames){if(frame.length>animation.controls*8||frame.length%8||!frame.every(Number.isSafeInteger))throw Error('animation.limit');}
   if(animation.durations.some(d=>!Number.isFinite(d)||d<=0))throw Error('animation.limit');
   let planning={changed:false};
   if(options.optimizeOrder!==false){
    const order=typeof AnimationOrder!=='undefined'?AnimationOrder:require('./animation-order.js');
-   try{const plan=order.plan(input.frames,{compact,dimensions:[width,animation.width,animation.height,animation.controls],lines:{LOOP:String(animation.loop!==false)}});input={...input,frames:plan.frames};planning=plan.report;}
+   try{const plan=order.plan(input.frames,{compact,dimensions:[width,canvas.width,canvas.height,animation.controls],lines:{LOOP:String(animation.loop!==false)}});input={...input,frames:plan.frames};planning=plan.report;}
    catch(error){if(!error.message.startsWith('Draw-order dependency graph exceeds'))throw error;planning={changed:false,reason:'overlap-budget'};}
   }
   // Range coding saved only 3–4% on supplied clips but took ~10x as many game
@@ -325,12 +337,13 @@ end
   const huffman=encodeHuffman(input),bookText='{'+huffman.books.map(b=>'{'+b.root+',{'+b.tree.join(',')+'}}').join(',')+'}';
   const range=options.compression==='maximum'?codec.encode(input):null;
   const useRange=range!==null&&range.length+12*8<huffman.text.length+bookText.length,packed=useRange?range:huffman.text;
-  const header=`-- Primeval animation: lossless compression, one control pool, precompiled updates.
+  const header=`-- ${canvas===animation?'Primeval':'Splat'} animation: lossless compression, one control pool, precompiled updates.
 -- Other scripts: targetScript:Invoke("Play"), :Invoke("Stop"), :Invoke("Restart").
 local IMAGE_TEMPLATE_INDEX=${index}
 local PLAYBACK_FPS=${fps} -- 0 = stored timing
+local LOAD_SPEED=${loadSpeed} -- higher loads faster; lower it if the game shows an execution timeout error
 local ENCODED_FPS=${Number(animation.fps)||0}
-local WIDTH,W,H,N=${width},${animation.width},${animation.height},${animation.controls}
+local WIDTH,W,H,N=${width},${canvas.width},${canvas.height},${animation.controls}
 local GEOMETRY,ROTATION,COMPACT=${compact?'0.5,1,true':'0.1,0.1,false'}
 local LOOP=${animation.loop!==false}
 local CODEC=${useRange?2:1}
@@ -348,7 +361,7 @@ local moveCounts={${Array(animation.frames.length+1).fill(0).join(',')}}
  }
  function buildAsync(animation,options={}){
   return new Promise((resolve,reject)=>{
-   const worker=new Worker('js/worker-animation-export.js?v=3');
+   const worker=new Worker('js/worker-animation-export.js?v=7');
    worker.onmessage=({data})=>{worker.terminate();if(data.error)reject(Error(data.error));else resolve(data.text);};
    worker.onerror=event=>{worker.terminate();reject(Error(event.message||'animation.fitError'));};
    try{worker.postMessage({animation,options});}catch(error){worker.terminate();reject(error);}

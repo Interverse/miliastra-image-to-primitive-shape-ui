@@ -11,7 +11,7 @@ frame.addEventListener('load',async()=>{
   const w=frame.contentWindow,d=w.document,$=id=>d.getElementById(id),errors=[];
   w.addEventListener('error',e=>errors.push(e.message));w.alert=m=>errors.push(m);w.confirm=()=>true;
   const change=(id,value)=>{$(id).value=value;$(id).dispatchEvent(new w.Event('change'));};
-  check(Array.from($('fitMethod').options,o=>o.value).join(',')==='primeval,splat,gaussian,legacy','four fitting methods, Splat right below Primeval');
+  check(Array.from($('fitMethod').options,o=>o.value).join(',')==='primeval,splat,pixel,gaussian,legacy','five fitting methods, Splat right below Primeval');
   check($('fitMethod').value==='primeval','Primeval is the default');
   check(Array.from($('primevalSpeed').options,o=>o.value).join(',')==='turbo,fast','optimization order without Draft');
   check(Array.from($('retryPrimevalSpeed').options,o=>o.value).join(',')==='turbo,fast'&&$('retryPrimevalSpeed').value==='turbo','retry optimization order and default');
@@ -21,7 +21,7 @@ frame.addEventListener('load',async()=>{
   check(w.getComputedStyle($('legacyShapeChecks')).gridTemplateColumns.split(' ').length===2,'Primeval uses a balanced two-column shape grid');
   check($('primevalSpeed').selectedOptions[0].textContent===w.LOCALES.en['fitting.maximumDetail'],'merged detail mode uses the accelerated exact implementation');
   for(const lang of Object.keys(w.LOCALES)){
-   change('langSelect',lang);check($('fitMethod').options[3].textContent===w.LOCALES[lang]['fitting.legacy'],'localized selector '+lang);check($('splatHint').textContent===w.LOCALES[lang]['splat.hint'],'localized Splat note '+lang);
+   change('langSelect',lang);check($('fitMethod').options[4].textContent===w.LOCALES[lang]['fitting.legacy']&&$('fitMethod').options[2].textContent===w.LOCALES[lang]['pixel.method'],'localized selector '+lang);check($('splatHint').textContent===w.LOCALES[lang]['splat.hint'],'localized Splat note '+lang);
    const cards=Array.from($('legacyShapeChecks').children).filter(e=>!e.hidden);
    check(cards.length===4&&cards.every(e=>e.scrollWidth<=e.clientWidth+1),'four shape cards fit '+lang);
    check($('primevalSpeed').options[0].textContent===w.LOCALES[lang]['fitting.turbo'],'localized optimization controls '+lang);

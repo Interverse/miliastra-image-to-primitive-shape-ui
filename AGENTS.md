@@ -14,6 +14,9 @@ build. Serve the root over HTTP, usually port 8321. GitHub Pages uses
 - `js/focus.js`, `js/worker-importance.js`, `js/importance-analysis.js`: Focus detail
   (automatic UNISAL map on CPU/WASM plus manually marked areas) for Primeval Turbo.
 - `js/worker-gaussian.js`, `js/worker-fill.js`, `js/worker-outline.js`: other fitting engines.
+- `js/worker-splat.js`, `js/splat-core.js`, `js/splat-gpu.js`: Splat (mw_splat port); WebGPU
+  fitter with the threaded CPU core as fallback.
+- `js/pixel-perfect.js`, `js/worker-pixel.js`: Pixel-perfect exact rectangles (layered).
 - `js/gia.js`, `js/gia-export.js`, `js/lua-export.js`: export and conversion.
 - `js/locales/`: all 15 supported languages.
 - `docs/development/`: current implementation notes and limitations.
@@ -36,7 +39,9 @@ build. Serve the root over HTTP, usually port 8321. GitHub Pages uses
    Legacy allows exactly one solid shape family. Gaussian uses only
    blurred circles. Circle in Primeval means benchmark rotated ellipses.
    Splat (mw_splat port, MPL-2.0) uses only soft rectangles and exports only
-   JSON and Lua; see `docs/development/splat.md`.
+   JSON and Lua; see `docs/development/splat.md`. Pixel-perfect copies
+   pixels exactly with rectangles and has no count or Opacity setting; see
+   `docs/development/pixel-perfect.md`.
 6. Preserve the pinned fitting output and single-asset triangle constraint.
    Do not fake transparency or quality by reapplying source alpha after fitting.
 7. Preserve runtime dependencies, game assets and redistribution licenses.

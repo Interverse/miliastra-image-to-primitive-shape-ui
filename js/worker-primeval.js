@@ -1,6 +1,6 @@
 /* Primeval 0.2.2 SIMD/Rayon engine; Fastest, exact Fast and Maximum Detail profiles. */
 "use strict";
-importScripts("png-decode.js", "primeval-result.js?v=3");
+importScripts("png-decode.js", "primeval-result.js?v=4");
 let runtime;
 // Experimental Turbo research options by key (see the Experimental settings); all
 // off unless chosen. Bits: 1-8 edge proposal kinds, 1<<18 spill reorder,

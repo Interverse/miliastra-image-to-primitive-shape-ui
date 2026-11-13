@@ -1,0 +1,22 @@
+<!doctype html><meta charset="utf-8"><title>Splat quality run</title>
+<script src="/js/png-decode.js"></script>
+<script>
+/* Manual check: one Splat job through the real worker.
+ * ?src=&n=&steps=&res=&backend=cpu|auto&threads= */
+(async () => {
+  const q = new URLSearchParams(location.search);
+  const img = await PNGDecode.decode(new Uint8Array(await (await fetch(q.get("src"))).arrayBuffer()));
+  const worker = new Worker("/js/worker-splat.js"), t = performance.now();
+  const result = await new Promise((resolve, reject) => {
+    worker.onmessage = ({ data }) => { if (data.type === "done") resolve(data.result); if (data.type === "error") reject(Error(data.message)); };
+    worker.postMessage({ cmd: "process", jobId: "q", rgba: img.rgba.buffer, width: img.width, height: img.height,
+      config: { num_primitives: +q.get("n"), splat_iterations: +q.get("steps"), splat_resolution: +(q.get("res") || 512),
+        splat_backend: q.get("backend") || "auto", splat_threads: +(q.get("threads") || 1), splat_seed: +(q.get("seed") || 0) } });
+  });
+  const c = document.createElement("canvas");
+  c.width = img.width; c.height = img.height;
+  c.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(result.preview_rgba), img.width, img.height), 0, 0);
+  document.body.dataset.result = JSON.stringify({ ms: Math.round(performance.now() - t), backend: result.config.splat_backend,
+    loss: result.config.final_loss, png: c.toDataURL() });
+})().catch((e) => { document.body.dataset.result = JSON.stringify({ error: String(e.stack || e) }); });
+</script>

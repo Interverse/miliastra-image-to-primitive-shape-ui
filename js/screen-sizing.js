@@ -99,7 +99,7 @@ const ScreenSizing = (() => {
     return {async open(setting){
       info=await getImage();if(!info)return;
       draft=session(setting,info.width);
-      url=URL.createObjectURL(new Blob([info.svg],{type:'image/svg+xml'}));image.src=url;
+      url=URL.createObjectURL(info.png||new Blob([info.svg],{type:'image/svg+xml'}));image.src=url;
       dialog.showModal();draw();$('screenSizingConfirm').focus();
     }};
   }

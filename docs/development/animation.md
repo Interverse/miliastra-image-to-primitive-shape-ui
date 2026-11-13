@@ -1,4 +1,41 @@
-# Primeval GIF/video animation
+# GIF/video animation (Splat and Primeval)
+
+GIF/video inputs offer two methods: Splat (default) and Primeval. The other
+methods are disabled while an animation is queued; the still-image method is
+restored when it is removed.
+
+## Splat
+
+Each selected frame is fitted by `splatFrame` in `worker-animation.js` with the
+Splat fitter (WebGPU, CPU fallback; see `splat.md`), using the Splat count,
+Fitting steps (default 3000) and Detail settings. Animation fits keep every
+splat's scale at 1 (scale learning rate 0), so a splat is a plain kind-4 record
+(image 106057, size, rotation, colour) and frames keep the 8-field layout. On a
+231 × 233 test image this fitted better than free scale (median loss about
+1.0e-3 vs 2.6e-3 over 6 seeds). With Reuse previous frame, a frame starts from
+the previous frame's splats, runs without redistribution and keeps their slots;
+otherwise each frame is initialized and fitted from scratch. Identical frames
+reuse the previous fit. An opaque background is an ordinary rectangle record.
+
+Clips are split into contiguous segments fitted in parallel workers (up to 4,
+at most half the logical cores and one per three frames), reusing
+`AnimationSequences.run` without Primeval's motion-predicted prefix. Each
+worker has its own WebGPU device (or one CPU thread); each segment starts with
+a full fit and segments are stitched by slot matching. Every frame runs the
+full step count in either case, so segmenting changes speed, not work per
+frame. On the 12-frame fixture this took about 11–13 s instead of 21 s.
+
+The Lua player's asset table includes 106057 for kind 4. Because the image's
+soft corners are a fixed 64 of 900 units, clips containing kind 4 are exported
+on a 900-unit-tall canvas (coordinates scaled by 900 / height), as the still
+Splat Lua does; the displayed size is unchanged. Animation JSON accepts kind 4.
+The draw-order planner and previews (`PrimevalResult.drawElements`, WebGL on
+the page and the CPU renderer in workers) handle kind 4.
+`tests/splat/run-animation.cjs` covers the GIF flow, JSON import and native-Lua
+playback. On the 512 × 288, 12-frame fixture, 1,000 splats and 1,000 steps per
+frame take about 21 s with WebGPU in one worker.
+
+## Primeval
 
 GIF/video inputs use the existing `processPrimeval` function in
 `worker-primeval.js` for every selected frame. Static generation calls that same
@@ -7,12 +44,17 @@ prior drawings between keyframes. The pinned still-image fitting path and static
 JSON layout are unchanged.
 There is no separate rectangular mosaic fitter or animation quality/count setting.
 
+## Pixel-perfect
+
+GIFs whose Pixel-perfect copy averages under 1,000 controls per frame select
+Pixel-perfect. Each frame becomes exact layered rectangles (kind 2); identical
+frames repeat the previous one. See [Pixel-perfect](pixel-perfect.md).
+
 ## Settings and decoding
 
-Animations use the regular Primeval shape family (including Mixed), primitive
+Primeval animations use the regular Primeval shape family (including Mixed), primitive
 count, Turbo/Maximum Detail, resolution, image scale, opacity, transparency,
-background, AI upscale, Focus and experimental options. GIF/video batches select
-Primeval automatically. The animation panel adds FPS (15 by default), Loop and Reuse previous frame (on by default). Results offer Lua and JSON, without audio.
+background, AI upscale, Focus and experimental options. The animation panel adds FPS (15 by default), Loop and Reuse previous frame (on by default). Results offer Lua and JSON, without audio.
 Focus areas can be marked using the source's first frame;
 normalized areas apply throughout the clip. Automatic Focus uses the same UNISAL worker and map-combination code as still
 images. Temporal mode refreshes its automatic map periodically and on full fits,
@@ -78,6 +120,38 @@ normal downloads. Only bounded startup callbacks decompress data; the first
 fitted pose appears while remaining frames load. Runtime Lua
 comments and redundant whitespace are removed using a literal-aware lexer;
 internal decoder/kernel aliases are shortened without renaming host APIs or settings.
+
+### Loading speed
+
+`LOAD_SPEED` in the script header (default 1) scales the loading work done per
+game update. Decoding, control creation, ordering and command compilation all
+draw from one budget of `LOAD_BATCH × LOAD_SPEED` units. Each stage takes as many
+items as fit, so a small clip finishes in a few updates rather than one step per
+update. One batch (128 controls, 256 orders or 2,048 compiled slots) fills a
+whole update at speed 1, the same ceiling as before. 2 loads about twice as fast
+but may hitch; 0.5 is smoother. Startup updates until ready on synthetic clips
+where every control moves each frame (before = fixed batch steps and the
+previous decoder; `tests/primeval/run-animation-export.cjs` checks the ordering):
+
+| Controls × frames | Before | Speed 1 | Speed 2 | Speed 0.5 |
+| --- | ---: | ---: | ---: | ---: |
+| 20 × 60 | 78 | 8 | 5 | 14 |
+| 200 × 60 | 110 | 44 | 23 | 86 |
+| 1000 × 30 | 165 | 120 | 57 | 270 |
+| 3000 × 20 | 359 | 292 | 137 | 616 |
+
+### Decoder
+
+Unpacking the frame data was 55–80% of startup Lua time. The decoder keeps
+every field in place and applies only nonzero deltas. Zero runs are skipped in
+one step, colours are rebuilt only for controls whose colour channels changed,
+and controls that did not change copy their previous pose instead of being
+rebuilt. Bit reads use the powers table instead of `^` and `math.floor`. The
+payload format is unchanged. With 2,000 controls × 60 frames where 30% of
+controls move per frame, startup fell from 517 to 243 updates and unpacking
+from 533 to 187 ms (texlua, mock UI calls). Profiled per stage, decoding is now
+about 55% of the remaining Lua time; creating, ordering and compiling controls
+make up the rest.
 
 Lossless is the default. The existing Compact checkbox remains an explicit
 precision reduction. Static JSON fields/semantics are untouched. The arithmetic

@@ -6,7 +6,7 @@
  * Started by worker-splat.js; one per thread. */
 "use strict";
 // The job worker usually starts this from a blob with splat-core.js inlined.
-if (typeof SplatCore === "undefined") importScripts("splat-core.js?v=3");
+if (typeof SplatCore === "undefined") importScripts("splat-core.js?v=4");
 
 let band = null, cap = 0, shared = null;
 

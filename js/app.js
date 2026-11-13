@@ -152,7 +152,9 @@
 
   const numPrimsSlider = $("numPrims");
   const numPrimsManual = $("numPrimsManual");
-  const animationSource=AnimationUI.createSource();let animationInputActive=false,stillPrimitiveCount=numPrimsManual.value,animationPrimitiveCount='1000';
+  const animationSource=AnimationUI.createSource();let animationInputActive=false,animationMethod='splat';
+  // GIF/video can be fitted with Splat (default) or Primeval only.
+  const ANIMATION_METHODS=['splat','primeval','pixel'];
   function validControlCount(input) {
     input.setCustomValidity("");
     const value=Number(input.value);
@@ -223,15 +225,21 @@
   buildExperiments("");buildExperiments("retry");
 
   function syncShapeLabels() {
-    const method=$("fitMethod").value, gaussian=method==="gaussian", primeval=method==="primeval", splat=method==="splat";
-    if(!splat)orderFitShapes("", method);
+    const method=$("fitMethod").value, gaussian=method==="gaussian", primeval=method==="primeval", splat=method==="splat", pixel=method==="pixel";
+    if(!splat&&!pixel)orderFitShapes("", method);
     fillShapeInputs.forEach(input=>input.closest(".shape-check").classList.toggle("active",input.checked));
-    $("legacyShapeChecks").hidden=gaussian||splat;
+    $("legacyShapeChecks").hidden=gaussian||splat||pixel;
+    // Pixel-perfect copies the image exactly: the image sets the count and transparency.
+    $("pixelHint").hidden=!pixel;
+    // Upload previews of small images keep hard pixel edges.
+    $("fileThumbs").classList.toggle("pixelated",pixel);$("animationSource").classList.toggle("pixelated",pixel);
+    numPrimsManual.closest(".param-item").hidden=pixel;
     $("primevalSettings").hidden=!primeval;
     $("gaussianHint").hidden=!gaussian;
     $("splatHint").hidden=!splat;
     $("splatSettings").hidden=!splat;
-    $("outputAlphaSettings").hidden=splat;
+    // Opacity would blend overlapping Pixel-perfect layers.
+    $("outputAlphaSettings").hidden=splat||pixel;
     $("shapeHint").hidden=method!=="legacy";
     $("mixedShapeHint").hidden=!(primeval&&$("shapeMixed").checked&&$("primevalSpeed").value!=="turbo");
     $("focusSettings").hidden=!(primeval&&$("primevalSpeed").value==="turbo");
@@ -242,12 +250,74 @@
     $("enhancedMode").disabled=method!=="legacy";
     $("enhancedSettings").hidden=method!=="legacy";
     // Splat handles transparency on its own, like mw_splat.
-    $("pngModeSettings").hidden=splat;
+    $("pngModeSettings").hidden=splat||pixel;
     syncBackgroundColor();
     $("numPrimsTitle").textContent=t("fillParams.numPrims");
     numPrimsManual.removeAttribute("max");numPrimsManual.min="1";numPrimsSlider.min="1";
   }
-  $("fitMethod").addEventListener("change",()=>{syncShapeLabels();updateSubtitle();});
+  /* Shared fitting parameters are remembered per method, and separately for
+   * GIF/video: switching methods saves the old method's values and restores
+   * the new method's (page defaults the first time; 1,000 shapes for GIF/video). */
+  const METHOD_FIELDS=["numPrimsManual","imageScale","outputAlpha","enablePngMode","useBackgroundColor","backgroundColor","enhancedMode"];
+  const readMethodFields=()=>{
+    const values={shape:selectedFitShape()};
+    for(const id of METHOD_FIELDS){const input=$(id);values[id]=input.type==="checkbox"?input.checked:input.value;}
+    return values;
+  };
+  const METHOD_DEFAULTS=readMethodFields(),methodSettings=new Map();
+  const methodKey=()=>$("fitMethod").value+(animationInputActive?":animation":"");
+  let methodSettingsKey=methodKey();
+  function saveMethodSettings(){methodSettings.set(methodSettingsKey,readMethodFields());}
+  function loadMethodSettings(){
+    methodSettingsKey=methodKey();
+    const values=methodSettings.get(methodSettingsKey)||{...METHOD_DEFAULTS,...(animationInputActive?{numPrimsManual:"1000"}:{})};
+    for(const id of METHOD_FIELDS){
+      const input=$(id);
+      if(input.type==="checkbox"){input.checked=values[id];input.dispatchEvent(new Event("change"));}
+      else{input.value=values[id];input.dispatchEvent(new Event("input"));}
+    }
+    const shape=shapePairs.find(([,name])=>name===values.shape);
+    if(shape)$("shape"+shape[0]).checked=true;
+  }
+  /* Pixel-perfect is chosen automatically while every queued input would need
+   * fewer than PixelPerfect.THRESHOLD controls as a Pixel-perfect copy (GIF:
+   * average per frame). If a larger input is added, the method used before
+   * comes back. A method chosen by hand is kept until the queue is emptied. */
+  let autoPixelFrom=null,methodChosen=false;
+  function setFitMethod(method){saveMethodSettings();$("fitMethod").value=method;loadMethodSettings();syncShapeLabels();updateSubtitle();}
+  function autoPixelMethod(){
+    if(methodChosen||currentMode!=="fill"||!pendingFiles.length||pendingFiles.some(entry=>entry.pixelControls===undefined))return;
+    const small=pendingFiles.every(entry=>entry.pixelControls<PixelPerfect.THRESHOLD),method=$("fitMethod").value;
+    if(small&&method!=="pixel"){autoPixelFrom=method;setFitMethod("pixel");}
+    else if(!small&&method==="pixel"&&autoPixelFrom){const previous=autoPixelFrom;autoPixelFrom=null;setFitMethod(previous);}
+  }
+  /* Controls counted off the page in one persistent worker (worker-pixel.js). */
+  let countWorker=null,countId=0;const countReplies=new Map();
+  function countControls(message,transfer){
+    if(!countWorker){
+      countWorker=new Worker("js/worker-pixel.js?v=3");
+      countWorker.onmessage=({data})=>{if(data.type!=="count")return;countReplies.get(data.id)?.(data.controls);countReplies.delete(data.id);};
+      countWorker.onerror=()=>{for(const resolve of countReplies.values())resolve(Infinity);countReplies.clear();countWorker.terminate();countWorker=null;};
+    }
+    const id=++countId;
+    return new Promise(resolve=>{countReplies.set(id,resolve);countWorker.postMessage({cmd:"count",id,...message},transfer);});
+  }
+  /* GIFs are decoded in the worker. Video frames have no alpha; only a video
+   * under the threshold in pixels is certain to need fewer controls. */
+  async function animationControls(file){
+    if(/\.gif$/i.test(file.name)||file.type==="image/gif"){const gif=await file.arrayBuffer();return countControls({gif,type:"image/gif"},[gif]);}
+    const video=document.createElement("video"),url=URL.createObjectURL(file);
+    try{
+      video.muted=true;video.preload="metadata";video.src=url;await new Promise((resolve,reject)=>{video.onloadedmetadata=resolve;video.onerror=reject;});
+      const pixels=video.videoWidth*video.videoHeight;return pixels<PixelPerfect.THRESHOLD?pixels:Infinity;
+    }finally{URL.revokeObjectURL(url);video.removeAttribute("src");video.load();}
+  }
+  $("fitMethod").addEventListener("change",()=>{
+    autoPixelFrom=null;methodChosen=true;
+    saveMethodSettings();
+    if(animationInputActive)animationMethod=$("fitMethod").value;
+    loadMethodSettings();syncShapeLabels();updateSubtitle();
+  });
   fillShapeInputs.forEach(input=>input.addEventListener("change",syncShapeLabels));
   $("primevalSpeed").addEventListener("change",syncShapeLabels);
   $("focusDetail").addEventListener("change",syncFocusButtons);
@@ -520,11 +590,15 @@
   function updateUploadReady() {
     const sourceFile=pendingFiles.find(entry=>AnimationUI.isFile(entry.file))?.file??null;
     const animated=!!sourceFile;
-    if(animated!==animationInputActive){if(animated){stillPrimitiveCount=numPrimsManual.value;numPrimsManual.value=animationPrimitiveCount;}else{animationPrimitiveCount=numPrimsManual.value;numPrimsManual.value=stillPrimitiveCount;}animationInputActive=animated;numPrimsManual.dispatchEvent(new Event('input'));}
+    // Entering GIF/video selects the last animation method (Splat at first);
+    // leaving it (e.g. after Start clears the list) keeps the chosen method.
+    if(animated!==animationInputActive){saveMethodSettings();if(animated)$("fitMethod").value=animationMethod;animationInputActive=animated;loadMethodSettings();}
     animationSource.update(sourceFile);$("animationSettings").hidden=!animated;
     const onlyAnimation=pendingFiles.length>0&&pendingFiles.every(entry=>AnimationUI.isFile(entry.file));
-    if(pendingFiles.some(entry=>AnimationUI.isFile(entry.file))&&($("fitMethod").value!=="primeval"||currentMode!=="fill")){setMode("fill");$("fitMethod").value="primeval";syncShapeLabels();}
-    $("fitMethod").disabled=pendingFiles.some(entry=>AnimationUI.isFile(entry.file));
+    if(animated&&currentMode!=="fill")setMode("fill");
+    if(animated&&!ANIMATION_METHODS.includes($("fitMethod").value)){saveMethodSettings();$("fitMethod").value=animationMethod="splat";loadMethodSettings();}
+    for(const option of $("fitMethod").options)option.disabled=animated&&!ANIMATION_METHODS.includes(option.value);
+    syncShapeLabels();
     $("fillShapeSection").closest("section").hidden=false;
     for(const id of ["fillShapeSection","fillParams"])$(id).hidden=currentMode!=="fill";
     for(const id of ["primitiveListSection","outlineParams"])$(id).hidden=onlyAnimation||currentMode!=="outline";
@@ -586,14 +660,20 @@
   }
 
   function addFiles(files) {
+    if(!pendingFiles.length)methodChosen=false;
     for (const file of files) {
       if (!file || (!file.type.startsWith("image/")&&!AnimationUI.isFile(file))) continue;
       const entry = { file, url: AnimationUI.isFile(file)&&!(/\.gif$/i.test(file.name)||file.type==='image/gif')?AnimationUI.poster:URL.createObjectURL(file), focus: { enabled: true, automatic: true, areas: [] } };
       pendingFiles.push(entry);
-      if(AnimationUI.isFile(file))continue;
+      if(AnimationUI.isFile(file)){
+        animationControls(file).catch(()=>Infinity).then(count=>{entry.pixelControls=count;if(pendingFiles.includes(entry))autoPixelMethod();});
+        continue;
+      }
       decodeToRGBA(file).then(decoded => {
         entry.hasTransparency = hasTransparentPixels(decoded.data.data);
         if (!pendingFiles.includes(entry)) return;
+        const { width, height, data } = decoded.data, rgba = data.slice().buffer;
+        countControls({ rgba, width, height }, [rgba]).then(count => { entry.pixelControls = count; if (pendingFiles.includes(entry)) autoPixelMethod(); });
         $("enablePngMode").checked = pendingFiles.some(item => item.hasTransparency);
         syncBackgroundColor();
       }).catch(() => {}); // The queue reports decoding failures.
@@ -908,7 +988,8 @@
       if(method==="legacy" && $("enhancedMode").checked){
         cfg.guided_sampling=true;cfg.search_n=150;cfg.search_age=100;cfg.search_m=4;
       }
-      cfg.allowed_shapes=method==="gaussian"?["blurred_circle"]:method==="splat"?["splat"]:[shape];
+      cfg.allowed_shapes=method==="gaussian"?["blurred_circle"]:method==="splat"?["splat"]:method==="pixel"?["rect"]:[shape];
+      if(method==="pixel")cfg.output_alpha=1;
       if(method==="splat"){
         cfg.output_alpha=1;
         cfg.splat_iterations=Math.max(1,Math.round(Number($("splatIterations").value)||3000));
@@ -1175,8 +1256,9 @@
     }
 
     let workerFile = job.config.mode === "outline" ? "js/worker-outline.js?v=structure-priority-7" :
-      job.config.fit_method === "primeval" ? "js/worker-primeval.js?v=animation-default-1" :
-      job.config.fit_method === "splat" ? "js/worker-splat.js?v=4" :
+      job.config.fit_method === "primeval" ? "js/worker-primeval.js?v=animation-default-2" :
+      job.config.fit_method === "splat" ? "js/worker-splat.js?v=5" :
+      job.config.fit_method === "pixel" ? "js/worker-pixel.js?v=3" :
       job.config.fit_method === "compression" ? "js/worker-compress.js?v=3" :
       (job.config.allowed_shapes || []).includes("blurred_circle") ?
         "js/worker-gaussian.js?v=structure-priority-7" : "js/worker-fill.js?v=structure-priority-7";
@@ -1241,7 +1323,7 @@
 
   function startAnimationJob(job){
     if(!jobs.some(j=>j.id===selectedPreviewJobId&&j.status==='processing'))selectedPreviewJobId=job.id;
-    const worker=new Worker('js/worker-animation.js?v=animation-sequences-4');job.worker=worker;
+    const worker=new Worker('js/worker-animation.js?v=pixel-perfect-3');job.worker=worker;
     worker.onmessage=({data})=>{
       if(job.status!=="processing")return;
       if(data.type.startsWith('animation-frame')){animationGeneration.handle(job,data);scheduleProgressFlush();}
@@ -1372,7 +1454,9 @@
     const hasFinished=jobs.some(job=>["done","paused"].includes(job.status)&&job.result);
     $("btnDownloadAll").hidden = !hasFinished;
     $("batchLuaTemplateField").hidden = !hasFinished;
-    $("batchAnimationCompactField").hidden=!jobs.some(job=>["done","paused"].includes(job.status)&&job.result?.animation);
+    const finishedAnimations=jobs.filter(job=>["done","paused"].includes(job.status)&&job.result?.animation);
+    $("batchAnimationCompactField").hidden=!finishedAnimations.some(job=>!isPixelConfig(job.result.config));
+    $("batchAnimationLoadSpeedField").hidden=!finishedAnimations.some(job=>isPixelConfig(job.result.config));
     $("batchLuaBudgetNote").hidden = !jobs.some(job=>["done","paused"].includes(job.status)&&job.result&&!compressionLuaFits(job.result));
     if (!jobs.length) return;
     let totalProgress = 0;
@@ -1394,6 +1478,7 @@
     selectedPreviewJobId=job?.id||null;
     $('generationStatus').closest('section').hidden=!job;
     $('previewJobName').textContent=job?.name||'';
+    $('generationStatus').closest('section').classList.toggle('pixelated',isPixelConfig(job?.config));
     $('btnPausePreview').hidden=job?.status!=='processing';
     $('btnPausePreview').disabled=!canPauseJob(job);
     const display=animationGeneration.view(job)||job;animationGeneration.render(job);
@@ -1472,6 +1557,7 @@
 
       const thumb = document.createElement("img");
       thumb.className = "job-thumb";
+      thumb.classList.toggle("pixelated", isPixelConfig(job.config));
       thumb.src = job.thumbUrl;
       thumb.alt = "";
       card.appendChild(thumb);
@@ -1705,6 +1791,8 @@
   function isSplatData(data) {
     return !!data && !data.animation && (data.config?.engine === "splat-browser" || data.config?.fit_method === "splat");
   }
+  // Pixel-perfect bitmaps are scaled with hard pixel edges, never smoothed.
+  const isPixelConfig = (config) => config?.fit_method === "pixel" || config?.engine === "pixel-browser";
 
   function shapeDisplayName(type) {
     const normalized = normalizeType(type);
@@ -1896,7 +1984,10 @@
     const assets = ensureJobAssets(R.job);
     // The Original view swaps the on-screen canvas only; exports always draw the fitted shapes.
     const original = targetCtx === screenCtx && R.view === "original";
+    ctx.save();
+    ctx.imageSmoothingEnabled = !isPixelConfig(data.config);
     if ((original || (!thumbRendering && $("showImage").checked)) && assets.base) ctx.drawImage(assets.base, 0, 0, imageWidth, imageHeight);
+    ctx.restore();
     if (!original && !thumbRendering && $("showMask").checked && assets.mask) {
       ctx.save();
       ctx.globalAlpha = 0.22;
@@ -2193,7 +2284,10 @@
   function updateStats() {
     const data = R.data;
     const animated=!!data.animation, splat=isSplatData(data), luaOnly=animated||splat;
-    $("clientAnimationCompactField").hidden=!animated;
+    // Pixel-perfect animations are exact: Load speed replaces Compact.
+    const pixelAnimation=animated&&isPixelConfig(data.config);
+    $("clientAnimationCompactField").hidden=!animated||pixelAnimation;
+    $("clientAnimationLoadSpeedField").hidden=!pixelAnimation;
     $("animationLuaMethods").hidden=!animated;
     $("viewResult").classList.toggle("animation-result",animated);
     if(animated)$("showClientMask").checked=false;
@@ -2224,7 +2318,7 @@
       ? t(fillVariant === "png" ? "result.mode.fillPng" : "result.mode.fill")
       : t("result.mode.outline");
 
-    $("statMode").textContent = animated ? t("animation.title") : splat ? "Splat" : data.config?.engine === "primeval-browser" ? "Primeval" : data.config?.engine === "compression-browser" ? t("compression.name") : gaussianCount ? "GaussianImage" : modeText;
+    $("statMode").textContent = animated ? t("animation.title") : splat ? "Splat" : data.config?.engine === "pixel-browser" ? t("pixel.method") : data.config?.engine === "primeval-browser" ? "Primeval" : data.config?.engine === "compression-browser" ? t("compression.name") : gaussianCount ? "GaussianImage" : modeText;
     $("statTotal").textContent = String(elements.length);
     $("statEllipse").textContent = String(ellipseCount);
     $("statGaussian").textContent = String(gaussianCount);
@@ -2271,7 +2365,7 @@
     $("retrySectionOutline").hidden = isFill;
     if (isFill) {
       const allowed=cfg.allowed_shapes || ["triangle"];
-      $("retryFitMethod").value=allowed.includes("blurred_circle")?"gaussian":cfg.fit_method==="splat"?"splat":cfg.fit_method==="primeval"||cfg.fit_method==="compression"?"primeval":"legacy";
+      $("retryFitMethod").value=allowed.includes("blurred_circle")?"gaussian":cfg.fit_method==="splat"?"splat":cfg.fit_method==="pixel"?"pixel":cfg.fit_method==="primeval"||cfg.fit_method==="compression"?"primeval":"legacy";
       $("retryNumPrims").removeAttribute("max");$("retryNumPrims").min="1";
       $("retryNumPrims").value=cfg.num_primitives ?? 2000;
       $("retryImageScale").value=cfg.image_scale ?? 1;
@@ -2308,11 +2402,13 @@
   const retryShapeInputs = Array.from(document.querySelectorAll("#retryShapeChecks .shape-check input"));
   function syncRetryShapeLabels() {
     const method=$("retryFitMethod").value;
-    if(method!=="splat")orderFitShapes("retry", method);
-    $("retryShapeChecks").hidden=method==="gaussian"||method==="splat";
+    if(method!=="splat"&&method!=="pixel")orderFitShapes("retry", method);
+    $("retryShapeChecks").hidden=method==="gaussian"||method==="splat"||method==="pixel";
+    $("retryPixelHint").hidden=method!=="pixel";
+    $("retryNumPrims").closest(".config-row").hidden=method==="pixel";
     $("retrySplatHint").hidden=method!=="splat";
     $("retrySplatSettings").hidden=method!=="splat";
-    $("retryOutputAlphaRow").hidden=method==="splat";
+    $("retryOutputAlphaRow").hidden=method==="splat"||method==="pixel";
     $("retryGaussianSettings").hidden=method!=="gaussian";
     $("retryPrimevalSettings").hidden=method!=="primeval";
     $("retryMixedShapeHint").hidden=!(method==="primeval"&&$("retryShapeMixed").checked&&$("retryPrimevalSpeed").value!=="turbo");
@@ -2329,14 +2425,14 @@
     const method=$("retryFitMethod").value;
     if(method==="primeval"&&!$("retryPrimevalResolution").reportValidity())return;
     if(method==="splat"&&!($("retrySplatIterations").reportValidity()&&$("retrySplatResolution").reportValidity()))return;
-    const shapes=method==="gaussian"?["blurred_circle"]:method==="splat"?["splat"]:[selectedFitShape("retry")];
+    const shapes=method==="gaussian"?["blurred_circle"]:method==="splat"?["splat"]:method==="pixel"?["rect"]:[selectedFitShape("retry")];
     const previousFocus=R.job.config.focus||{automatic:true,areas:[]};
     const turbo=method==="primeval"&&$("retryPrimevalSpeed").value==="turbo";
     retryJob(R.job,{
       focus:{enabled:turbo&&$("retryFocusDetail").checked,automatic:previousFocus.automatic!==false,areas:(previousFocus.areas||[]).map(area=>area.slice())},
       fit_method:method,num_primitives:Number($("retryNumPrims").value),allowed_shapes:shapes,
       image_scale:Number($("retryImageScale").value)||1,
-      output_alpha:method==="splat"?1:Math.max(0,Math.min(100,Number($("retryOutputAlpha").value)))/100,
+      output_alpha:method==="splat"||method==="pixel"?1:Math.max(0,Math.min(100,Number($("retryOutputAlpha").value)))/100,
       splat_iterations:Math.max(1,Math.round(Number($("retrySplatIterations").value)||3000)),
       splat_resolution:Math.max(32,Math.round(Number($("retrySplatResolution").value)||512)),splat_seed:0,
       primeval_turbo:method==="primeval"&&$("retryPrimevalSpeed").value==="turbo",
@@ -3236,6 +3332,11 @@
     getImage:async()=>{
       if(!R)return null;
       const job=R.job,width=R.data.image_size.width/R.ppu,height=R.data.image_size.height/R.ppu;
+      // Splat has no SVG output; show the editor's cached raster instead.
+      if(R.data.elements.some(SplatCore.isSplat)){
+        const png=await new Promise(resolve=>currentSplatRaster(R.data).toBlob(resolve,'image/png'));
+        return R?.job===job&&png?{width,height,png,job}:null;
+      }
       let svg=buildSvgExportText();
       if(nativeEditable()&&job.primevalEdited){await ensureNativeEdit(job,R.data);svg=job.nativeEditSvg;}
       if(R?.job!==job)return null;
@@ -3540,13 +3641,18 @@
   /* Client Lua export: one self-contained script — PrimitiveImage runtime
    * library + the Export JSON payload as a data table (port of the community
    * primitive_shaper_to_lua.py converter) + OnStart/OnDestroy hooks. */
+  /* Lua options for an animation: Pixel-perfect sets LOAD_SPEED, others may be Compact. */
+  function animationLuaOptions(data,compactInput,speedInput){
+    return isPixelConfig(data.config)?{loadSpeed:Number(speedInput.value)}:{compact:compactInput.checked};
+  }
   async function exportClientLua() {
     if (!R) return;
+    if(R.data.animation&&isPixelConfig(R.data.config)&&!$("clientAnimationLoadSpeed").reportValidity())return;
     const imageTemplateIndex = LuaExport.parseTemplateIndex($("clientLuaTemplateIndex").value);
     if(imageTemplateIndex===null)return;
     const name=currentExportBaseName();$("btnExportClientLua").disabled=true;
     try {
-      const text = isSplatData(R.data) ? SplatExport.buildLuaScript(buildJsonExportPayload(), { imageTemplateIndex }) : R.data.animation ? await AnimationLua.buildAsync(R.data.animation,{imageTemplateIndex,compact:$("clientAnimationCompact").checked,width:ScreenSizing.width(R.job.screenSizing,R.data.image_size.width/R.ppu)}) : LuaExport.buildStandaloneLuaScript(buildJsonExportPayload(), { imageTemplateIndex });
+      const text = isSplatData(R.data) ? SplatExport.buildLuaScript(buildJsonExportPayload(), { imageTemplateIndex }) : R.data.animation ? await AnimationLua.buildAsync(R.data.animation,{imageTemplateIndex,...animationLuaOptions(R.data,$("clientAnimationCompact"),$("clientAnimationLoadSpeed")),width:ScreenSizing.width(R.job.screenSizing,R.data.image_size.width/R.ppu)}) : LuaExport.buildStandaloneLuaScript(buildJsonExportPayload(), { imageTemplateIndex });
       downloadBlob(new Blob([text], { type: "text/x-lua" }), `${name}_client.lua`);
     } catch (error) {
       alert(t("result.export.gia.clientFailed", {
@@ -3861,6 +3967,7 @@
 
   $("btnDownloadAll").addEventListener("click", async () => {
     if($("btnDownloadAll").disabled)return;
+    if(!$("batchAnimationLoadSpeedField").hidden&&!$("batchAnimationLoadSpeed").reportValidity())return;
     const doneJobs = jobs.filter((job) => ["done","paused"].includes(job.status) && job.result);
     if (!doneJobs.length) {
       alert(t("batch.downloadAllNothing"));
@@ -3883,7 +3990,7 @@
       const encoder = new TextEncoder();
       for (const job of doneJobs) {
         const data = job.result;
-        if(data.animation){files.push({name:uniqueName(`${job.baseName}_client`,"lua"),data:encoder.encode(await AnimationLua.buildAsync(data.animation,{imageTemplateIndex,compact:$("batchAnimationCompact").checked,width:ScreenSizing.width(job.screenSizing,data.image_size.width/((data.config&&data.config.pixel_per_unit)||1))}))});continue;}
+        if(data.animation){files.push({name:uniqueName(`${job.baseName}_client`,"lua"),data:encoder.encode(await AnimationLua.buildAsync(data.animation,{imageTemplateIndex,...animationLuaOptions(data,$("batchAnimationCompact"),$("batchAnimationLoadSpeed")),width:ScreenSizing.width(job.screenSizing,data.image_size.width/((data.config&&data.config.pixel_per_unit)||1))}))});continue;}
         if(isSplatData(data)){
           // Splat results: JSON (with mw_splat's fields) and the Lua script only.
           const unit=(data.config&&data.config.pixel_per_unit)||1;

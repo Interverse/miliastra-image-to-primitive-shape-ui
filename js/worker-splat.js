@@ -3,12 +3,14 @@
  * You can obtain one at https://mozilla.org/MPL/2.0/ (also LICENSES/mw_splat-MPL-2.0.txt).
  * Based on mw_splat by Golden_Water, commit 8c3951a. */
 /* Splat fitting worker. Port of mw_splat (MPL-2.0); see splat-core.js.
- * Each fitting step is split into horizontal bands handled by helper
- * workers; with cross-origin isolation they share memory, otherwise the
- * parameters and gradients are copied. One thread runs everything inline. */
+ * WebGPU runs upstream's tiled GPU passes (splat-gpu.js) when available.
+ * Otherwise each fitting step is split into horizontal bands handled by
+ * helper workers; with cross-origin isolation they share memory, otherwise
+ * the parameters and gradients are copied. One thread runs everything inline. */
 "use strict";
-if (typeof importScripts === "function") importScripts("splat-core.js?v=3");
+if (typeof importScripts === "function") importScripts("splat-core.js?v=4", "splat-gpu.js?v=1");
 const Core = typeof SplatCore !== "undefined" ? SplatCore : require("./splat-core.js");
+const Gpu = typeof SplatGpu !== "undefined" ? SplatGpu : null;
 
 const DEFAULT_ITERATIONS = 3000, DEFAULT_RESOLUTION = 512, REDISTRIBUTE_EVERY = 200;
 
@@ -34,6 +36,7 @@ function buildResult(params, count, background, fw, fh, width, height, config, t
       num_primitives: count, enable_png_mode: transparent, output_has_transparency: transparent,
       fill_variant: transparent ? "png" : "mask",
       splat_iterations: extra.iterations, splat_resolution: extra.resolution,
+      ...(extra.backend ? { splat_backend: extra.backend } : {}),
       splat_redistribute: REDISTRIBUTE_EVERY, splat_ramp_cap: Core.RAMP_CAP, splat_reference_height: Core.REF_HEIGHT,
       training_size: { width: fw, height: fh },
       ...(extra.finalLoss !== undefined ? { final_loss: extra.finalLoss } : {}),
@@ -47,7 +50,7 @@ function buildResult(params, count, background, fw, fh, width, height, config, t
 let bandSource = null;
 async function bandUrl() {
   if (!bandSource) {
-    const [core, band] = await Promise.all(["splat-core.js?v=3", "worker-splat-band.js?v=4"].map(async (path) => {
+    const [core, band] = await Promise.all(["splat-core.js?v=4", "worker-splat-band.js?v=4"].map(async (path) => {
       const response = await fetch(path);
       if (!response.ok) throw new Error("Could not load " + path);
       return response.text();
@@ -128,26 +131,44 @@ async function processSplat(rgba, width, height, config = {}, hooks = {}) {
   const target = Core.downsample(full, width, height, fw, fh);
   if (hooks.progress) hooks.progress(0, iterations, "init");
   const init = Core.initialize(target, fw, fh, count, seed);
-  const fitter = Core.createFitter(target, fw, fh, init.params, init.background);
-  const pool = await createPool(target, fw, fh, init.background, fitter.cap, count, Math.floor(Number(config.splat_threads) || 1));
-  const meta = { iterations, resolution };
-  let finished;
+  // WebGPU first (several times faster); resource limits fail explicitly,
+  // other GPU failures fall back to the CPU bands.
+  let fitter = null;
+  if (Gpu && config.splat_backend !== "cpu") {
+    try { fitter = await Gpu.createFitter(target, fw, fh, init.params, init.background, { core: Core }); }
+    catch (error) {
+      if (/SPLAT_GPU_LIMIT/.test(error.message)) throw error;
+      console.warn("[splat] WebGPU unavailable, fitting on the CPU:", error.message || error);
+    }
+  }
+  const pool = fitter ? null : await createPool(target, fw, fh, init.background, Core.rampCap(fh), count, Math.floor(Number(config.splat_threads) || 1));
+  if (!fitter) fitter = Core.createFitter(target, fw, fh, init.params, init.background);
+  const meta = { iterations, resolution, backend: fitter.backend || "cpu" };
+  const build = async () => {
+    if (fitter.sync) await fitter.sync();
+    return buildResult(fitter.params, count, fitter.background, fw, fh, width, height, config, transparent, meta);
+  };
+  let finished, finalLoss;
   try {
     finished = await fitter.run(iterations, 1, REDISTRIBUTE_EVERY, seed, {
       gradient: pool || undefined,
-      each: (iter) => {
+      each: async (iter) => {
         if (hooks.cancelled && hooks.cancelled()) return false;
         if (hooks.progress && (iter % 10 === 0 || iter === iterations)) hooks.progress(iter, iterations, "");
-        if (hooks.preview) hooks.preview(fitter, iter);
-        if (hooks.checkpoint) hooks.checkpoint(() => buildResult(fitter.params, count, fitter.background, fw, fh, width, height, config, transparent, meta), iter);
+        if (hooks.preview) await hooks.preview(fitter, iter);
+        if (hooks.checkpoint) await hooks.checkpoint(build, iter);
         return true;
       },
     });
+    if (finished) {
+      if (fitter.sync) await fitter.sync();
+      finalLoss = await fitter.loss();
+    }
   } finally {
     if (pool) pool.close();
+    if (fitter.destroy) fitter.destroy();
   }
   if (!finished) return null;
-  const finalLoss = fitter.loss();
   const result = buildResult(fitter.params, count, fitter.background, fw, fh, width, height, config, transparent, { ...meta, finalLoss });
   // Full-size preview drawn from the exported elements, so it matches the editor.
   const preview = Core.renderElements(result.elements, width, height, result.config.pixel_per_unit, 1).rgba;
@@ -164,20 +185,20 @@ if (typeof self !== "undefined" && typeof importScripts === "function") {
     try {
       const result = await processSplat(new Uint8ClampedArray(msg.rgba), msg.width, msg.height, msg.config, {
         progress: (step, all, phase) => postMessage({ type: "progress", jobId: msg.jobId, step, total: all, phase }),
-        preview: (fitter, iter) => {
+        preview: async (fitter, iter) => {
           const now = Date.now();
           if (now - lastPreview < 600 && iter !== 1) return;
           lastPreview = now;
-          const rgba = Core.toRGBA8(fitter.render(), fitter.width, fitter.height);
+          const rgba = Core.toRGBA8(await fitter.render(), fitter.width, fitter.height);
           postMessage({ type: "progress", jobId: msg.jobId, step: iter, total, previewOnly: true,
             previewRGBA: rgba.buffer, previewWidth: fitter.width, previewHeight: fitter.height }, [rgba.buffer]);
         },
         // Pause & save keeps the last checkpoint; send one every few seconds.
-        checkpoint: (build, iter) => {
+        checkpoint: async (build, iter) => {
           const now = Date.now();
           if (iter > 1 && now - lastCheckpoint < 3000) return;
           lastCheckpoint = now;
-          postMessage({ type: "progress", jobId: msg.jobId, step: iter, total, previewOnly: true, checkpoint: build() });
+          postMessage({ type: "progress", jobId: msg.jobId, step: iter, total, previewOnly: true, checkpoint: await build() });
         },
       });
       if (!result) postMessage({ type: "cancelled", jobId: msg.jobId });

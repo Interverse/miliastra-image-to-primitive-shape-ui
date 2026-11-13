@@ -9,8 +9,11 @@ PNG, SVG, CSS, JSON, Lua and GIA. Images are processed locally.
   PNG mode fits source alpha and exports independent transparent shapes.
   Optimization: Fastest, Fast (default), Maximum Detail. Fast matches Maximum
   Detail; Fastest restores the earlier reduced-effort algorithm.
-- **Splat:** soft-edged rectangles, ported from mw_splat. Exports JSON and a
-  Lua script only. See [Splat](docs/development/splat.md).
+- **Splat:** soft-edged rectangles, ported from mw_splat (WebGPU, CPU fallback).
+  Exports JSON and a Lua script only; also the default for GIF/video.
+  See [Splat](docs/development/splat.md).
+- **Pixel-perfect:** an exact copy with layered rectangles; chosen automatically
+  when the copy needs under 1,000 controls. See [Pixel-perfect](docs/development/pixel-perfect.md).
 - **Gaussian:** blurred circles using the existing Gaussian fitters.
 - **Legacy:** the original browser fitter, with one selected solid shape family.
 
