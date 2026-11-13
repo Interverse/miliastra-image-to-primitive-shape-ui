@@ -35,6 +35,8 @@ build. Serve the root over HTTP, usually port 8321. GitHub Pages uses
 5. Primeval supports single-family modes and Mixed (ellipse/rectangle/triangle).
    Legacy allows exactly one solid shape family. Gaussian uses only
    blurred circles. Circle in Primeval means benchmark rotated ellipses.
+   Splat (mw_splat port, MPL-2.0) uses only soft rectangles and exports only
+   JSON and Lua; see `docs/development/splat.md`.
 6. Preserve the pinned fitting output and single-asset triangle constraint.
    Do not fake transparency or quality by reapplying source alpha after fitting.
 7. Preserve runtime dependencies, game assets and redistribution licenses.

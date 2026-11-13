@@ -223,12 +223,15 @@
   buildExperiments("");buildExperiments("retry");
 
   function syncShapeLabels() {
-    const method=$("fitMethod").value, gaussian=method==="gaussian", primeval=method==="primeval";
-    orderFitShapes("", method);
+    const method=$("fitMethod").value, gaussian=method==="gaussian", primeval=method==="primeval", splat=method==="splat";
+    if(!splat)orderFitShapes("", method);
     fillShapeInputs.forEach(input=>input.closest(".shape-check").classList.toggle("active",input.checked));
-    $("legacyShapeChecks").hidden=gaussian;
+    $("legacyShapeChecks").hidden=gaussian||splat;
     $("primevalSettings").hidden=!primeval;
     $("gaussianHint").hidden=!gaussian;
+    $("splatHint").hidden=!splat;
+    $("splatSettings").hidden=!splat;
+    $("outputAlphaSettings").hidden=splat;
     $("shapeHint").hidden=method!=="legacy";
     $("mixedShapeHint").hidden=!(primeval&&$("shapeMixed").checked&&$("primevalSpeed").value!=="turbo");
     $("focusSettings").hidden=!(primeval&&$("primevalSpeed").value==="turbo");
@@ -238,7 +241,8 @@
     $("gaussianSettings").hidden=!gaussian;
     $("enhancedMode").disabled=method!=="legacy";
     $("enhancedSettings").hidden=method!=="legacy";
-    $("pngModeSettings").hidden=false;
+    // Splat handles transparency on its own, like mw_splat.
+    $("pngModeSettings").hidden=splat;
     syncBackgroundColor();
     $("numPrimsTitle").textContent=t("fillParams.numPrims");
     numPrimsManual.removeAttribute("max");numPrimsManual.min="1";numPrimsSlider.min="1";
@@ -904,7 +908,13 @@
       if(method==="legacy" && $("enhancedMode").checked){
         cfg.guided_sampling=true;cfg.search_n=150;cfg.search_age=100;cfg.search_m=4;
       }
-      cfg.allowed_shapes=method==="gaussian"?["blurred_circle"]:[shape];
+      cfg.allowed_shapes=method==="gaussian"?["blurred_circle"]:method==="splat"?["splat"]:[shape];
+      if(method==="splat"){
+        cfg.output_alpha=1;
+        cfg.splat_iterations=Math.max(1,Math.round(Number($("splatIterations").value)||3000));
+        cfg.splat_resolution=Math.max(32,Math.round(Number($("splatResolution").value)||512));
+        cfg.splat_seed=0;
+      }
       if(method==="primeval"){
         cfg.primeval_turbo=$("primevalSpeed").value==="turbo";
         cfg.primeval_contour_smoothing=cfg.primeval_turbo?1:0;
@@ -1113,9 +1123,10 @@
   async function startJob(job) {
     job.status = "processing";
     job.startedAt=performance.now();
-    if(job.config.fit_method==='primeval'){
+    if(job.config.fit_method==='primeval'||job.config.fit_method==='splat'){
       const slots=Math.max(1,Math.min(MAX_CONCURRENT,runningCount()+jobs.filter(j=>j.status==='queued').length));
-      job.config.primeval_threads=Math.max(1,Math.min(16,Math.floor((navigator.hardwareConcurrency||1)/slots)));
+      const threads=Math.max(1,Math.min(16,Math.floor((navigator.hardwareConcurrency||1)/slots)));
+      if(job.config.fit_method==='primeval')job.config.primeval_threads=threads;else job.config.splat_threads=threads;
     }
     renderJobs();
     if(AnimationUI.isFile(job.file)){startAnimationJob(job);return;}
@@ -1165,6 +1176,7 @@
 
     let workerFile = job.config.mode === "outline" ? "js/worker-outline.js?v=structure-priority-7" :
       job.config.fit_method === "primeval" ? "js/worker-primeval.js?v=animation-default-1" :
+      job.config.fit_method === "splat" ? "js/worker-splat.js?v=4" :
       job.config.fit_method === "compression" ? "js/worker-compress.js?v=3" :
       (job.config.allowed_shapes || []).includes("blurred_circle") ?
         "js/worker-gaussian.js?v=structure-priority-7" : "js/worker-fill.js?v=structure-priority-7";
@@ -1295,6 +1307,7 @@
     if(pendingFiles.some(entry=>AnimationUI.isFile(entry.file))){const fps=Number($("animationFps").value);if(!Number.isSafeInteger(fps)||fps<0)$("animationFps").setCustomValidity(t('animation.fpsInvalid'));if(!$("animationFps").reportValidity())return;}
     if(currentMode==="fill"&&!validControlCount(numPrimsManual))return;
     if(currentMode==="fill"&&$("fitMethod").value==="primeval"&&!$("primevalResolution").reportValidity())return;
+    if(currentMode==="fill"&&$("fitMethod").value==="splat"&&!($("splatIterations").reportValidity()&&$("splatResolution").reportValidity()))return;
     for (const entry of pendingFiles) {
       jobs.push(createJob(entry.file, entry.url, captureConfig(entry.file, entry)));
     }
@@ -1688,11 +1701,17 @@
     return type;
   }
 
+  // Splat results (also when reopened from their JSON) export only JSON and Lua.
+  function isSplatData(data) {
+    return !!data && !data.animation && (data.config?.engine === "splat-browser" || data.config?.fit_method === "splat");
+  }
+
   function shapeDisplayName(type) {
     const normalized = normalizeType(type);
     if (normalized === "ellipse") return t("result.shape.ellipse");
     if (normalized === "rectangle") return t("result.shape.rectangle");
     if (normalized === "triangle") return t("result.shape.triangle");
+    if (normalized === "splat") return t("splat.shape");
     return normalized || t("result.shape.unknown");
   }
 
@@ -1773,9 +1792,25 @@
       ctx.closePath();
       return;
     }
-    const width = (element.size.width || 0) * R.ppu;
-    const height = (element.size.height || 0) * R.ppu;
+    // Splats are stretched by their own X/Y scale on top of their size.
+    const sx = type === "splat" ? Number(element.scale?.x ?? 1) : 1, sy = type === "splat" ? Number(element.scale?.y ?? 1) : 1;
+    const width = (element.size.width || 0) * R.ppu * sx;
+    const height = (element.size.height || 0) * R.ppu * sy;
     ctx.rect(-width / 2, -height / 2, width, height);
+  }
+
+  /* Splat results are drawn from one cached raster (see splat-preview.js) that
+   * is rebuilt only when the shapes change, so panning and zooming stay fast
+   * with thousands of splats. */
+  const splatRaster = { job: null, signature: null, canvas: null };
+  function currentSplatRaster(data) {
+    const signature = SplatPreview.signature(data.elements);
+    if (splatRaster.job !== R.job || splatRaster.signature !== signature || !splatRaster.canvas) {
+      splatRaster.canvas = SplatPreview.draw(data.elements, data.image_size.width, data.image_size.height, R.ppu, splatRaster.job === R.job ? splatRaster.canvas : null);
+      splatRaster.job = R.job;
+      splatRaster.signature = signature;
+    }
+    return splatRaster.canvas;
   }
 
   // True while drawScene renders the clean "Fitted result" thumbnail.
@@ -1799,6 +1834,7 @@
       else if (highlighted) ctx.fillStyle = "rgba(59, 130, 246, 0.28)";
       else ctx.fillStyle = cssColor(element.color, fillAlpha);
       if (Gaussian.isGaussian(element) && !selected && !highlighted) Gaussian.draw(ctx, element, R.ppu);
+      else if (element.type === "splat" && !selected && !highlighted) { /* painted by the cached splat raster */ }
       else ctx.fill();
     }
     if (!thumbRendering && $("showBorder").checked) {
@@ -1894,6 +1930,43 @@
     if (!original && data.animation) {
       // Draw the current Primeval frame using the same renderer as still images.
       if (thumbRendering || $("showFill").checked) AnimationUI.paint(R, ctx);
+    } else if (!original && isSplatData(data)) {
+      if (thumbRendering || $("showFill").checked) {
+        ctx.save();
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(currentSplatRaster(data), 0, 0, imageWidth, imageHeight);
+        ctx.restore();
+      }
+      // Only outlines are drawn as vectors. Border on strokes every splat as
+      // one path (a single draw call, so thousands stay smooth); hovered and
+      // selected splats are then drawn on top as usual.
+      if (!thumbRendering) {
+        if ($("showBorder").checked) {
+          ctx.save();
+          ctx.beginPath();
+          for (const element of data.elements) {
+            if (isBackgroundElement(element) || element.type !== "splat") continue;
+            const c = imagePointToElementCenter(element), a = elementRotationRad(element), cos = Math.cos(a), sin = Math.sin(a);
+            const w = (element.size.width || 0) * R.ppu * Number(element.scale?.x ?? 1) / 2;
+            const h = (element.size.height || 0) * R.ppu * Number(element.scale?.y ?? 1) / 2;
+            ctx.moveTo(c.x - w * cos + h * sin, c.y - w * sin - h * cos);
+            ctx.lineTo(c.x + w * cos + h * sin, c.y + w * sin - h * cos);
+            ctx.lineTo(c.x + w * cos - h * sin, c.y + w * sin + h * cos);
+            ctx.lineTo(c.x - w * cos - h * sin, c.y - w * sin + h * cos);
+            ctx.closePath();
+          }
+          ctx.strokeStyle = "rgba(56, 189, 248, 0.35)";
+          ctx.lineWidth = 1 / R.scale;
+          ctx.stroke();
+          ctx.restore();
+        }
+        const marked = new Set([R.hovered, R.selected, ...R.selectedSet]);
+        for (const index of marked) {
+          const element = index === null || index === undefined ? null : data.elements[index];
+          if (element && !isBackgroundElement(element)) drawElement(element, index);
+        }
+      }
     } else if (!original) {
       const elementIndices = new Map();
       data.elements.forEach((element,index)=>{if(!elementIndices.has(element))elementIndices.set(element,index);});
@@ -2005,8 +2078,9 @@
       }
       return crosses.every((v) => v >= 0) || crosses.every((v) => v <= 0);
     }
-    const width = (element.size.width || 0) * R.ppu;
-    const height = (element.size.height || 0) * R.ppu;
+    const splat = type === "splat";
+    const width = (element.size.width || 0) * R.ppu * (splat ? Number(element.scale?.x ?? 1) : 1);
+    const height = (element.size.height || 0) * R.ppu * (splat ? Number(element.scale?.y ?? 1) : 1);
     return Math.abs(dx) <= width / 2 && Math.abs(dy) <= height / 2;
   }
 
@@ -2118,35 +2192,39 @@
   });
   function updateStats() {
     const data = R.data;
-    const animated=!!data.animation;
+    const animated=!!data.animation, splat=isSplatData(data), luaOnly=animated||splat;
     $("clientAnimationCompactField").hidden=!animated;
     $("animationLuaMethods").hidden=!animated;
     $("viewResult").classList.toggle("animation-result",animated);
     if(animated)$("showClientMask").checked=false;
-    $("exportFileName").parentElement.querySelector(".hint").hidden=animated;
+    $("exportFileName").parentElement.querySelector(".hint").hidden=luaOnly;
     $("btnExportJSON").parentElement.hidden=false;$("btnCopyJSON").hidden=animated;$("btnExportFramesJSON").hidden=!animated;
     const jsonLabel=animated?"animation.videoJSON":"result.export.json";$("btnExportJSON").dataset.i18n=jsonLabel;$("btnExportJSON").textContent=t(jsonLabel);
-    for(const id of ["btnExportCSS","btnCopyCSS"])$(id).parentElement.hidden=animated;
-    for(const id of ["btnExportSVG","btnExportPNG"])$(id).hidden=animated;
-    for(const group of document.querySelectorAll("#viewResult .gia-export-group")){const client=!!group.querySelector("#btnExportClientLua");group.hidden=animated&&!client;if(client){$("btnExportClientGIAOverlimit").hidden=animated;$("btnExportClientGIAClassic").hidden=animated;}}
+    for(const id of ["btnExportCSS","btnCopyCSS"])$(id).parentElement.hidden=luaOnly;
+    for(const id of ["btnExportSVG","btnExportPNG"])$(id).hidden=luaOnly;
+    for(const group of document.querySelectorAll("#viewResult .gia-export-group")){const client=!!group.querySelector("#btnExportClientLua");group.hidden=luaOnly&&!client;if(client){$("btnExportClientGIAOverlimit").hidden=luaOnly;$("btnExportClientGIAClassic").hidden=luaOnly;}}
+    $("splatExportNote").hidden=!splat;
     $("retrySectionFill").hidden=animated||R.job.config.mode==="outline";$("retrySectionOutline").hidden=animated||R.job.config.mode!=="outline";
-    $("btnCleanTransparency").closest("section").hidden=animated;
-    $("resultOriginSection").hidden=animated;$("exportAllFormatsNote").hidden=animated;
+    $("btnCleanTransparency").closest("section").hidden=luaOnly;
+    $("resultOriginSection").hidden=animated;$("exportAllFormatsNote").hidden=luaOnly;
     const clientGroup=$("btnExportClientLua").closest(".gia-export-group"),title=clientGroup.querySelector(".gia-export-group__title");
-    title.dataset.i18n=animated?"result.export.gia.clientLua":"result.export.gia.clientTitle";title.textContent=t(title.dataset.i18n);
-    clientGroup.querySelector(".gia-export-group__desc").hidden=animated;
+    title.dataset.i18n=luaOnly?"result.export.gia.clientLua":"result.export.gia.clientTitle";title.textContent=t(title.dataset.i18n);
+    clientGroup.querySelector(".gia-export-group__desc").hidden=luaOnly;
     const elements = visibleElements(data);
+    const splatCount = elements.filter((el) => el.type === "splat").length;
     const gaussianCount = elements.filter(Gaussian.isGaussian).length;
     const ellipseCount = elements.filter((el) => normalizeType(el.type) === "ellipse" && !Gaussian.isGaussian(el)).length;
     const triangleCount = elements.filter((el) => normalizeType(el.type) === "triangle").length;
-    const rectCount = elements.length - ellipseCount - triangleCount - gaussianCount;
+    const rectCount = elements.length - ellipseCount - triangleCount - gaussianCount - splatCount;
+    $("statSplatRow").hidden = !splatCount;
+    $("statSplat").textContent = String(splatCount);
     const mode = data.mode || "fill";
     const fillVariant = (data.config && data.config.fill_variant) || "mask";
     const modeText = mode === "fill"
       ? t(fillVariant === "png" ? "result.mode.fillPng" : "result.mode.fill")
       : t("result.mode.outline");
 
-    $("statMode").textContent = animated ? t("animation.title") : data.config?.engine === "primeval-browser" ? "Primeval" : data.config?.engine === "compression-browser" ? t("compression.name") : gaussianCount ? "GaussianImage" : modeText;
+    $("statMode").textContent = animated ? t("animation.title") : splat ? "Splat" : data.config?.engine === "primeval-browser" ? "Primeval" : data.config?.engine === "compression-browser" ? t("compression.name") : gaussianCount ? "GaussianImage" : modeText;
     $("statTotal").textContent = String(elements.length);
     $("statEllipse").textContent = String(ellipseCount);
     $("statGaussian").textContent = String(gaussianCount);
@@ -2193,7 +2271,7 @@
     $("retrySectionOutline").hidden = isFill;
     if (isFill) {
       const allowed=cfg.allowed_shapes || ["triangle"];
-      $("retryFitMethod").value=allowed.includes("blurred_circle")?"gaussian":cfg.fit_method==="primeval"||cfg.fit_method==="compression"?"primeval":"legacy";
+      $("retryFitMethod").value=allowed.includes("blurred_circle")?"gaussian":cfg.fit_method==="splat"?"splat":cfg.fit_method==="primeval"||cfg.fit_method==="compression"?"primeval":"legacy";
       $("retryNumPrims").removeAttribute("max");$("retryNumPrims").min="1";
       $("retryNumPrims").value=cfg.num_primitives ?? 2000;
       $("retryImageScale").value=cfg.image_scale ?? 1;
@@ -2207,6 +2285,8 @@
       $("retryGaussianAlgorithm").value=cfg.gaussian_algorithm || "gaussianimage";
       $("retryGaussianIterations").value=cfg.gaussian_iterations || 600;
       $("retryGaussianResolution").value=cfg.gaussian_resolution || 512;
+      $("retrySplatIterations").value=cfg.splat_iterations || 3000;
+      $("retrySplatResolution").value=cfg.splat_resolution || 512;
       syncRetryShapeLabels();
     } else {
       $("retryPrimSize").value = cfg.primitive_size != null ? cfg.primitive_size : 30;
@@ -2228,8 +2308,11 @@
   const retryShapeInputs = Array.from(document.querySelectorAll("#retryShapeChecks .shape-check input"));
   function syncRetryShapeLabels() {
     const method=$("retryFitMethod").value;
-    orderFitShapes("retry", method);
-    $("retryShapeChecks").hidden=method==="gaussian";
+    if(method!=="splat")orderFitShapes("retry", method);
+    $("retryShapeChecks").hidden=method==="gaussian"||method==="splat";
+    $("retrySplatHint").hidden=method!=="splat";
+    $("retrySplatSettings").hidden=method!=="splat";
+    $("retryOutputAlphaRow").hidden=method==="splat";
     $("retryGaussianSettings").hidden=method!=="gaussian";
     $("retryPrimevalSettings").hidden=method!=="primeval";
     $("retryMixedShapeHint").hidden=!(method==="primeval"&&$("retryShapeMixed").checked&&$("retryPrimevalSpeed").value!=="turbo");
@@ -2245,14 +2328,17 @@
     if(!R||!validControlCount($("retryNumPrims")))return;
     const method=$("retryFitMethod").value;
     if(method==="primeval"&&!$("retryPrimevalResolution").reportValidity())return;
-    const shapes=method==="gaussian"?["blurred_circle"]:[selectedFitShape("retry")];
+    if(method==="splat"&&!($("retrySplatIterations").reportValidity()&&$("retrySplatResolution").reportValidity()))return;
+    const shapes=method==="gaussian"?["blurred_circle"]:method==="splat"?["splat"]:[selectedFitShape("retry")];
     const previousFocus=R.job.config.focus||{automatic:true,areas:[]};
     const turbo=method==="primeval"&&$("retryPrimevalSpeed").value==="turbo";
     retryJob(R.job,{
       focus:{enabled:turbo&&$("retryFocusDetail").checked,automatic:previousFocus.automatic!==false,areas:(previousFocus.areas||[]).map(area=>area.slice())},
       fit_method:method,num_primitives:Number($("retryNumPrims").value),allowed_shapes:shapes,
       image_scale:Number($("retryImageScale").value)||1,
-      output_alpha:Math.max(0,Math.min(100,Number($("retryOutputAlpha").value)))/100,
+      output_alpha:method==="splat"?1:Math.max(0,Math.min(100,Number($("retryOutputAlpha").value)))/100,
+      splat_iterations:Math.max(1,Math.round(Number($("retrySplatIterations").value)||3000)),
+      splat_resolution:Math.max(32,Math.round(Number($("retrySplatResolution").value)||512)),splat_seed:0,
       primeval_turbo:method==="primeval"&&$("retryPrimevalSpeed").value==="turbo",
       primeval_speed:$("retryPrimevalSpeed").value==="turbo"?"fast":$("retryPrimevalSpeed").value,
       primeval_resolution:Number($("retryPrimevalResolution").value)||512,primeval_seed:42,
@@ -2357,7 +2443,8 @@
   function gizmoPoints(){
     if(!R||R.selected===null||R.selected<0||R.view==="original")return null;
     const el=R.data.elements[R.selected];if(!el||isBackgroundElement(el))return null;
-    const c=imagePointToElementCenter(el),a=elementRotationRad(el),actualW=(el.size.width||el.size.rx*2||1)*R.ppu/2,actualH=(el.size.height||el.size.ry*2||1)*R.ppu/2,w=Math.max(actualW,12/R.scale),h=Math.max(actualH,12/R.scale);
+    const splatX=el.type==='splat'?Number(el.scale?.x??1):1,splatY=el.type==='splat'?Number(el.scale?.y??1):1;
+    const c=imagePointToElementCenter(el),a=elementRotationRad(el),actualW=(el.size.width||el.size.rx*2||1)*R.ppu/2*splatX,actualH=(el.size.height||el.size.ry*2||1)*R.ppu/2*splatY,w=Math.max(actualW,12/R.scale),h=Math.max(actualH,12/R.scale);
     const point=(x,y)=>({x:c.x+x*Math.cos(a)-y*Math.sin(a),y:c.y+x*Math.sin(a)+y*Math.cos(a)});
     return {el,c,w,h,a,actualW,actualH,corners:[point(-w,-h),point(w,-h),point(w,h),point(-w,h)],edges:[point(0,-h),point(w,0),point(0,h),point(-w,0)],rotate:point(0,-h-28/R.scale)};
   }
@@ -2678,7 +2765,9 @@
   // Radius around the element centre that contains the whole shape (image px).
   function elementReach(element) {
     const size = element.size || {};
-    const w = size.width || (size.rx || 0) * 2, h = size.height || (size.ry || 0) * 2;
+    const splat = element.type === "splat";
+    const w = (size.width || (size.rx || 0) * 2) * (splat ? Number(element.scale?.x ?? 1) : 1);
+    const h = (size.height || (size.ry || 0) * 2) * (splat ? Number(element.scale?.y ?? 1) : 1);
     return Math.hypot(w, h) * R.ppu;
   }
 
@@ -2806,6 +2895,8 @@
     editPanelSyncing = true;
     const type = normalizeType(el.type);
     $("editShape").value=type;
+    // A splat cannot become another shape: its size and scale mean something else.
+    $("editShape").closest(".form-field").hidden=type==="splat";
     $("editX").value = Number(el.center.x).toFixed(2);
     $("editY").value = Number(el.center.y).toFixed(2);
     if (type === "ellipse") {
@@ -3098,12 +3189,13 @@
 
   function buildUnscaledJsonExportPayload(data=R.data,context=R,exportBaseName=currentExportBaseName()) {
     const originUnits = { x: context.origin.x / context.ppu, y: -context.origin.y / context.ppu };
+    const splatPayload = isSplatData(data);
     return {
       image_name: exportBaseName || null,
       group_name: exportBaseName || null,
       origin: originUnits,
       image_size: data.image_size,
-      config: data.config?.engine==="primeval-browser"||data.config?.partial?{...context.job.config,...data.config}:context.job.config || data.config,
+      config: data.config?.engine==="primeval-browser"||data.config?.engine==="splat-browser"||data.config?.partial?{...context.job.config,...data.config}:context.job.config || data.config,
       mask: data.mask || null,
       elements: renderOrderedElements(data).map((element, index) => ({
         id: element.id != null ? element.id : index,
@@ -3126,6 +3218,8 @@
         type_id: element.type_id,
         element_type_id: element.element_type_id,
         name: element.name,
+        // Splat results only: per-splat X/Y scale and the background flag.
+        ...(splatPayload ? { scale: element.scale, is_background: element.is_background || undefined } : {}),
       })),
     };
   }
@@ -3154,7 +3248,10 @@
     try {await screenSizing.open(R.job.screenSizing);}catch(error){alert(t('result.export.failed',{error:error.message}));}
   });
 
-  function buildJsonExportText() { return JSON.stringify(buildJsonExportPayload(), null, 2); }
+  function buildJsonExportText() {
+    const payload = buildJsonExportPayload();
+    return JSON.stringify(isSplatData(R.data) ? SplatExport.jsonPayload(payload) : payload, null, 2);
+  }
 
   function buildUnscaledCssExportText() {
     const data = R.data;
@@ -3346,7 +3443,7 @@
 
   /* Asset Group export — source-image rectangular mask enabled by default. */
   async function exportGia(classic) {
-    if (!R || R.data.animation) return;
+    if (!R || R.data.animation || isSplatData(R.data)) return;
     try {
       const templates = await loadTemplates();
       const jsonData = currentGiaJson();
@@ -3363,7 +3460,7 @@
   }
 
   async function exportServerGia(classic) {
-    if (!R || R.data.animation) return;
+    if (!R || R.data.animation || isSplatData(R.data)) return;
     try {
       const templates = await loadTemplates();
       let bytes = GIA.convertJsonToGiaBytes(currentGiaJson(), templates.server, GIA.MODE_SERVER_IMAGE);
@@ -3389,7 +3486,7 @@
   }
 
   async function exportClientGia(classic) {
-    if (!R || R.data.animation) return;
+    if (!R || R.data.animation || isSplatData(R.data)) return;
     try {
       const templates = await loadTemplates();
       const jsonData = currentGiaJson();
@@ -3449,7 +3546,7 @@
     if(imageTemplateIndex===null)return;
     const name=currentExportBaseName();$("btnExportClientLua").disabled=true;
     try {
-      const text = R.data.animation ? await AnimationLua.buildAsync(R.data.animation,{imageTemplateIndex,compact:$("clientAnimationCompact").checked,width:ScreenSizing.width(R.job.screenSizing,R.data.image_size.width/R.ppu)}) : LuaExport.buildStandaloneLuaScript(buildJsonExportPayload(), { imageTemplateIndex });
+      const text = isSplatData(R.data) ? SplatExport.buildLuaScript(buildJsonExportPayload(), { imageTemplateIndex }) : R.data.animation ? await AnimationLua.buildAsync(R.data.animation,{imageTemplateIndex,compact:$("clientAnimationCompact").checked,width:ScreenSizing.width(R.job.screenSizing,R.data.image_size.width/R.ppu)}) : LuaExport.buildStandaloneLuaScript(buildJsonExportPayload(), { imageTemplateIndex });
       downloadBlob(new Blob([text], { type: "text/x-lua" }), `${name}_client.lua`);
     } catch (error) {
       alert(t("result.export.gia.clientFailed", {
@@ -3682,7 +3779,7 @@
     }
   });
   $("btnExportCSS").addEventListener("click", () => {
-    if (!R || R.data.animation) return;
+    if (!R || R.data.animation || isSplatData(R.data)) return;
     try {
       downloadBlob(new Blob([buildCssExportText()], { type: "text/css" }), exportFileName("css"));
     } catch (error) {
@@ -3690,7 +3787,7 @@
     }
   });
   $("btnExportSVG").addEventListener("click", async () => {
-    if(R?.data.animation)return;
+    if(R?.data.animation||isSplatData(R?.data))return;
     if(nativeEditable()&&R.job.primevalEdited){try{await ensureNativeEdit(R.job,R.data);downloadBlob(new Blob([ScreenSizing.svg(R.job.nativeEditSvg,rasterExportScale())],{type:"image/svg+xml"}),exportFileName("svg"));}catch(error){alert(t("result.export.failed",{error:error.message}));}return;}
     if (!R) return;
     try {
@@ -3700,7 +3797,7 @@
     }
   });
   $("btnExportPNG").addEventListener("click", async () => {
-    if(R?.data.animation)return;
+    if(R?.data.animation||isSplatData(R?.data))return;
     if(R?.job.screenSizing){
       try {
         let svg=buildSvgExportText();
@@ -3744,7 +3841,7 @@
     }
   });
   $("btnCopyCSS").addEventListener("click", async () => {
-    if (!R || R.data.animation) return;
+    if (!R || R.data.animation || isSplatData(R.data)) return;
     try {
       await copyTextToClipboard(buildCssExportText());
       setTemporaryButtonState($("btnCopyCSS"), t("result.export.copied"), "is-success");
@@ -3771,7 +3868,7 @@
     }
     try {
       $("btnDownloadAll").disabled=true;
-      const templates = doneJobs.some(job=>!job.result.animation)?await loadTemplates():null;
+      const templates = doneJobs.some(job=>!job.result.animation&&!isSplatData(job.result))?await loadTemplates():null;
       // Optional: null keeps the TODO placeholder in every Lua script.
       const imageTemplateIndex = LuaExport.parseTemplateIndex($("batchLuaTemplateIndex").value);
       const files = [];
@@ -3787,6 +3884,15 @@
       for (const job of doneJobs) {
         const data = job.result;
         if(data.animation){files.push({name:uniqueName(`${job.baseName}_client`,"lua"),data:encoder.encode(await AnimationLua.buildAsync(data.animation,{imageTemplateIndex,compact:$("batchAnimationCompact").checked,width:ScreenSizing.width(job.screenSizing,data.image_size.width/((data.config&&data.config.pixel_per_unit)||1))}))});continue;}
+        if(isSplatData(data)){
+          // Splat results: JSON (with mw_splat's fields) and the Lua script only.
+          const unit=(data.config&&data.config.pixel_per_unit)||1;
+          const payload=ScreenSizing.payload({image_name:job.baseName,group_name:job.baseName,origin:{x:data.image_center.x/unit,y:-data.image_center.y/unit},
+            image_size:data.image_size,config:{...job.config,...data.config},mask:data.mask||null,elements:data.elements},exportScale(job));
+          files.push({name:uniqueName(job.baseName,"json"),data:encoder.encode(JSON.stringify(SplatExport.jsonPayload(payload),null,2))});
+          files.push({name:uniqueName(`${job.baseName}_client`,"lua"),data:encoder.encode(SplatExport.buildLuaScript(payload,{imageTemplateIndex}))});
+          continue;
+        }
         const origin = { x: data.image_center.x, y: data.image_center.y };
         const jsonData = ScreenSizing.payload(convertResultToGiaJson(data, job.config, job.baseName, origin.x, origin.y),exportScale(job));
         const giaBytes = GIA.convertJsonToGiaBytes(GiaExport.withAssetGroupMask(jsonData), templates.image, GIA.MODE_IMAGE);

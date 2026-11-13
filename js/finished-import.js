@@ -24,12 +24,13 @@ const FinishedImport=(()=>{
     const image_center={x:image_size.width/2,y:image_size.height/2};
     const offset=origin?{x:num(origin.x),y:num(origin.y)}:{x:image_center.x/ppu,y:-image_center.y/ppu};
     const normalized=elements.map((raw,i)=>{
-      if(!raw||!['ellipse','rectangle','triangle'].includes(type(raw.type)))fail('import.unsupported');
+      if(!raw||!['ellipse','rectangle','triangle','splat'].includes(type(raw.type)))fail('import.unsupported');
       const el=structuredClone(raw);el.type=type(el.type);el.id??=i;
       el.center=raw.center?{x:num(raw.center.x),y:num(raw.center.y)}:{x:num(raw.relative?.x)+offset.x,y:num(raw.relative?.y)+offset.y};
       el.relative={x:el.center.x-offset.x,y:el.center.y-offset.y};
       const keys=el.type==='ellipse'?['rx','ry']:['width','height'];
       if(!raw.size)fail();el.size={...raw.size};for(const k of keys){el.size[k]=num(raw.size[k]);if(el.size[k]<0)fail();}
+      if(el.type==='splat'){el.scale={x:num(raw.scale?.x,1),y:num(raw.scale?.y,1)};if(el.scale.x<=0||el.scale.y<=0)fail();}
       el.rotation=typeof raw.rotation==='object'?{x:num(raw.rotation.x,0),y:num(raw.rotation.y,0),z:num(raw.rotation.z,0)}:{x:0,y:0,z:num(raw.rotation,0)};
       if(raw.packed_color!=null){
         const packed=num(raw.packed_color);if(!Number.isInteger(packed)||packed<0||packed>4294967295)fail();
@@ -183,7 +184,11 @@ const FinishedImport=(()=>{
     const {width,height}=result.image_size,canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
     if(canvas.width!==width||canvas.height!==height)fail('import.render');const ctx=canvas.getContext('2d');if(!ctx)fail('import.render');
     const ppu=result.config.pixel_per_unit;if(!result.config.output_has_transparency){ctx.fillStyle='#fff';ctx.fillRect(0,0,width,height);}
-    for(const el of result.elements){ctx.save();ctx.translate(el.center.x*ppu,-el.center.y*ppu);ctx.rotate(-(el.rotation?.z||0)*Math.PI/180);ctx.fillStyle=el.color;ctx.globalAlpha=el.alpha;ctx.beginPath();
+    if(result.elements.some(SplatCore.isSplat)){
+      // Splat JSON: draw with the same kernel the fitter used.
+      const drawn=SplatCore.renderElements(result.elements,width,height,ppu,1),layer=document.createElement('canvas');layer.width=width;layer.height=height;
+      layer.getContext('2d').putImageData(new ImageData(drawn.rgba,width,height),0,0);ctx.drawImage(layer,0,0);
+    }else for(const el of result.elements){ctx.save();ctx.translate(el.center.x*ppu,-el.center.y*ppu);ctx.rotate(-(el.rotation?.z||0)*Math.PI/180);ctx.fillStyle=el.color;ctx.globalAlpha=el.alpha;ctx.beginPath();
       if(el.type==='ellipse'){if(Gaussian.isGaussian(el)){ctx.globalAlpha=1;Gaussian.draw(ctx,el,ppu);}else{ctx.ellipse(0,0,el.size.rx*ppu,el.size.ry*ppu,0,0,Math.PI*2);ctx.fill();}}
       else if(el.type==='triangle'){const w=el.size.width*ppu,h=el.size.height*ppu,shift=el.triangle_pivot==='box'?h/6:0;ctx.moveTo(0,-2*h/3+shift);ctx.lineTo(-w/2,h/3+shift);ctx.lineTo(w/2,h/3+shift);ctx.closePath();ctx.fill();}
       else {ctx.rect(-el.size.width*ppu/2,-el.size.height*ppu/2,el.size.width*ppu,el.size.height*ppu);ctx.fill();}ctx.restore();}

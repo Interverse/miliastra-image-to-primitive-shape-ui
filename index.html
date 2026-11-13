@@ -67,6 +67,7 @@
             <label for="fitMethod" data-i18n="compression.method">Method</label>
             <select id="fitMethod" class="num-input">
               <option value="primeval">Primeval</option>
+              <option value="splat">Splat</option>
               <option value="gaussian">Gaussian</option>
               <option value="legacy" data-i18n="fitting.legacy">Legacy</option>
             </select>
@@ -136,6 +137,17 @@
               <input type="number" id="gaussianResolution" value="512" min="32" step="1" class="num-input">
             </div>
           </div>
+          <p class="hint splat-hint" id="splatHint" hidden data-i18n="splat.hint">Uses soft-edged rectangles. Only a Lua script is made for the game, with no GIA files. You can also save the JSON.</p>
+          <div id="splatSettings" class="form-stack" hidden>
+            <div class="form-field">
+              <label for="splatIterations" data-i18n="fillParams.gaussianIterations">Fitting steps</label>
+              <input type="number" id="splatIterations" value="3000" min="1" step="1" required class="num-input">
+            </div>
+            <div class="form-field">
+              <label for="splatResolution" data-i18n="fillParams.gaussianResolution">Detail (px)</label>
+              <input type="number" id="splatResolution" value="512" min="32" max="2048" step="1" required class="num-input">
+            </div>
+          </div>
           <p class="hint" id="shapeHint" data-i18n="fitting.shapeHint"></p>
         </div>
 
@@ -179,7 +191,7 @@
             <input type="range" id="imageScale" min="0.2" max="4" step="0.1" value="1.0">
           </div>
 
-          <div class="param-item">
+          <div class="param-item" id="outputAlphaSettings">
             <div class="param-head">
               <span class="param-title" data-i18n="fillParams.outputAlpha">Opacity</span>
               <span id="outputAlphaVal" class="val-tag">100%</span>
@@ -345,6 +357,7 @@
       </section>
       <section class="panel-section">
         <h3 data-i18n="result.export.sectionTitle">Export</h3>
+        <p id="splatExportNote" class="hint" hidden data-i18n="splat.exportNote">Splat results can only be used in the game through the Lua script.</p>
         <button type="button" id="btnScreenSizing" class="btn-sm" data-i18n="screen.title">Screen size</button>
         <div class="export-name-field">
           <label for="exportFileName" data-i18n="result.export.fileName">Export file name</label>
@@ -544,6 +557,7 @@
           <tr><td data-i18n="result.stats.total">Total</td><td id="statTotal">—</td></tr>
           <tr><td data-i18n="result.stats.ellipse">Circles</td><td id="statEllipse">—</td></tr>
           <tr><td data-i18n="shapes.blurredCircle">Blurred radial circle</td><td id="statGaussian">—</td></tr>
+          <tr id="statSplatRow" hidden><td data-i18n="splat.stat">Soft rectangles</td><td id="statSplat">—</td></tr>
           <tr><td data-i18n="result.stats.rect">Rectangles</td><td id="statRect">—</td></tr>
           <tr><td data-i18n="result.stats.triangle">Triangles</td><td id="statTriangle">—</td></tr>
           <tr><td data-i18n="result.stats.imageSize">Image size</td><td id="statImgSize">—</td></tr>
@@ -555,7 +569,7 @@
         <div class="form-field">
           <label for="retryFitMethod" data-i18n="compression.method">Method</label>
           <select id="retryFitMethod" class="num-input">
-            <option value="primeval">Primeval</option><option value="gaussian">Gaussian</option><option value="legacy" data-i18n="fitting.legacy">Legacy</option>
+            <option value="primeval">Primeval</option><option value="splat">Splat</option><option value="gaussian">Gaussian</option><option value="legacy" data-i18n="fitting.legacy">Legacy</option>
           </select>
         </div>
         <div class="shape-checks" id="retryShapeChecks">
@@ -610,6 +624,17 @@
             <input type="number" id="retryGaussianResolution" value="512" min="32" step="1" class="num-input">
           </div>
         </div>
+        <p class="hint splat-hint" id="retrySplatHint" hidden data-i18n="splat.hint">Uses soft-edged rectangles. Only a Lua script is made for the game, with no GIA files. You can also save the JSON.</p>
+        <div id="retrySplatSettings" class="form-stack" hidden>
+          <div class="form-field">
+            <label for="retrySplatIterations" data-i18n="fillParams.gaussianIterations">Fitting steps</label>
+            <input type="number" id="retrySplatIterations" value="3000" min="1" step="1" required class="num-input">
+          </div>
+          <div class="form-field">
+            <label for="retrySplatResolution" data-i18n="fillParams.gaussianResolution">Detail (px)</label>
+            <input type="number" id="retrySplatResolution" value="512" min="32" max="2048" step="1" required class="num-input">
+          </div>
+        </div>
         <div class="config-row">
           <label data-i18n="fillParams.numPrims">Primitive count</label>
           <input type="number" id="retryNumPrims" min="1" step="1" required class="num-input">
@@ -618,7 +643,7 @@
           <label data-i18n="fillParams.imageScale">Image scale</label>
           <input type="number" id="retryImageScale" min="0.2" max="4" step="0.1" class="num-input">
         </div>
-        <div class="config-row">
+        <div class="config-row" id="retryOutputAlphaRow">
           <label data-i18n="fillParams.outputAlpha">Opacity</label>
           <input type="number" id="retryOutputAlpha" min="0" max="100" step="5" class="num-input">
         </div>
@@ -790,11 +815,15 @@
   <script src="js/locales/screen-sizing.js?v=3"></script>
   <script src="js/locales/import.js?v=animation-json-1"></script>
   <script src="js/locales/animation.js?v=animation-methods-1"></script>
+  <script src="js/locales/splat.js?v=1"></script>
   <script src="js/i18n.js?v=25"></script>
   <script src="js/zip.js?v=25"></script>
   <script src="js/gia.js?v=26"></script>
   <script src="js/gia-export.js?v=26"></script>
-  <script src="js/lua-export.js?v=packed-mask-1"></script>
+  <script src="js/lua-export.js?v=splat-1"></script>
+  <script src="js/splat-core.js?v=3"></script>
+  <script src="js/splat-export.js?v=1"></script>
+  <script src="js/splat-preview.js?v=2"></script>
   <script src="js/png-decode.js?v=24"></script>
   <script src="js/gaussian.js?v=25"></script>
   <script src="js/compression-quality.js?v=1"></script>
@@ -804,7 +833,7 @@
   <script src="js/gizmo-resize.js?v=1"></script>
   <script src="js/focus.js?v=2"></script>
   <script src="js/screen-sizing.js?v=3"></script>
-  <script src="js/finished-import.js?v=2"></script>
+  <script src="js/finished-import.js?v=splat-1"></script>
   <script src="js/animation-motion.js?v=5"></script>
   <script src="js/animation-core.js?v=6"></script>
   <script src="js/animation-json.js?v=1"></script>
@@ -814,6 +843,6 @@
   <script src="js/animation-lua.js?v=12"></script>
   <script src="js/animation-generation-ui.js?v=2"></script>
   <script src="js/animation-ui.js?v=11"></script>
-  <script src="js/app.js?v=animation-methods-1"></script>
+  <script src="js/app.js?v=splat-3"></script>
 </body>
 </html>
