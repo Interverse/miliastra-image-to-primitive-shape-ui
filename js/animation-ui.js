@@ -31,7 +31,7 @@ const AnimationUI=(()=>{
    $('animationSourcePlay').disabled=true;$('animationSourceStatus').textContent=I18N.t('animation.previewLoading');
    if(!Number.isSafeInteger(fps)||fps<0){$('animationSourceStatus').textContent=I18N.t('animation.fpsInvalid');return;}
    if(!(/\.gif$/i.test(file.name)||file.type==='image/gif')){streamVideo(current,fps);return;}
-   worker=new Worker('js/worker-animation.js?v=pixel-perfect-3');
+   worker=new Worker('js/worker-animation.js?v=splat-b4dd204');
    const fail=key=>{clear();$('animationSourcePlay').disabled=true;$('animationSourceStatus').textContent=I18N.t(key);};
    worker.onerror=()=>fail('animation.codec');worker.onmessage=({data})=>{
     if(current!==token){data.bitmap?.close();return;}

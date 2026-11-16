@@ -29,10 +29,42 @@ test("single opaque splat fills its core and fades out", () => {
   const p = new Float64Array([16, 16, 20, 10, 0, 1, 0, 0, 1, 1, 1]);
   const { pixels } = Core.render(p, 1, 32, 32, [0, 0, 0, 0], 4);
   const at = (x, y) => pixels[(y * 32 + x) * 4 + 3];
-  assert.ok(Math.abs(at(16, 16) - 1) < 1e-9, "centre opaque");
+  // Upstream samples the texture two texels (of 256) off centre, so the core
+  // is just below opaque and the ramp leans right and down.
+  assert.ok(Math.abs(at(16, 16) - Core.profile(1 - Core.TEXEL * Math.SQRT2)) < 1e-12, "core " + at(16, 16));
+  assert.ok(at(16, 16) > 0.99, "core nearly opaque");
   assert.ok(at(16, 11) > 0 && at(16, 11) < 1, "ramp is soft");
+  assert.ok(at(24, 16) > at(7, 16) && at(16, 19) > at(16, 12), "texel offset towards +x and +y (down)");
   assert.strictEqual(at(16, 2), 0, "outside is empty");
   assert.strictEqual(at(28, 16), 0, "outside x is empty");
+});
+
+test("redistribution puts moved splats on top in order", () => {
+  const W = 32, H = 32;
+  const target = Core.premultiply(image(W, H, (x, y) => [x * 8, y * 8, 60, 255]));
+  const p = new Float64Array(4 * Core.STRIDE);
+  for (let i = 0; i < 4; i++) p.set([6 + i * 6, 16, 8, 8, 0, 0.3, 0.3, 0.3, 1, 1, 1], i * Core.STRIDE);
+  p[Core.STRIDE] = -50; // splat 1 is off the canvas and must move
+  const f = Core.createFitter(target, W, H, p, [0, 0, 0, 1]);
+  const before = Array.from({ length: 4 }, (_, i) => p[i * Core.STRIDE]);
+  const moved = f.redistribute(4, 1, 5, 3);
+  assert.ok(moved >= 1, "a splat moved");
+  const xs = Array.from({ length: 4 }, (_, i) => f.params[i * Core.STRIDE]);
+  assert.ok(xs.every((x) => x >= 0 && x <= W), "no splat left off the canvas");
+  const kept = before.filter((x) => xs.includes(x));
+  assert.deepStrictEqual(xs.slice(0, kept.length), kept, "unmoved splats keep their order at the bottom");
+});
+
+test("refine phase anneals the learning rate to 0.1", async () => {
+  assert.strictEqual(Core.annealed(1, null, 5, 10), 1);
+  assert.strictEqual(Core.annealed(2, 0.1, 0, 100), 2);
+  assert.ok(Math.abs(Core.annealed(1, 0.1, 50, 100) - 0.55) < 1e-12);
+  const calls = [];
+  const fake = { run: async (iters, lr, every, seed, hooks) => { calls.push([iters, every, hooks.annealTo]); for (let i = 1; i <= iters; i++) hooks.each(i); return true; } };
+  const seen = [];
+  await Core.fit(fake, 7, 50, 0, { each: (i) => seen.push(i) });
+  assert.deepStrictEqual(calls, [[4, 50, null], [3, 0, 0.1]], "main then refine, steps split without loss");
+  assert.deepStrictEqual(seen, [1, 2, 3, 4, 5, 6, 7], "overall step numbers");
 });
 
 test("analytic gradients match finite differences", () => {
@@ -59,7 +91,7 @@ test("analytic gradients match finite differences", () => {
   const after = f.loss();
   assert.ok(after < before, `loss should drop: ${before} -> ${after}`);
   // Direct finite-difference check of one coordinate's sign via a probe step.
-  for (const index of [0, 1, 2, 3, 4, 9, 10, 13]) {
+  for (let index = 0; index < n * Core.STRIDE; index++) {
     const h = 1e-4, plus = base.slice(), minus = base.slice();
     plus[index] += h; minus[index] -= h;
     const numeric = (lossOf(plus) - lossOf(minus)) / (2 * h);

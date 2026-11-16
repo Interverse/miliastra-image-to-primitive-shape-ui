@@ -1,7 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at https://mozilla.org/MPL/2.0/ (also LICENSES/mw_splat-MPL-2.0.txt).
- * Based on mw_splat by Golden_Water, commit 8c3951a. */
+ * Based on mw_splat by Golden_Water, commit b4dd204. */
 /*
  * splat-preview.js — draws Splat results into a canvas for the editor.
  *
@@ -27,12 +27,14 @@ uniform float u_cap;
 out vec2 v_local;
 flat out vec2 v_core;
 flat out vec2 v_iramp;
+flat out vec2 v_extent;
 flat out vec4 v_color;
 void main() {
   vec2 ramp = min(a_half, vec2(u_cap)) * a_scale;
   vec2 extent = a_half * a_scale;
   v_core = extent - ramp;
   v_iramp = 1.0 / max(ramp, vec2(1e-6));
+  v_extent = extent;
   vec2 local = a_corner * (extent + 0.5);
   float c = cos(a_rot), s = sin(a_rot);
   vec2 world = a_center + vec2(c * local.x - s * local.y, s * local.x + c * local.y);
@@ -45,10 +47,13 @@ precision highp float;
 in vec2 v_local;
 flat in vec2 v_core;
 flat in vec2 v_iramp;
+flat in vec2 v_extent;
 flat in vec4 v_color;
 out vec4 o_color;
 void main() {
-  vec2 e = max(abs(v_local) - v_core, 0.0) * v_iramp;
+  // Zero outside the rectangle; sampled two texels (of 256) off centre.
+  if (any(greaterThan(abs(v_local), v_extent))) discard;
+  vec2 e = sign(v_local) * max(abs(v_local) - v_core, 0.0) * v_iramp - 0.0078125;
   float d = length(e);
   if (d >= 1.0) discard;
   float t = 1.0 - d;

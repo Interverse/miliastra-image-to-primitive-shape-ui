@@ -1257,7 +1257,7 @@
 
     let workerFile = job.config.mode === "outline" ? "js/worker-outline.js?v=structure-priority-7" :
       job.config.fit_method === "primeval" ? "js/worker-primeval.js?v=animation-default-2" :
-      job.config.fit_method === "splat" ? "js/worker-splat.js?v=5" :
+      job.config.fit_method === "splat" ? "js/worker-splat.js?v=6" :
       job.config.fit_method === "pixel" ? "js/worker-pixel.js?v=3" :
       job.config.fit_method === "compression" ? "js/worker-compress.js?v=3" :
       (job.config.allowed_shapes || []).includes("blurred_circle") ?
@@ -1323,7 +1323,7 @@
 
   function startAnimationJob(job){
     if(!jobs.some(j=>j.id===selectedPreviewJobId&&j.status==='processing'))selectedPreviewJobId=job.id;
-    const worker=new Worker('js/worker-animation.js?v=pixel-perfect-3');job.worker=worker;
+    const worker=new Worker('js/worker-animation.js?v=splat-b4dd204');job.worker=worker;
     worker.onmessage=({data})=>{
       if(job.status!=="processing")return;
       if(data.type.startsWith('animation-frame')){animationGeneration.handle(job,data);scheduleProgressFlush();}

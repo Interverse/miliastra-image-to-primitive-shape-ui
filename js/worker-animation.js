@@ -1,5 +1,5 @@
 "use strict";
-importScripts('animation-sequences.js?v=7','animation-motion.js?v=5','animation-fit-pool.js?v=3','animation-media.js?v=1','animation-progress.js?v=1','animation-core.js?v=7','worker-primeval.js?v=animation-detail-3','focus.js?v=2','splat-core.js?v=4','splat-gpu.js?v=1','pixel-perfect.js?v=3');
+importScripts('animation-sequences.js?v=7','animation-motion.js?v=5','animation-fit-pool.js?v=3','animation-media.js?v=1','animation-progress.js?v=1','animation-core.js?v=7','worker-primeval.js?v=animation-detail-3','focus.js?v=2','splat-core.js?v=5','splat-gpu.js?v=2','pixel-perfect.js?v=3');
 self.onmessage=async({data:msg})=>{
  if(!['process','preview'].includes(msg.cmd))return;
  const started=performance.now();let fitPool=null;
@@ -92,7 +92,7 @@ self.onmessage=async({data:msg})=>{
      // Live preview: the frame's current render about twice a second. Every
      // splat exists from the first step, so all shapes count as placed.
      let lastPreview=-Infinity;
-     await fitter.run(splatIterations,1,warm?0:200,splatSeed,{each:async i=>{
+     await SplatCore.fit(fitter,splatIterations,warm?0:SplatCore.REDISTRIBUTE_EVERY,splatSeed,{each:async i=>{
       if(i%25===0||i===splatIterations)self.postMessage({type:'progress',step:sourceIndex-1+i/splatIterations,total:expected||animation.frames.length+1,phase:'animation'});
       if(live&&i<splatIterations&&(i===1||performance.now()-lastPreview>=500)){
        lastPreview=performance.now();const rgba=SplatCore.toRGBA8(await fitter.render(),fw,fh);

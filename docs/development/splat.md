@@ -1,7 +1,7 @@
 # Splat
 
 Splat is a browser port of [mw_splat](https://github.com/BillGoldenWater/mw_splat)
-(MPL-2.0, commit 8c3951a). It fits an image with soft-edged rectangles and
+(MPL-2.0, commit b4dd204). It fits an image with soft-edged rectangles and
 exports only JSON and a client Lua script. There is no GIA, CSS, SVG or PNG
 output for this method.
 
@@ -23,20 +23,29 @@ output for this method.
 Each splat has a position, size, rotation, premultiplied colour and an X/Y
 scale. Its shape is a solid core with a soft ramp around it. The ramp is
 `min(size / 2, 64 × height / 900) × scale`, which matches the game stretching
-image 106057 with fixed-size soft corners on a 900-unit-tall canvas. Splats are
-drawn in order with normal "over" blending.
+image 106057 with fixed-size soft corners on a 900-unit-tall canvas. Like the
+game's texture, the kernel is sampled two texels (of 256) off centre: towards
++x and +y in the site's y-down frame (upstream: `vec2(1/256, -1/256)` twice,
+y up). The core is therefore about 0.995 opaque, and the kernel is zero outside
+the rectangle. Splats are drawn in order with normal "over" blending.
 
 The fitter follows upstream: blue-noise start, mean-shift background for opaque
-images, the black/white backdrop loss, Adam without bias correction, and the
-same learning rates. Splats are moved from low-loss to high-loss areas every
-200 steps. Unlike upstream, no move happens after the last step, so every
-splat is fitted before export.
+images, the black/white backdrop loss, Adam without bias correction (β1 0.5,
+β2 0.95) and the same learning rates. Fitting steps are split in half, as in
+upstream's default 2,000 + 2,000: the main phase moves splats from low-loss to
+high-loss areas every 50 steps, and the refine phase does not move splats and
+cosine-anneals the learning rate down to 0.1×. Moved splats go on top of the
+draw order (both groups keep their order) and restart with zero Adam moments.
+Unlike upstream, no move happens after the last main step, so every splat is
+fitted before export.
 
 With WebGPU, `splat-gpu.js` runs upstream's passes (tile binning, render,
-backward, Adam, redistribution) with three browser changes: immediates become
-uniform buffers, f32 atomics become a workgroup reduction plus
-compare-exchange, and loss weights sit after the reference so the backward pass
-stays within 8 storage buffers. Bin overflow follows upstream: skipped passes,
+backward, Adam, redistribution and its sort) with four browser changes:
+immediates become uniform buffers, f32 atomics become a workgroup reduction plus
+compare-exchange, the redistribution sort runs in one workgroup, and loss
+weights sit after the reference so the backward pass stays within 8 storage
+buffers. Upstream's fixed-point gradient mode (for GPUs without f32 atomics) is
+not used: the reduction already avoids f32 atomics. Bin overflow follows upstream: skipped passes,
 a doubled bin buffer and replayed iterations. Buffers larger than the device
 allows fail with `SPLAT_GPU_LIMIT`; other WebGPU failures fall back to the CPU.
 `config.splat_backend` records `webgpu` or `cpu`.
@@ -51,21 +60,32 @@ cannot start, the job runs on one thread.
 Speed, 2,000 splats and 3,000 steps on a 231 × 233 image (RTX-class GPU,
 16-thread CPU): WebGPU about 6 s for the whole job, the CPU bands about 38 s,
 upstream's native build about 7 s. One GPU step matches the CPU fitter to about
-1e-5 and moves the same splats when redistributing (`tests/splat/gpu_parity.html`).
+1e-5 and moves and reorders the same splats when redistributing
+(`tests/splat/gpu_parity.html`).
 
-Accuracy: the final loss varies several-fold between seeds and between runs, in
-upstream too (2e-4 to 1e-3 on that image). Without redistribution the port and
-upstream match statistically. With it, from identical starting splats over 8
-seeds, the port's median was about 2.5× upstream's in one comparison and 1.6×
-in another; the steps themselves and one redistribution match upstream, so the
-remaining difference is not yet explained. Upstream's model change to image
-106057 itself costs some quality at equal counts. `tests/splat/quality.html`
-runs one job through the worker for manual comparisons.
+Update to b4dd204 (texel offset, moves on top, new rates, refine phase), same
+image, 2,000 splats, 3,000 steps, seeds 0–3 on WebGPU: final loss
+4.57/4.31/4.29/4.38e-4 before and 4.01/4.15/4.27/4.31e-4 after, about 6.1 s
+both. Upstream changes that only affect its native build (fixed-point atomics,
+unaligned readback, environment setup, compact IR files, the tuner) have no
+browser counterpart. Its Lua converter now writes alpha-0 colours as 0 and
+stops rounding; the site already writes alpha-0 splats as black, and its packed
+Lua keeps 0.1-unit precision.
+
+Accuracy: the final loss varies between seeds and runs, in upstream too. Before
+this update, from identical starting splats over 8 seeds, the port's median was
+1.6–2.5× upstream's (8c3951a) with redistribution, though single steps and one
+redistribution matched; that comparison has not been repeated against b4dd204.
+Upstream's model change to image 106057 itself costs some quality at equal
+counts. `tests/splat/quality.html` runs one job through the worker for manual
+comparisons.
 
 ## Animations
 
 GIF/video inputs default to Splat. Animation fits keep scale at 1 so each splat
-fits the 8-field animation frame as kind 4; see `animation.md`.
+fits the 8-field animation frame as kind 4; see `animation.md`. Frames warm
+started from the previous frame run both phases without redistribution, so
+splats keep their slots.
 
 ## Editor
 

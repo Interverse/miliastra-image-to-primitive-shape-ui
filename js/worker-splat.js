@@ -1,18 +1,18 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at https://mozilla.org/MPL/2.0/ (also LICENSES/mw_splat-MPL-2.0.txt).
- * Based on mw_splat by Golden_Water, commit 8c3951a. */
+ * Based on mw_splat by Golden_Water, commit b4dd204. */
 /* Splat fitting worker. Port of mw_splat (MPL-2.0); see splat-core.js.
  * WebGPU runs upstream's tiled GPU passes (splat-gpu.js) when available.
  * Otherwise each fitting step is split into horizontal bands handled by
  * helper workers; with cross-origin isolation they share memory, otherwise
  * the parameters and gradients are copied. One thread runs everything inline. */
 "use strict";
-if (typeof importScripts === "function") importScripts("splat-core.js?v=4", "splat-gpu.js?v=1");
+if (typeof importScripts === "function") importScripts("splat-core.js?v=5", "splat-gpu.js?v=2");
 const Core = typeof SplatCore !== "undefined" ? SplatCore : require("./splat-core.js");
 const Gpu = typeof SplatGpu !== "undefined" ? SplatGpu : null;
 
-const DEFAULT_ITERATIONS = 3000, DEFAULT_RESOLUTION = 512, REDISTRIBUTE_EVERY = 200;
+const DEFAULT_ITERATIONS = 3000, DEFAULT_RESOLUTION = 512, REDISTRIBUTE_EVERY = Core.REDISTRIBUTE_EVERY;
 
 function fitSize(width, height, resolution) {
   const ratio = Math.min(1, resolution / Math.max(width, height));
@@ -50,7 +50,7 @@ function buildResult(params, count, background, fw, fh, width, height, config, t
 let bandSource = null;
 async function bandUrl() {
   if (!bandSource) {
-    const [core, band] = await Promise.all(["splat-core.js?v=4", "worker-splat-band.js?v=4"].map(async (path) => {
+    const [core, band] = await Promise.all(["splat-core.js?v=5", "worker-splat-band.js?v=5"].map(async (path) => {
       const response = await fetch(path);
       if (!response.ok) throw new Error("Could not load " + path);
       return response.text();
@@ -150,7 +150,7 @@ async function processSplat(rgba, width, height, config = {}, hooks = {}) {
   };
   let finished, finalLoss;
   try {
-    finished = await fitter.run(iterations, 1, REDISTRIBUTE_EVERY, seed, {
+    finished = await Core.fit(fitter, iterations, REDISTRIBUTE_EVERY, seed, {
       gradient: pool || undefined,
       each: async (iter) => {
         if (hooks.cancelled && hooks.cancelled()) return false;

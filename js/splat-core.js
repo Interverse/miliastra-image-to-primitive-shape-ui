@@ -1,7 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at https://mozilla.org/MPL/2.0/ (also LICENSES/mw_splat-MPL-2.0.txt).
- * Based on mw_splat by Golden_Water, commit 8c3951a. */
+ * Based on mw_splat by Golden_Water, commit b4dd204. */
 /*
  * splat-core.js — Splat fitting and rendering.
  *
@@ -13,7 +13,9 @@
  *
  * Each splat is a soft rectangle: a solid core with a ramp around it. The ramp
  * is capped at 64 units of a 900-unit-tall canvas, which matches how the game
- * stretches image 106057 with fixed-size soft corners.
+ * stretches image 106057 with fixed-size soft corners. Like upstream, the
+ * kernel is sampled two texels (of 256) off centre, as the game's texture is,
+ * and is zero outside the rectangle.
  *
  * Internal coordinates are image pixels with y pointing down. Exported JSON
  * uses the upstream layout (uv, y up, radians counter-clockwise).
@@ -25,8 +27,15 @@ const SplatCore = (() => {
   const ASSET = 106057, BACKGROUND_ASSET = 100001;
   const STRIDE = 11; // x, y, w, h, rot, r, g, b, a, sx, sy (colour premultiplied)
   const LOGIT_EPS = 1e-4, LN_SIZE_MAX = Math.log(20000);
-  const BETA1 = 0.9, BETA2 = 0.999, ADAM_EPS = 1e-8;
-  const LR = { position: 0.7246497, size: 0.025369959, rotation: 0.0110587515, color: 0.03130688, alpha: 1.3482634, scale: 0.0034468751 };
+  const BETA1 = 0.5, BETA2 = 0.95, ADAM_EPS = 1e-8;
+  // Upstream defaults, tuned for 2,000 steps redistributing every 50.
+  const LR = { position: 0.31874454, size: 0.033444524, rotation: 0.011405053, color: 0.62412935, alpha: 0.0011357757, scale: 0.044140805 };
+  // Fitting: a main phase with redistribution, then a refine phase of the
+  // same length whose learning rate is cosine-annealed down to 0.1.
+  const REDISTRIBUTE_EVERY = 50, REFINE_LR = 0.1;
+  // Texture offset in kernel units, in the y-down local frame (upstream:
+  // vec2(1/256, -1/256) twice, with y up).
+  const TEXEL = 2 / 256;
   const INVERSE_CDF_SIZE = 1 << 14, BINS = 512;
   const LOSS_WEIGHT_GAMMA = 1.4;
 
@@ -113,9 +122,9 @@ const SplatCore = (() => {
         rowSpan(cx, dy, c, s, hx, hy, x0, x1);
         const xa = SPAN[0], xb = SPAN[1], row = (y - y0) * width;
         for (let x = xa; x < xb; x++) {
-          const dx = x + 0.5 - cx;
-          const ex = Math.abs(c * dx + s * dy) - coreX, ey = Math.abs(c * dy - s * dx) - coreY;
-          const qx = ex > 0 ? ex * irx : 0, qy = ey > 0 ? ey * iry : 0;
+          const dx = x + 0.5 - cx, u = c * dx + s * dy, v = c * dy - s * dx;
+          const ex = Math.abs(u) - coreX, ey = Math.abs(v) - coreY;
+          const qx = (ex > 0 ? (u < 0 ? -ex : ex) * irx : 0) - TEXEL, qy = (ey > 0 ? (v < 0 ? -ey : ey) * iry : 0) - TEXEL;
           const d2 = qx * qx + qy * qy;
           if (d2 >= 1) continue;
           const t = 1 - Math.sqrt(d2), kern = t * (0.5 + t * (1.5 - t));
@@ -368,7 +377,6 @@ const SplatCore = (() => {
         const rampLenX = Math.min(halfX, cap), rampLenY = Math.min(halfY, cap);
         const limX = halfX < cap ? 1 : 0, limY = halfY < cap ? 1 : 0;
         const cr = p[k + 5], cg = p[k + 6], cb = p[k + 7], ca = p[k + 8];
-        const irx2 = irx * irx, iry2 = iry * iry;
         let gx = 0, gy = 0, gw = 0, gh = 0, grot = 0, gr = 0, gg = 0, gb = 0, ga = 0, gsx = 0, gsy = 0;
         for (let y = ya; y < yb; y++) {
           const dy = y + 0.5 - cy;
@@ -379,7 +387,8 @@ const SplatCore = (() => {
             const u = c * dx + s * dy, v = c * dy - s * dx;
             const ex0 = Math.abs(u) - coreX, ey0 = Math.abs(v) - coreY;
             const ex = ex0 > 0 ? ex0 : 0, ey = ey0 > 0 ? ey0 : 0;
-            const qx = ex * irx, qy = ey * iry, d2 = qx * qx + qy * qy;
+            const su = u > 0 ? 1 : u < 0 ? -1 : 0, sv = v > 0 ? 1 : v < 0 ? -1 : 0;
+            const qx = su * ex * irx - TEXEL, qy = sv * ey * iry - TEXEL, d2 = qx * qx + qy * qy;
             if (d2 >= 1) continue;
             const dist = Math.sqrt(d2), t = 1 - dist;
             const kern = t * (0.5 + t * (1.5 - t));
@@ -391,19 +400,19 @@ const SplatCore = (() => {
             const dCov = a3 * bgT * tb - (comp[at] * a0 + comp[at + 1] * a1 + comp[at + 2] * a2);
             const dKernel = a0 * cr + a1 * cg + a2 * cb + dCov * ca;
             gr += a0 * kern; gg += a1 * kern; gb += a2 * kern; ga += dCov * kern;
-            if (dist > 1e-6) {
-              const slope = 0.5 + 3 * t * (1 - t), sd = slope / dist;
-              const dqx = -sd * ex * irx2, dqy = -sd * ey * iry2;
-              const dux = u > 0 ? dqx : u < 0 ? -dqx : 0, duy = v > 0 ? dqy : v < 0 ? -dqy : 0;
-              const dRampX = sd * ex * ex * irx2 * irx + dqx;
-              const dRampY = sd * ey * ey * iry2 * iry + dqy;
+            if ((ex > 0 || ey > 0) && dist > 1e-6) {
+              // Kernel derivative per local axis; zero on an axis inside its core.
+              const sd = (0.5 + 3 * t * (1 - t)) / dist;
+              const dux = ex > 0 ? -sd * qx * irx : 0, duy = ey > 0 ? -sd * qy * iry : 0;
+              const dHalfX = -su * dux, dHalfY = -sv * duy;
+              const dRampX = su * dux * (1 - ex * irx), dRampY = sv * duy * (1 - ey * iry);
               gx -= (c * dux - s * duy) * dKernel;
               gy -= (s * dux + c * duy) * dKernel;
               grot += (dux * v - duy * u) * dKernel;
-              gw += 0.5 * sx * (dRampX * limX - dqx) * dKernel;
-              gh += 0.5 * sy * (dRampY * limY - dqy) * dKernel;
-              gsx += (dRampX * rampLenX - dqx * halfX) * dKernel;
-              gsy += (dRampY * rampLenY - dqy * halfY) * dKernel;
+              gw += 0.5 * sx * (dHalfX + dRampX * limX) * dKernel;
+              gh += 0.5 * sy * (dHalfY + dRampY * limY) * dKernel;
+              gsx += (dHalfX * halfX + dRampX * rampLenX) * dKernel;
+              gsy += (dHalfY * halfY + dRampY * rampLenY) * dKernel;
             }
             comp[at] = comp[at] * inv + cr * kern;
             comp[at + 1] = comp[at + 1] * inv + cg * kern;
@@ -543,6 +552,7 @@ const SplatCore = (() => {
         cdf[slot] = ci;
       }
       let moved = 0;
+      const isMoved = new Uint8Array(n);
       for (let i = 0; i < n; i++) {
         const k = i * STRIDE, x = p[k], y = p[k + 1];
         let move = !(x >= 0 && y >= 0 && x < width && y < height);
@@ -563,7 +573,19 @@ const SplatCore = (() => {
         p[k] = dx; p[k + 1] = dy; p[k + 2] = splatSize; p[k + 3] = splatSize; p[k + 4] = 0;
         p[k + 5] = target[d]; p[k + 6] = target[d + 1]; p[k + 7] = target[d + 2]; p[k + 8] = target[d + 3];
         p[k + 9] = 1; p[k + 10] = 1;
-        moved++;
+        m1.fill(0, k, k + STRIDE); m2.fill(0, k, k + STRIDE);
+        isMoved[i] = 1; moved++;
+      }
+      // Moved splats go on top (drawn last) instead of possibly behind opaque
+      // ones; both groups keep their order, and moments travel with them.
+      if (moved && moved < n) {
+        const order = [];
+        for (let i = 0; i < n; i++) if (!isMoved[i]) order.push(i);
+        for (let i = 0; i < n; i++) if (isMoved[i]) order.push(i);
+        for (const a of [p, m1, m2]) {
+          const copy = a.slice();
+          order.forEach((from, to) => a.set(copy.subarray(from * STRIDE, from * STRIDE + STRIDE), to * STRIDE));
+        }
       }
       return moved;
     }
@@ -576,7 +598,8 @@ const SplatCore = (() => {
     }
 
     /* Runs `iters` steps like upstream Learner::run. `gradient(p)` may return
-     * a promise (threaded bands); `hooks.each(iter)` returning false stops.
+     * a promise (threaded bands); `hooks.each(iter)` returning false stops;
+     * `hooks.annealTo` cosine-anneals the learning rate down to that factor.
      * Unlike upstream, no redistribution happens after the final step, so
      * every moved splat still gets fitted. */
     async function run(iters, lrScale, every, seed, hooks = {}) {
@@ -585,7 +608,7 @@ const SplatCore = (() => {
         let out = gradient(p);
         if (out && typeof out.then === "function") out = await out;
         lastLoss = out.loss;
-        adam(out.grad, lrScale);
+        adam(out.grad, annealed(lrScale, hooks.annealTo, iter, iters));
         if (every > 0 && iter % every === 0 && iter + 1 < iters) {
           const [cellSize, moveCount, splatSize] = redistributeArgs(iter, iters);
           redistribute(cellSize, moveCount, splatSize, Math.floor(random() * 4294967296));
@@ -609,6 +632,30 @@ const SplatCore = (() => {
       _gradient: (index) => localGradient().grad[index],
       get lastLoss() { return lastLoss; },
     };
+  }
+
+  /* Learning rate at `iter` of `iters`, cosine-annealed to `annealTo`. */
+  function annealed(lrScale, annealTo, iter, iters) {
+    if (annealTo == null) return lrScale;
+    const c = 0.5 * (1 + Math.cos(Math.PI * iter / iters));
+    return lrScale * (annealTo + (1 - annealTo) * c);
+  }
+
+  /* Upstream's default fit: the main phase redistributing every `every`
+   * steps, then a refine phase without redistribution and with the learning
+   * rate annealed to REFINE_LR. `steps` is the total, split in half.
+   * hooks.each sees the overall step number. */
+  async function fit(fitter, steps, every, seed, hooks = {}) {
+    const refine = Math.floor(steps / 2), phases = [[steps - refine, every, null], [refine, 0, REFINE_LR]];
+    let done = 0;
+    for (const [iters, phaseEvery, annealTo] of phases) {
+      if (!iters) continue;
+      const offset = done;
+      const each = hooks.each && ((iter) => hooks.each(offset + iter));
+      if (await fitter.run(iters, 1, phaseEvery, seed, { ...hooks, annealTo, each }) === false) return false;
+      done += iters;
+    }
+    return true;
   }
 
   /* Upstream loss weights: grey value raised to 1.4. */
@@ -706,8 +753,8 @@ const SplatCore = (() => {
   }
 
   return {
-    REF_HEIGHT, RAMP_CAP, ASSET, BACKGROUND_ASSET, STRIDE, LR,
-    rng, rampCap, render, toRGBA8, premultiply, downsample, initialize, createFitter, createBand, balanceRows, shapeWeights,
+    REF_HEIGHT, RAMP_CAP, ASSET, BACKGROUND_ASSET, STRIDE, LR, REDISTRIBUTE_EVERY, REFINE_LR, TEXEL,
+    rng, rampCap, annealed, fit, render, toRGBA8, premultiply, downsample, initialize, createFitter, createBand, balanceRows, shapeWeights,
     toElements, backgroundElement, fromElements, renderElements, toIr, isSplat, colorOf, hash, profile: (t) => { const u = clamp(t, 0, 1); return u * (0.5 + u * (1.5 - u)); },
   };
 })();
