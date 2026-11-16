@@ -13,7 +13,7 @@ const animation={kind:'primeval',width:64,height:32,controls:3,frames:[],duratio
 for(let f=0;f<40;f++)animation.frames.push(new Float64Array([1,-200+f,20,80,60,f*5,0xff112233,f%2?1:0,3,100,0,80+f,100,-120, f%3?0xffaabbcc:0x80ffffff,f%2?0:1,f%4?2:0,0,0,640,320,0,0xff010203,2]));
 const encoded=L.encode(animation);assert.equal(encoded.patches[0].length,48);assert.ok(encoded.patches.slice(1).every(p=>p.length<48));
 const repeated={...animation,frames:[animation.frames[0],animation.frames[0]],durations:[.05,.05]};assert.equal(L.encode(repeated).patches[1].length,0);
-const lua=['lua','texlua'].find(c=>{const p=spawnSync(c,['--version'],{encoding:'utf8'});return !p.error&&p.status===0;});
+const lua=['lua','texlua'].find(c=>{const p=spawnSync(c,['-v'],{encoding:'utf8'});return !p.error&&p.status===0;});
 if(lua){const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'primeval-animation-'));try{
  const expected='{'+animation.frames.map(f=>'{'+[...f].join(',')+'}').join(',')+'}';
  const stub=`local nodes={} local creations=0 local colorCreates=0 local writes=0 local siblingWrites=0 local enabled=false local destroyed=0

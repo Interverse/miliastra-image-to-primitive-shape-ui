@@ -2,7 +2,7 @@
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{spawnSync}=require('node:child_process');
 const {generate,fields}=require('./animation-kernel.cjs'),flat=require('./animation-dispatch.cjs');
 function benchmark(){
- const lua=['lua','texlua'].find(c=>{const r=spawnSync(c,['--version']);return !r.error&&r.status===0;});if(!lua)throw Error('Lua unavailable');
+ const lua=['lua','texlua'].find(c=>{const r=spawnSync(c,['-v']);return !r.error&&r.status===0;});if(!lua)throw Error('Lua unavailable');
  const variants=[{name:'flat',layout:'flat',code:flat()}];
  for(const layout of ['columns','rows','unpack'])for(const unroll of [1,2,4,8])for(const hoist of [false,true])variants.push({name:layout+'-'+unroll+(hoist?'-local':''),layout,code:generate({layout,unroll,hoist})});
  for(const blockSize of [4,8,16])variants.push({name:'hybrid-'+blockSize,layout:'hybrid',blockSize,code:generate({layout:'hybrid',blockSize})});

@@ -1,7 +1,7 @@
 'use strict';
 const assert=require('node:assert/strict'),fs=require('fs'),os=require('os'),path=require('path'),{spawnSync}=require('child_process');
 global.LuaExport=require('../../js/lua-export.js');const Player=require('../../js/animation-lua.js'),{buildVariants}=require('../../scripts/prepare-animation-variants.cjs'),{extract}=require('../../scripts/upgrade-animation-player.cjs');
-const lua=['lua','texlua'].find(c=>{const r=spawnSync(c,['--version']);return !r.error&&r.status===0;});
+const lua=['lua','texlua'].find(c=>{const r=spawnSync(c,['-v']);return !r.error&&r.status===0;});
 const Payload=require('../../scripts/animation-payload.cjs'),Order=require('../../scripts/animation-draw-order.cjs'),Verifier=require('../../scripts/verify-animation-order.cjs');
 {
  const make=frames=>Player.buildLegacy({width:64,height:32,controls:frames[0].length/8,frames,durations:frames.map(()=>.07),fps:15},{imageTemplateIndex:123});

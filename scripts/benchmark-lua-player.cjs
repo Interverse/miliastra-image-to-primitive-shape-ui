@@ -10,7 +10,7 @@ if(!intervals)throw Error('Unknown playback profile');
 const {decode,expand}=require('./animation-payload.cjs');
 if(player.includes('local LOSSLESS_DRAW_ORDER=true')){const proof=require('./verify-animation-order.cjs').verify(source,player);console.log('PASS offline order proof '+JSON.stringify(proof));}
 const decoded=decode(player.includes('local LOSSLESS_DRAW_ORDER=true')?player:source),frames=decoded.frames.map(frame=>expand(frame,meta.compact));
-const lua=['lua','texlua'].find(c=>{const p=spawnSync(c,['--version'],{encoding:'utf8'});return !p.error&&p.status===0;});if(!lua)throw Error('Native Lua unavailable');
+const lua=['lua','texlua'].find(c=>{const p=spawnSync(c,['-v'],{encoding:'utf8'});return !p.error&&p.status===0;});if(!lua)throw Error('Native Lua unavailable');
 const expected='{'+frames.map(f=>'{'+Array.from(f).join(',')+'}').join(',')+'}',scale=displayWidth/width*.1;
 const nativeHost='local BOUND_SEQUENCE_METHODS='+(process.env.BIND_METHODS==='1'?'true':'false')+'\n'+fs.readFileSync(path.join(__dirname,'lua/animation-native-mock.lua'),'utf8')+(process.env.NO_NATIVE_SEQUENCE==='1'?'\ngame.TweenSequence=nil game.Tween=nil\n':'');
 const stub=`local nodes={} local writes=0 local creates=0 local siblings=0 local colorCreates=0 local enabled=false local destroys=0 local methodReads=0 local resizeWrites=0 local scaleWrites=0 local imageWrites=0

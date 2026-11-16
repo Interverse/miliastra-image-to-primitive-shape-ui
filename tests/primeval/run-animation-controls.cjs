@@ -14,7 +14,7 @@ try{
    const run=spawnSync(process.execPath,[path.resolve(__dirname,'../../scripts/benchmark-lua-player.cjs'),file,file,'controls'],{encoding:'utf8',maxBuffer:1024*1024});assert.equal(run.status,0,run.stdout+run.stderr);console.log(run.stdout.trim());
   }
  }
- const lua=['lua','texlua'].find(command=>spawnSync(command,['--version'],{encoding:'utf8'}).status===0);assert.ok(lua,'native Lua required');
+ const lua=['lua','texlua'].find(command=>spawnSync(command,['-v'],{encoding:'utf8'}).status===0);assert.ok(lua,'native Lua required');
  const code=Player.build({width:32,height:16,controls:1,frames:[new Float64Array([1,0,0,80,60,0,0xff123456,0]),new Float64Array([1,30,0,80,60,0,0xff654321,0])],durations:[.07,.11],fps:0},{imageTemplateIndex:123});
  const program=require('./animation-standalone-host.cjs')([123])+`
 local source=[====[${code}\nfunction Snapshot() return current,clock,ready end]====]

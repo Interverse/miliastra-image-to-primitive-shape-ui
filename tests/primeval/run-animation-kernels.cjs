@@ -1,7 +1,7 @@
 'use strict';
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{spawnSync}=require('node:child_process');
 const {generate}=require('../../scripts/animation-kernel.cjs');
-const lua=['lua','texlua'].find(c=>{const r=spawnSync(c,['--version']);return !r.error&&r.status===0;});if(!lua)throw Error('Lua VM required for kernel parity');
+const lua=['lua','texlua'].find(c=>{const r=spawnSync(c,['-v']);return !r.error&&r.status===0;});if(!lua)throw Error('Lua VM required for kernel parity');
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),'kernel-parity-'));
 try{
  for(const options of [{layout:'columns'},{layout:'rows'},{layout:'unpack'},{layout:'hybrid',blockSize:4},{layout:'hybrid',blockSize:8},{layout:'hybrid',blockSize:16}]){

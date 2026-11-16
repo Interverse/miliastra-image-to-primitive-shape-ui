@@ -15,7 +15,7 @@ assert(creates==baselineCreates and colors==baselineColors,"steady allocations")
 for index,samples in ipairs(times)do table.sort(samples) print(index..","..samples[1]..","..samples[math.floor(#samples/2)+1]..","..samples[#samples]) end
 for _,p in ipairs(players)do p.destroy()end for _,c in ipairs(nodes)do assert(not c.alive)end
 `;
- const lua=['lua','texlua'].find(c=>{const r=spawnSync(c,['--version']);return !r.error&&r.status===0;});if(!lua)throw Error('Lua unavailable');
+ const lua=['lua','texlua'].find(c=>{const r=spawnSync(c,['-v']);return !r.error&&r.status===0;});if(!lua)throw Error('Lua unavailable');
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'lua-runtime-time-'));try{const file=path.join(dir,'test.lua');fs.writeFileSync(file,code);const r=spawnSync(lua,[file],{encoding:'utf8',timeout:120000,maxBuffer:2*1024*1024});if(r.status!==0)throw Error(r.stdout+r.stderr);return {note:`Same payload; ${trials} rotating-order trials; median CPU time for ${steps} updates after warmup, including fake API. Not game FPS.`,steps,trials,results:r.stdout.trim().split(/\r?\n/).map(line=>{const [i,minMs,medianMs,maxMs]=line.split(',').map(Number);return {file:path.basename(files[i-1]),minMs,medianMs,maxMs};})};}finally{fs.rmSync(dir,{recursive:true,force:true});}
 }
 if(require.main===module){const [output,...files]=process.argv.slice(2);if(!output||files.length<2)throw Error('Usage: <report.json> <baseline.lua> <candidate.lua> [...]');const report=compare(files);fs.writeFileSync(output,JSON.stringify(report,null,2));console.log(JSON.stringify(report));}

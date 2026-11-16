@@ -31,7 +31,7 @@ function capture(source,{fault=false}={}){
  if(N>10000||meta.durations.length>500||N*meta.durations.length>500000)throw Error('Mock resource limit: 10,000 shapes / 500 frames / 500,000 shape-frames');
  const decoded=decode(source),preloaded=source.includes('local VARIANT="preloaded"');
  const expected=decoded.frames.map(f=>expectedFrame(expand(f,meta.compact),meta,preloaded));
- const lua=['lua','texlua'].find(c=>{const p=spawnSync(c,['--version'],{encoding:'utf8'});return !p.error&&p.status===0;});if(!lua)throw Error('Install Lua 5.3+ (lua or texlua must be on PATH)');
+ const lua=['lua','texlua'].find(c=>{const p=spawnSync(c,['-v'],{encoding:'utf8'});return !p.error&&p.status===0;});if(!lua)throw Error('Install Lua 5.3+ (lua or texlua must be on PATH)');
  const instrumentation='\nreturn {start=OnStart,update=OnUpdate,destroy=OnDestroy,ready=function() return ready end,current=function() return current end,clock=function() return clock end}';
  const native=fs.readFileSync(path.join(__dirname,'lua/animation-native-mock.lua'),'utf8');
  const program=host([meta.templateIndex])+`\nlocal BOUND_SEQUENCE_METHODS=false\n`+native+`

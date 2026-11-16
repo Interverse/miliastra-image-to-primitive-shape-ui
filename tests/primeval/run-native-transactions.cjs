@@ -3,7 +3,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
 global.LuaExport=require('../../js/lua-export.js');
 const Player=require('../../js/animation-lua.js'),{buildVariants}=require('../../scripts/prepare-animation-variants.cjs'),{decode,expand}=require('../../scripts/animation-payload.cjs');
 const host=require('./animation-standalone-host.cjs');
-const lua=['lua','texlua'].find(c=>{const r=spawnSync(c,['--version']);return !r.error&&r.status===0;});if(!lua)throw Error('Native Lua required');
+const lua=['lua','texlua'].find(c=>{const r=spawnSync(c,['-v']);return !r.error&&r.status===0;});if(!lua)throw Error('Native Lua required');
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),'native-transaction-'));
 try{
  const N=17,frames=Array.from({length:5},(_,f)=>Float64Array.from({length:N*8},(_,i)=>{const id=Math.floor(i/8);return [(id+f)%3+1,id*13-110+f*5,id*3-20-f*2,40+f*2,30+f,f*71+id,0xff123456+id*123+f*1001,id][i%8];}));

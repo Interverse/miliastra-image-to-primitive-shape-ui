@@ -14,7 +14,7 @@ assert(creates==initialCreates and colors==initialColors and tweenCreates==initi
 print("PASS independent scripts: instances=${sources.length}, controls="..creates..", cached tweens="..tweenCreates..", cached sequences="..sequenceCreates..", peak Lua/native submissions="..peak..", total submissions="..(writes+nativeCalls-totalBefore)..", total Lua instructions="..instructions..", internal endpoint writes="..(internalWrites-internalBefore))
 for _,p in ipairs(players)do p.destroy()end assert(liveTweens==0 and liveSequences==0,"native cache leak") for _,c in ipairs(nodes)do assert(not c.alive,"UI leak")end
 `;
- const lua=['lua','texlua'].find(c=>{const r=spawnSync(c,['--version']);return !r.error&&r.status===0;});if(!lua)throw Error('Native Lua unavailable');
+ const lua=['lua','texlua'].find(c=>{const r=spawnSync(c,['-v']);return !r.error&&r.status===0;});if(!lua)throw Error('Native Lua unavailable');
  const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'standalone-instances-'));try{const file=path.join(tmp,'run.lua');fs.writeFileSync(file,host(indices)+fs.readFileSync(path.join(__dirname,'lua/animation-native-mock.lua'),'utf8')+factories+checks);const result=spawnSync(lua,[file],{encoding:'utf8',maxBuffer:2*1024*1024});assert.equal(result.status,0,result.stdout+result.stderr);return result.stdout;}finally{fs.rmSync(tmp,{recursive:true,force:true});}
 }
 if(require.main===module)process.stdout.write(compare(process.argv.slice(2)));
