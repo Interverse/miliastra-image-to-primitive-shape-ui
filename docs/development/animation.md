@@ -123,7 +123,9 @@ sibling-move plans. Predictive arithmetic coding remains readable and available
 to tools with `compression: 'maximum'`, but is no longer selected automatically.
 Its small byte savings caused a long apparent freeze on the first pose while
 decoding the rest of the clip. The unused arithmetic decoder is stripped from
-normal downloads. Only bounded startup callbacks decompress data; the first
+normal downloads. Clips of unrotated rectangles (Pixel-perfect) may instead use
+the pose stream (`CODEC=3`, see `pixel-perfect.md`) when it is smaller; it
+decodes into the same poses, and its decoder is stripped from other downloads. Only bounded startup callbacks decompress data; the first
 fitted pose appears while remaining frames load. Runtime Lua
 comments and redundant whitespace are removed using a literal-aware lexer;
 internal decoder/kernel aliases are shortened without renaming host APIs or settings.

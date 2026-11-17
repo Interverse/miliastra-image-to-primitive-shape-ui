@@ -79,11 +79,37 @@ script's `LOAD_SPEED`, default 10) instead of Compact, on the result page and
 next to Download all (ZIP). Higher loads faster; lowering it avoids execution
 timeout errors in the game. A 377-control GIF loaded fine in game at 10.
 
+## Lua size
+
+Both exports keep the JSON, GIA and fitted geometry unchanged; only the Lua
+payload is coded more compactly.
+
+- Still images (`LuaExport.packLuaData`): positions and half-sizes are stored
+  in tenths, so Pixel-perfect values are all multiples of 5. Columns that share
+  a factor store the quotients, and the script multiplies them back before the
+  usual `*0.1`, so every API argument is bit-identical. An 89×89 sprite frame
+  (844 rectangles) drops from about 4,600 to 3,300 data characters.
+- Animations (`CODEC=3`, `encodePixelStream` in `animation-lua.js`, decoder
+  `scripts/lua/animation-pixel.lua`): Pixel-perfect rebuilds every frame's
+  cover, so per-control deltas save little. The stream instead stores each
+  frame's painter-ordered pose: runs repeated from the previous pose (at the
+  same or a shifted position) and new rectangles with colour recency, sizes
+  and edges predicted from the entry before them, in shared-factor units.
+  The player decodes straight into the same `keys` the channel coder builds,
+  so playback (poses, writes, timing) is identical; it is used only when it
+  is smaller, and only for clips of unrotated rectangles. An 84-frame 89×89
+  APNG: script 566,595 → 227,718 bytes, startup 26 → 17 updates.
+
 ## Tests
 
 - `node tests/pixel/run_tests.js`: exactness when drawn in order, translucent
   pixels covered once, compression counts, bounded control counts, geometry,
   ignored Opacity.
+- `node tests/pixel/run-animation-stream.cjs`: `CODEC=3` poses equal the
+  channel coder's, the saved Lua plays them identically (with lua/texlua),
+  upgrades keep the pixel decoder, other clips keep the channel coder.
+- `node tests/parity/lua/run_tests.js`: still Pixel-perfect sprites (plain and
+  scaled) render call-for-call like the readable script.
 - `node tests/pixel/run-browser.cjs`: automatic selection, hidden controls,
   exact JSON rebuild, layer compression, GIA export, method restore, a GIF
   through the Lua playback oracle.

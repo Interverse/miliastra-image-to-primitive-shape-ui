@@ -7,8 +7,9 @@ const fs=require('fs'),path=require('path');global.LuaExport=require('../js/lua-
 function extract(source){
  const names=['IMAGE_TEMPLATE_INDEX','PLAYBACK_FPS','ENCODED_FPS','WIDTH,W,H,N','GEOMETRY,ROTATION,COMPACT','LOOP','DATA','books','durations','moveCounts'],lines={};
  for(const name of names){const match=source.match(new RegExp('^local '+name+'=([^\\r\\n]*)','m'));if(!match)throw Error('Unrecognized animation codec: '+name);lines[name]=match[1];}
- for(const name of ['CODEC','COLOR_TRANSFORM']){const match=source.match(new RegExp('^local '+name+'=([^\\r\\n]*)','m'));if(match)lines[name]=match[1];}
- if(lines.CODEC!==undefined&&!['1','2'].includes(lines.CODEC))throw Error('Unknown animation codec');
+ for(const name of ['CODEC','PIXEL','COLOR_TRANSFORM']){const match=source.match(new RegExp('^local '+name+'=([^\\r\\n]*)','m'));if(match)lines[name]=match[1];}
+ if(lines.CODEC!==undefined&&!['1','2','3'].includes(lines.CODEC))throw Error('Unknown animation codec');
+ if((lines.CODEC==='3')!==(lines.PIXEL!==undefined))throw Error('Invalid pixel stream header');
  if(lines.COLOR_TRANSFORM!==undefined&&!['true','false'].includes(lines.COLOR_TRANSFORM))throw Error('Invalid color transform');
  const scalar=name=>Number(lines[name].split('--')[0].trim()),array=name=>{const value=lines[name].trim();if(!/^[0-9{},\s-]+$/.test(value))throw Error('Invalid literal: '+name);return JSON.parse(value.replaceAll('{','[').replaceAll('}',']'));};
  const dimensions=lines['WIDTH,W,H,N'].split(',').map(Number);
@@ -18,15 +19,17 @@ function extract(source){
  if(!['true','false'].includes(lines.LOOP.trim()))throw Error('Invalid loop flag');
  for(const name of ['IMAGE_TEMPLATE_INDEX','PLAYBACK_FPS','ENCODED_FPS'])if(!Number.isSafeInteger(scalar(name))||scalar(name)<0)throw Error('Invalid '+name);
  const books=array('books'),durations=array('durations'),moveCounts=array('moveCounts');
- if(books.length!==12||!durations.length||moveCounts.length!==durations.length+1||durations.some(v=>!Number.isSafeInteger(v)||v<=0)||moveCounts.some(v=>!Number.isSafeInteger(v)||v<0||v%2))throw Error('Invalid animation tables');
+ const pixel=lines.PIXEL===undefined?null:array('PIXEL');
+ if(pixel&&(pixel.length!==8||!pixel.every(Number.isSafeInteger)||[1,3,5,7].some(i=>pixel[i]<1)))throw Error('Invalid pixel stream header');
+ if(books.length!==(pixel?10:12)||!durations.length||moveCounts.length!==durations.length+1||durations.some(v=>!Number.isSafeInteger(v)||v<=0)||moveCounts.some(v=>!Number.isSafeInteger(v)||v<0||v%2))throw Error('Invalid animation tables');
  for(const book of books)if(!Array.isArray(book)||book.length!==2||!Number.isSafeInteger(book[0])||!Array.isArray(book[1])||book[1].some(v=>!Number.isSafeInteger(v)))throw Error('Invalid Huffman table');
- return {lines,dimensions,books,durations,moveCounts,compact:lines['GEOMETRY,ROTATION,COMPACT'].trim().endsWith('true'),templateIndex:scalar('IMAGE_TEMPLATE_INDEX')};
+ return {lines,dimensions,books,durations,moveCounts,pixel,compact:lines['GEOMETRY,ROTATION,COMPACT'].trim().endsWith('true'),templateIndex:scalar('IMAGE_TEMPLATE_INDEX')};
 }
 function upgrade(source){
  const meta=extract(source);
  if(meta.lines.CODEC!==undefined){
   const runtime=require('../js/animation-player-runtime.js');
-  const body=meta.lines.CODEC==='2'?runtime.replace('LOAD_BATCH,SPAWN_BATCH,ORDER_BATCH=6144,128,256','LOAD_BATCH,SPAWN_BATCH,ORDER_BATCH=384,128,256'):runtime.replace(/-- @BEGIN_RANGE_CODEC@[\s\S]*?-- @END_RANGE_CODEC@\r?\n/,'').replaceAll('releaseRange() ','');
+  const body=Player.playerFor(runtime,Number(meta.lines.CODEC));
   const order=source.match(/^local LOSSLESS_DRAW_ORDER=(true|false)\s*$/m)?.[0]||'';
   return {code:Object.entries(meta.lines).map(([name,value])=>'local '+name+'='+value).join('\n')+'\nlocal VARIANT="fast"\n'+order+'\n'+Player.minify(body)+'\n',meta};
  }

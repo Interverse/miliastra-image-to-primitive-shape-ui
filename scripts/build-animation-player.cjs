@@ -4,7 +4,7 @@ const fs=require('fs'),path=require('path'),kernels=require('./animation-kernel.
 function source(){
  const read=name=>fs.readFileSync(path.join(__dirname,'lua',name),'utf8');
  let shared=read('animation-shared.lua');
- shared=shared.replace('local function signed','-- @BEGIN_RANGE_CODEC@\n'+read('animation-range.lua')+'\n-- @END_RANGE_CODEC@\nlocal function signed')
+ shared=shared.replace('local function signed','-- @BEGIN_RANGE_CODEC@\n'+read('animation-range.lua')+'\n-- @END_RANGE_CODEC@\n-- @BEGIN_PIXEL_STREAM@\n'+read('animation-pixel.lua')+'-- @END_PIXEL_STREAM@\nlocal function signed')
   .replace('DATA=nil books=nil','releaseRange() DATA=nil books=nil')
   .replace('colors={} keys={}','releaseRange() colors={} keys={}')
   .replace('local p=components[a+4]*16777216+components[a+3]*65536+components[a+2]*256+components[a+1]',

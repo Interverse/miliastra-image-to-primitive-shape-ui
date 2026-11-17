@@ -657,9 +657,9 @@ return PrimitiveImage
     }
     return output;
   }
-  function packLuaDataV2(data, sourceTable) {
+  function packLuaDataV2(data, sourceTable, sourceRows) {
     const table=sourceTable || convertJsonToLuaText(data);
-    const rows=[...table.matchAll(/^        \{([^}]+)\},$/gm)].map(m=>m[1].split(',').map(Number));
+    const rows=sourceRows || [...table.matchAll(/^        \{([^}]+)\},$/gm)].map(m=>m[1].split(',').map(Number));
     const columns=[], encoded=[];
     const bits=n=>n===0?0:Math.floor(Math.log2(n))+1;
     const descriptor=c=>`{${c.low},${c.bits},${c.mode}${c.palette?',{'+c.palette.join(',')+'}':''}}`;
@@ -830,7 +830,21 @@ end`;
       return [...row.slice(0,6),r,g-r,b-g,a,row[7]];
     });
     const candidates=[original,{...original,...packRiceRows(rows)},{...original,...packRiceRows(split)}];
-    const size=art=>art.packed.length+art.columns.length+readerFor(art).length;
+    // Geometry columns often share a factor (Pixel-perfect: every position and
+    // half-size is a multiple of 5 tenths). Store the quotients; the script
+    // multiplies back before the usual *0.1, so every coordinate is unchanged.
+    // The Rice reader rebuilds its row each call, so the script scales it in
+    // place; the v2 reader keeps running deltas in its row and returns a copy.
+    const gcd=(a,b)=>{a=Math.abs(a);b=Math.abs(b);while(b){[a,b]=[b,a%b];}return a;};
+    const factors=[1,2,3,4,5].map(col=>rows.reduce((g,row)=>gcd(g,row[col]),0));
+    if(factors.some(g=>g>1)){
+      const scaled=rows.map(row=>row.map((v,col)=>col>=1&&col<=5&&factors[col-1]>1?v/factors[col-1]:v));
+      const scaleCode=factors.map((g,i)=>g>1?`p[${i+2}]=p[${i+2}]*${g}`:'').filter(Boolean).join(' ');
+      for(const art of [packRiceRows(scaled),packRiceRows(scaled.map((row,i)=>[...row.slice(0,6),...split[i].slice(6)]))])candidates.push({...original,...art,scaleCode});
+      const copy='return {'+Array.from({length:8},(_,i)=>i>=1&&i<=5&&factors[i-1]>1?`row[${i+1}]*${factors[i-1]}`:`row[${i+1}]`).join(',')+'}\nend\nend';
+      candidates.push({...packLuaDataV2(data,table,scaled.map(row=>row.slice(0,8))),reader:PACKED_READER.replace(/return row\nend\nend$/,copy)});
+    }
+    const size=art=>art.packed.length+art.columns.length+readerFor(art).length+(art.scaleCode?.length||0);
     candidates.sort((a,b)=>size(a)-size(b));
     return candidates[0];
   }
@@ -874,7 +888,7 @@ rect(canvas,${mask.x?`(${-mask.x})*WIDTH/W`:0},${mask.y?`(${-mask.y})*WIDTH/W`:0
 canvas:SetLocalScale(WIDTH/W,WIDTH/W,1)
 local nextPrimitive=PackedReader(DATA,COLS)
 for i=1,${art.count} do
-local p=nextPrimitive()
+local p=nextPrimitive()${art.scaleCode?'\n'+art.scaleCode:''}
 local a=math.floor(p[7]/16777216)
 local rgb=p[7]-a*16777216
 local r=math.floor(rgb/65536)

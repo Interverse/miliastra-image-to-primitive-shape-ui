@@ -434,7 +434,18 @@ if (nativeLua) {
   const shaded={...correlated,elements:Array.from({length:2000},(_,i)=>el(['ellipse','rectangle','triangle'][i%3],i%400,i%300,{rx:i===0?10000:1+i%13,ry:1+i%7,width:2*(1+i%13),height:2*(1+i%7)},0,(128+i%32)*16777216+90*65536+91*256+92,i%21===0?{primitive_type:'blurred_circle'}:{}))};
   const shadedArt=LuaExport.packLuaData(shaded);
   check('Rice/channel and streaming LZ combined',shadedArt.version===3&&shadedArt.lz);
-  for(const [label,payload] of Object.entries({...synthetic,offCenter:{...synthetic.mixed_shapes,origin:{x:12.5,y:-17.25}},stress,repeated,correlated,shaded})) {
+  // Pixel-perfect sprite: odd size, outline, fill, dots, translucent and clear pixels.
+  const PixelPerfect=require(path.join(ROOT,"js","pixel-perfect.js"));
+  const spriteW=41,spriteH=29,sprite=new Uint8ClampedArray(spriteW*spriteH*4);
+  for(let y=0;y<spriteH;y++)for(let x=0;x<spriteW;x++){
+    const edge=x===3||y===2||x===spriteW-4||y===spriteH-3,inside=x>3&&y>2&&x<spriteW-4&&y<spriteH-3,dot=inside&&(x*7+y*3)%11===0;
+    const rgba=edge?[20,20,30,255]:dot?[240,200,40,255]:inside?[60+(x>>3)*20,120,200,(x+y)%17===0?128:255]:[0,0,0,0];
+    sprite.set(rgba,(y*spriteW+x)*4);
+  }
+  const pixelPayload=PixelPerfect.process(sprite,spriteW,spriteH,{}),pixelScaled=PixelPerfect.process(sprite,spriteW,spriteH,{image_scale:3,origin:{type:"top_left"}});
+  const pixelArt=LuaExport.packLuaData(pixelPayload);
+  check("pixel geometry factors are divided out",/p\[2\]=p\[2\]\*5|row\[2\]\*5/.test((pixelArt.scaleCode||"")+(pixelArt.reader||"")),pixelArt.columns);
+  for(const [label,payload] of Object.entries({...synthetic,offCenter:{...synthetic.mixed_shapes,origin:{x:12.5,y:-17.25}},stress,repeated,correlated,shaded,pixel:pixelPayload,pixelScaled})) {
     const harness = `
 local trace={}
 local nodes={}

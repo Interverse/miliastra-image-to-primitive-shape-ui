@@ -47,6 +47,84 @@ const AnimationLua=(()=>{
   for(let f=0;f<animation.frames.length;f++){for(let c=0;c<12;c++)chunk(c,f);}chunk(11,animation.frames.length);if(bits)text+=alphabet[buffer%64];
   return {text,books:books.map(({root,tree})=>({root,tree})),patches,orders,loopOrder};
  }
+ /* Pixel-perfect clips (rectangles only, no rotation) store each frame's
+  * painter-ordered pose directly: runs repeated from the previous pose (at the
+  * same or a shifted position) and new rectangles predicted from the entry
+  * before them. The player rebuilds exactly the poses the channel coder gives,
+  * so playback is unchanged. Channels: 1 op, 2 run, 3 shift, 4 colour (0 new,
+  * else recency rank), 5 width, 6 height, 7 top, 8 left in a row, 9 left,
+  * 10 entry count. Geometry is coded as quotients of shared factors. */
+ const PIXEL_CHANNELS=10;
+ function pixelPoses(frames,N,W,H){
+  const poses=[];
+  for(const frame of frames){
+   const pose=new Array(N).fill(null);
+   for(let id=0;id<N;id++){
+    const a=id*8,kind=frame[a]||0;if(!kind)continue;
+    if(kind!==2||frame[a+5])return null;
+    const x=frame[a+1],y=frame[a+2],w=frame[a+3],h=frame[a+4],color=frame[a+6],rank=frame[a+7];
+    if(![x,y,w,h,color,rank].every(Number.isSafeInteger)||color<0||color>=2**32)return null;
+    // The player's renderable() at rotation 0: hidden entries are not in a pose.
+    if(Math.floor(color/16777216)===0)continue;
+    const gw=w*0.1,gh=h*0.1;if(gw<=0||gh<=0)continue;
+    const rx=(gw*1+gh*0)*0.5,ry=(gw*0+gh*1)*0.5,gx=x*0.1,gy=y*0.1;
+    if(!(gx+rx>=-W*0.5-2&&gx-rx<=W*0.5+2&&gy+ry>=-H*0.5-2&&gy-ry<=H*0.5+2))continue;
+    if(rank<0||rank>=N||pose[rank])return null;
+    pose[rank]=[x,y,w,h,color];
+   }
+   poses.push(pose);
+  }
+  return poses;
+ }
+ function encodePixelStream(poses){
+  const gcd=(a,b)=>{a=Math.abs(a);b=Math.abs(b);while(b)[a,b]=[b,a%b];return a;};
+  const entries=poses.flatMap(pose=>pose.filter(Boolean));
+  // Doubled left/top edges stay integers; x=(left2+w)/2, y=(top2-h)/2.
+  const fields=[e=>2*e[0]-e[2],e=>2*e[1]+e[3],e=>e[2],e=>e[3]];
+  const norm=fields.map(get=>{let low=entries.length?Infinity:0;for(const e of entries)low=Math.min(low,get(e));let g=0;for(const e of entries)g=gcd(g,get(e)-low);return [low,g||1];});
+  if(!norm.flat().every(Number.isSafeInteger))return null;
+  const [L,T,Wq,Hq]=fields.map((get,i)=>e=>(get(e)-norm[i][0])/norm[i][1]);
+  const tokens=[],zig=n=>n<0?-n*2-1:n*2;
+  const symbol=(c,s)=>tokens.push(c,s,0,0);
+  const number=(c,v)=>{const k=Math.floor(Math.log2(v+1));tokens.push(c,k,v+1-2**k,k);};
+  const recent=[];let previous=[],previousKeys=[],prevN=0;
+  for(const pose of poses){
+   let n=pose.length;while(n&&!pose[n-1])n--;
+   number(10,zig(n-prevN));
+   const keys=pose.map(e=>e&&e.join(',')),index=new Map();
+   for(let q=0;q<prevN;q++){const k=previousKeys[q];if(k===null)continue;let list=index.get(k);if(!list)index.set(k,list=[]);list.push(q);}
+   const run=(p,q)=>{let k=0;while(p+k<n&&q+k>=0&&q+k<prevN&&keys[p+k]===previousKeys[q+k])k++;return k;};
+   let p=0,d=0,last=null;
+   const advance=k=>{for(let i=p+k-1;i>=p;i--)if(pose[i]){last=pose[i];break;}p+=k;};
+   while(p<n){
+    const here=run(p,p+d);
+    if(here){symbol(1,0);number(2,here-1);advance(here);continue;}
+    const e=pose[p];
+    if(!e){symbol(1,3);p++;continue;}
+    let best=-1,bestRun=0,bestDistance=Infinity;
+    for(const q of index.get(keys[p])||[]){const distance=Math.abs(q-(p+d));if(distance>bestDistance+64)continue;const k=run(p,q);if(k>bestRun||(k===bestRun&&distance<bestDistance)){best=q;bestRun=k;bestDistance=distance;}}
+    if(best>=0&&(bestRun>=2||bestDistance<=4)){symbol(1,2);number(3,zig(best-(p+d)));d=best-p;number(2,bestRun-1);advance(bestRun);continue;}
+    symbol(1,1);
+    const at=recent.indexOf(e[4]);
+    if(at<0){symbol(4,0);tokens.push(0,0,e[4],32);}else{symbol(4,at+1);recent.splice(at,1);}
+    recent.unshift(e[4]);
+    number(5,Wq(e));number(6,Hq(e));
+    const top=T(e),left=L(e),dt=top-(last?T(last):0);
+    number(7,zig(dt));
+    if(last&&dt===0)number(8,zig(left-(L(last)+Math.floor(2*last[2]/norm[0][1]))));
+    else number(9,zig(left-(last?L(last):0)));
+    last=e;p++;
+   }
+   previous=pose;previousKeys=keys;prevN=n;
+  }
+  const counts=Array.from({length:PIXEL_CHANNELS+1},()=>new Map());
+  for(let i=0;i<tokens.length;i+=4)if(tokens[i])counts[tokens[i]].set(tokens[i+1],(counts[tokens[i]].get(tokens[i+1])||0)+1);
+  const books=counts.slice(1).map(bookFor),parts=[];let text='',buffer=0,bits=0;
+  function write(v,n){if(n>48)throw Error('animation.limit');buffer+=v*2**bits;bits+=n;while(bits>=6){text+=alphabet[buffer%64];buffer=Math.floor(buffer/64);bits-=6;if(text.length===8192){parts.push(text);text='';}}}
+  for(let i=0;i<tokens.length;i+=4){const c=tokens[i];if(c)write(...books[c-1].codes.get(tokens[i+1]));if(tokens[i+3])write(tokens[i+2],tokens[i+3]);}
+  if(bits)text+=alphabet[buffer%64];parts.push(text);
+  return {text:parts.join(''),books:books.map(({root,tree})=>({root,tree})),norm:norm.flat()};
+ }
  function compactAnimation(animation){
   return {...animation,frames:animation.frames.map(frame=>Float64Array.from(frame,(v,i)=>{
    const c=i%8;if(c>=1&&c<=4)return c>=3&&v>0?Math.max(1,Math.round(v/5)):Math.round(v/5);
@@ -315,6 +393,12 @@ end
    const c=i%8;return c>=1&&c<=4&&frame[i-c]?Math.round(v*k):v;
   }))};
  }
+ /* The player with only the decoder `codec` (1 Huffman, 2 range, 3 pixel) needs. */
+ function playerFor(runtime,codec){
+  let player=codec===2?runtime.replace('local LOAD_BATCH,SPAWN_BATCH,ORDER_BATCH=6144,128,256','local LOAD_BATCH,SPAWN_BATCH,ORDER_BATCH=384,128,256'):runtime.replace(/-- @BEGIN_RANGE_CODEC@[\s\S]*?-- @END_RANGE_CODEC@\r?\n/,'').replaceAll('releaseRange() ','');
+  if(codec!==3)player=player.replace(/-- @BEGIN_PIXEL_STREAM@[\s\S]*?-- @END_PIXEL_STREAM@\r?\n/,'');
+  return player;
+ }
  function buildFast(animation,options={}){
   const codec=typeof AnimationCodec!=='undefined'?AnimationCodec:require('./animation-codec.js');
   const runtime=typeof AnimationPlayerRuntime!=='undefined'?AnimationPlayerRuntime:require('./animation-player-runtime.js');
@@ -334,9 +418,13 @@ end
   }
   // Range coding saved only 3–4% on supplied clips but took ~10x as many game
   // updates to load. Keep it opt-in for tools; website downloads use fast decode.
-  const huffman=encodeHuffman(input),bookText='{'+huffman.books.map(b=>'{'+b.root+',{'+b.tree.join(',')+'}}').join(',')+'}';
+  const bookList=books=>'{'+books.map(b=>'{'+b.root+',{'+b.tree.join(',')+'}}').join(',')+'}';
+  const huffman=encodeHuffman(input),bookText=bookList(huffman.books);
   const range=options.compression==='maximum'?codec.encode(input):null;
-  const useRange=range!==null&&range.length+12*8<huffman.text.length+bookText.length,packed=useRange?range:huffman.text;
+  const poses=compact||options.pixelStream===false?null:pixelPoses(input.frames,animation.controls,canvas.width,canvas.height);
+  const pixel=poses&&encodePixelStream(poses),pixelBooks=pixel&&bookList(pixel.books);
+  const sizes=[huffman.text.length+bookText.length,range===null?Infinity:range.length+12*8,pixel?pixel.text.length+pixelBooks.length+64:Infinity];
+  const chosen=sizes.indexOf(Math.min(...sizes))+1,useRange=chosen===2,usePixel=chosen===3,packed=useRange?range:usePixel?pixel.text:huffman.text;
   const header=`-- ${canvas===animation?'Primeval':'Splat'} animation: lossless compression, one control pool, precompiled updates.
 -- Other scripts: targetScript:Invoke("Play"), :Invoke("Stop"), :Invoke("Restart").
 local IMAGE_TEMPLATE_INDEX=${index}
@@ -346,27 +434,27 @@ local ENCODED_FPS=${Number(animation.fps)||0}
 local WIDTH,W,H,N=${width},${canvas.width},${canvas.height},${animation.controls}
 local GEOMETRY,ROTATION,COMPACT=${compact?'0.5,1,true':'0.1,0.1,false'}
 local LOOP=${animation.loop!==false}
-local CODEC=${useRange?2:1}
+local CODEC=${chosen}${usePixel?`\nlocal PIXEL={${pixel.norm.join(',')}}`:''}
 local COLOR_TRANSFORM=false
 local VARIANT="fast"
 local LOSSLESS_DRAW_ORDER=${planning.changed}
 -- Export planning: ${JSON.stringify(planning)}
 local DATA="${packed}"
-local books=${useRange?'{'+Array(12).fill('{-2,{}}').join(',')+'}':bookText}
+local books=${useRange?'{'+Array(12).fill('{-2,{}}').join(',')+'}':usePixel?pixelBooks:bookText}
 local durations={${animation.durations.map(d=>Math.max(1,Math.round(d*1e6))).join(',')}}
 local moveCounts={${Array(animation.frames.length+1).fill(0).join(',')}}
 `;
-  const player=useRange?runtime.replace('local LOAD_BATCH,SPAWN_BATCH,ORDER_BATCH=6144,128,256','local LOAD_BATCH,SPAWN_BATCH,ORDER_BATCH=384,128,256'):runtime.replace(/-- @BEGIN_RANGE_CODEC@[\s\S]*?-- @END_RANGE_CODEC@\r?\n/,'').replaceAll('releaseRange() ','');
+  const player=playerFor(runtime,chosen);
   return header+minify(player)+'\n';
  }
  function buildAsync(animation,options={}){
   return new Promise((resolve,reject)=>{
-   const worker=new Worker('js/worker-animation-export.js?v=7');
+   const worker=new Worker('js/worker-animation-export.js?v=8');
    worker.onmessage=({data})=>{worker.terminate();if(data.error)reject(Error(data.error));else resolve(data.text);};
    worker.onerror=event=>{worker.terminate();reject(Error(event.message||'animation.fitError'));};
    try{worker.postMessage({animation,options});}catch(error){worker.terminate();reject(error);}
   });
  }
- return {encode,encodeHuffman,build:buildFast,buildAsync,buildLegacy:build,planOrder,compactAnimation,minify};
+ return {encode,encodeHuffman,pixelPoses,encodePixelStream,playerFor,build:buildFast,buildAsync,buildLegacy:build,planOrder,compactAnimation,minify};
 })();
 if(typeof module!=='undefined')module.exports=AnimationLua;

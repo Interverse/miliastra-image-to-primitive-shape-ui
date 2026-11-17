@@ -4,11 +4,39 @@ const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_
 function decode(source,withSegments=false){
  const meta=extract(source),N=meta.dimensions[3],data=meta.lines.DATA.trim().slice(1,-1);let at=0,buffer=0,bits=0,run=0;
  if(meta.lines.CODEC==='2'){if(withSegments)throw Error('Range-coded data has no Huffman segments');return {meta,frames:require('../js/animation-codec.js').decode(data,N,meta.durations.length,{transform:meta.lines.COLOR_TRANSFORM==='true'}),segments:[]};}
+ if(meta.lines.CODEC==='3'){if(withSegments)throw Error('Pixel stream has no channel segments');return {meta,frames:decodePixel(data,meta),segments:[]};}
  const take=n=>{while(bits<n){const digit=alphabet.indexOf(data[at++]);if(digit<0)throw Error('Truncated animation payload');buffer+=digit*2**bits;bits+=6;}const p=2**n,v=buffer%p;buffer=Math.floor(buffer/p);bits-=n;return v;};
  const value=c=>{if(run){run--;return 0;}const [root,tree]=meta.books[c];let node=root,steps=0;while(node>0){if(++steps>tree.length+1)throw Error('Invalid Huffman tree');node=tree[(node-1)*2+take(1)];}if(!Number.isInteger(node))throw Error('Invalid Huffman node');const symbol=-node-1;if(symbol===1)return 0;if(symbol>1)return 2**(symbol-2)+take(symbol-2);let n=0;while(!take(1)){if(++n>=53)throw Error('Invalid animation run');}run=2**n+take(n)-1;return 0;};
  const signed=v=>v%2?-(v+1)/2:v/2,frames=[],segments=[],components=new Uint8Array(N*4);let old=new Float64Array(N*8);
  for(let f=0;f<meta.durations.length;f++){const state=new Float64Array(N*8);for(let c=0;c<12;c++){const start=at*6-bits,length=c<11?N:meta.moveCounts[f];for(let id=0;id<length;id++){const v=signed(value(c));if(c<6)state[id*8+c]=old[id*8+c]+v;else if(c<10){const key=id*4+c-6;components[key]=(components[key]+v+256)%256;if(c===9){const a=id*4;state[id*8+6]=components[a+3]*16777216+components[a+2]*65536+components[a+1]*256+components[a];}}else if(c===10)state[id*8+7]=old[id*8+7]+v;}if(run)throw Error('Animation run exceeds channel');if(withSegments&&c<11)segments.push([start,at*6-bits]);}frames.push(state);old=state;}
  return {meta,frames,segments};
+}
+/* CODEC 3 pixel poses back to channel-coder slots (slot = painter position). */
+function decodePixel(data,meta){
+ const N=meta.dimensions[3],norm=meta.pixel,frames=[],recent=[];let at=0,buffer=0,bits=0,prior=[],n=0;
+ const take=k=>{while(bits<k){const digit=alphabet.indexOf(data[at++]);if(digit<0)throw Error('Truncated animation payload');buffer+=digit*2**bits;bits+=6;}const p=2**k,v=buffer%p;buffer=Math.floor(buffer/p);bits-=k;return v;};
+ const symbol=c=>{const [root,tree]=meta.books[c-1];let node=root,steps=0;while(node>0){if(++steps>tree.length+1)throw Error('Invalid Huffman tree');node=tree[(node-1)*2+take(1)];}if(!Number.isInteger(node))throw Error('Invalid Huffman node');return -node-1;};
+ const number=c=>{const k=symbol(c);if(k>52)throw Error('Invalid pixel value');return 2**k-1+take(k);};
+ const signed=c=>{const v=number(c);return v%2?-(v+1)/2:v/2;};
+ for(let f=0;f<meta.durations.length;f++){
+  const priorN=n;n+=signed(10);if(n<0||n>N)throw Error('Invalid pixel pose');
+  const pose=new Array(N).fill(null);let p=0,d=0,last=null;
+  while(p<n){
+   const op=symbol(1);
+   if(op===0||op===2){if(op===2)d+=signed(3);const run=number(2)+1;if(p+d<0||p+d+run>priorN||p+run>n)throw Error('Invalid pixel run');for(let k=0;k<run;k++,p++){const e=prior[p+d];pose[p]=e;if(e)last=e;}}
+   else if(op===3)p++;
+   else if(op===1){
+    let s=symbol(4),color;if(s===0){color=take(32);s=recent.length+1;}else{color=recent[s-1];if(color===undefined)throw Error('Invalid pixel color');}
+    recent.splice(s-1,1);recent.unshift(color);
+    const w=norm[4]+number(5)*norm[5],h=norm[6]+number(6)*norm[7],dt=signed(7),top=(last?last.top:0)+dt;
+    const left=last&&dt===0?last.left+Math.floor(2*last.w/norm[1])+signed(8):(last?last.left:0)+signed(9);
+    const e={left,top,w,h,color,x:(norm[0]+left*norm[1]+w)/2,y:(norm[2]+top*norm[3]-h)/2};pose[p++]=e;last=e;
+   }else throw Error('Invalid pixel op');
+  }
+  const frame=new Float64Array(N*8);pose.forEach((e,q)=>{if(e)frame.set([2,e.x,e.y,e.w,e.h,0,e.color,q],q*8);});
+  frames.push(frame);prior=pose;
+ }
+ return frames;
 }
 function stripOrdering(source){
  const {meta,segments}=decode(source,true),input=meta.lines.DATA.trim().slice(1,-1);let text='',value=0,bits=0;

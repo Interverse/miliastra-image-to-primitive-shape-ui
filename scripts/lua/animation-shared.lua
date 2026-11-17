@@ -69,7 +69,8 @@ local function load()
   for v=0,255 do local node=book[1] local length=0 local n=v while node>0 and length<8 do node=tree[node*2-1+n%2] n=math.floor(n/2) length=length+1 end entries[v+1]=node lengths[v+1]=length end
   prefixes[bookAt]=entries prefixBits[bookAt]=lengths bookAt=bookAt+1 if bookAt>#books then stage=3 end remaining=remaining-256
  elseif stage==3 then
-  for i=1,#durations do total=total+durations[i] ends[i]=total end slot=1 stage=31 remaining=remaining-1
+  for i=1,#durations do total=total+durations[i] ends[i]=total end slot=1 remaining=remaining-1
+  if CODEC==3 then px=nil stage=50 else stage=31 end
  elseif stage==31 then
   -- Fields start at zero; frames then apply only their nonzero deltas in place.
   local stop=math.min(N,slot+math.max(1,math.floor(remaining/2))-1) remaining=remaining-math.max(1,(stop-slot+1)*2)
@@ -121,11 +122,14 @@ local function load()
    id=id+1
   end
   slot=id if slot>N then keys[f]=fixed fixed=nil slot=1 stage=6 end
+ elseif stage==50 then
+  -- Pixel-perfect poses are decoded straight into keys.
+  if pixelFrame() then stage=6 end
  elseif stage==6 then
   if variantPreview and not root and f==math.min(#ends,math.max(1,math.floor(FREEZE_FRAME))) then
    createRoot() variantStart() previewLoading=true remaining=0 return
   end
-  remaining=remaining-1 f=f+1 c=1 slot=1 changed=false if f<=#durations then stage=4 else stage=7 end
+  remaining=remaining-1 f=f+1 c=1 slot=1 changed=false if f<=#durations then stage=CODEC==3 and 50 or 4 else stage=7 end
  elseif stage==7 then
   local stop=math.min(moveCounts[f],slot+remaining-1) remaining=remaining-math.max(1,stop-slot+1) for i=slot,stop do value(12) end slot=stop+1 if slot>moveCounts[f] then assert(run==0,"Invalid loop order") stage=8 end
  elseif stage==8 then
