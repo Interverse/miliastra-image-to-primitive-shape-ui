@@ -1,5 +1,5 @@
 "use strict";
-importScripts('animation-sequences.js?v=7','animation-motion.js?v=5','animation-fit-pool.js?v=3','animation-media.js?v=1','animation-progress.js?v=1','animation-core.js?v=7','worker-primeval.js?v=animation-detail-3','focus.js?v=2','splat-core.js?v=5','splat-gpu.js?v=2','pixel-perfect.js?v=3');
+importScripts('animation-sequences.js?v=8','animation-motion.js?v=5','animation-fit-pool.js?v=3','animation-media.js?v=3','animation-progress.js?v=1','animation-core.js?v=7','worker-primeval.js?v=animation-detail-3','focus.js?v=2','splat-core.js?v=5','splat-gpu.js?v=2','pixel-perfect.js?v=3');
 self.onmessage=async({data:msg})=>{
  if(!['process','preview'].includes(msg.cmd))return;
  const started=performance.now();let fitPool=null;
@@ -239,10 +239,11 @@ self.onmessage=async({data:msg})=>{
    self.postMessage({type:'progress',step:sourceFrames,total:expected||animation.frames.length+1,phase:'animation',metrics:{...metrics}});
   }
   async function decode(){
-  if(file.type==='image/gif'||/\.gif$/i.test(file.name)){
-   if(typeof ImageDecoder==='undefined'||!await ImageDecoder.isTypeSupported('image/gif'))throw Error('animation.codec');
-   const gifData=await file.arrayBuffer(),timing=AnimationMedia.gifTiming(gifData);
-   const decoder=new ImageDecoder({data:gifData,type:'image/gif',preferAnimation:true});
+  const imageType=AnimationMedia.imageType(file);
+  if(imageType){
+   const type=await AnimationMedia.decoderType(imageType);if(!type)throw Error('animation.codec');
+   const imageData=await file.arrayBuffer(),timing=AnimationMedia.timing(imageType,imageData);
+   const decoder=new ImageDecoder({data:imageData,type,preferAnimation:true});
    try{await decoder.tracks.ready;await decoder.completed;const track=decoder.tracks.selectedTrack;expected=track.frameCount;preserveTiming=!!timing&&timing.frames===track.frameCount&&timing.frames<=fps*timing.duration+1e-6;
     for(let i=0;i<track.frameCount;i++){if(sequence&&i>sequenceLast)break;if(sequence&&!sequence.has(i))continue;const {image}=await decoder.decode({frameIndex:i});try{await accept((ctx,w,h)=>ctx.drawImage(image,0,0,w,h),image.displayWidth,image.displayHeight,image.timestamp/1e6,Math.max(0.01,(image.duration||0)/1e6));}finally{image.close();}}
    }finally{decoder.close();}

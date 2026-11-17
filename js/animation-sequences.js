@@ -29,9 +29,10 @@ const AnimationSequences=(()=>{
   const fps=Number(config.animation_fps??0);if(!Number.isSafeInteger(fps)||fps<0)throw Error('animation.fpsInvalid');
   const rows=[];let total=0,origin=null,endTime=0,width=0,height=0,preserve=false,cachedBytes=0,canvas=null,thumbCanvas=null,previousThumb=null;
   function accept(timestamp,duration,w,h,draw){if(width&&(width!==w||height!==h))throw Error('animation.codec');const source=total++;origin??=timestamp;timestamp-=origin;duration=Number.isFinite(duration)&&duration>0?duration:1/30;endTime=Math.max(endTime,timestamp+duration);width=w;height=h;const tick=fps&&!preserve?Math.max(0,Math.ceil((timestamp-1e-7)*fps))/fps:timestamp;if(fps&&!preserve&&tick>=timestamp+duration-1e-7)return;const row={index:rows.length,source,timestamp:tick,duration};if(rows.length<8&&cachedBytes+w*h*4<=64*1024*1024){if(!canvas||canvas.width!==w||canvas.height!==h)canvas=new OffscreenCanvas(w,h);const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.clearRect(0,0,w,h);draw(ctx,w,h);row.rgba=ctx.getImageData(0,0,w,h).data;cachedBytes+=row.rgba.byteLength;}const sw=Math.max(1,Math.round(w*Math.min(1,64/Math.max(w,h)))),sh=Math.max(1,Math.round(h*Math.min(1,64/Math.max(w,h))));if(!thumbCanvas||thumbCanvas.width!==sw||thumbCanvas.height!==sh)thumbCanvas=new OffscreenCanvas(sw,sh);const tiny=thumbCanvas.getContext('2d',{willReadFrequently:true});tiny.clearRect(0,0,sw,sh);draw(tiny,sw,sh);const thumb=tiny.getImageData(0,0,sw,sh).data;row.cut=!!previousThumb&&AnimationMotion.sceneChange(previousThumb,thumb,sw,sh).cut;previousThumb=thumb;rows.push(row);}
-  if(file.type==='image/gif'||/\.gif$/i.test(file.name)){
-   if(typeof ImageDecoder==='undefined'||!await ImageDecoder.isTypeSupported('image/gif'))throw Error('animation.codec');
-   const bytes=await file.arrayBuffer(),timing=AnimationMedia.gifTiming(bytes),decoder=new ImageDecoder({data:bytes,type:'image/gif',preferAnimation:true});
+  const imageType=AnimationMedia.imageType(file);
+  if(imageType){
+   const type=await AnimationMedia.decoderType(imageType);if(!type)throw Error('animation.codec');
+   const bytes=await file.arrayBuffer(),timing=AnimationMedia.timing(imageType,bytes),decoder=new ImageDecoder({data:bytes,type,preferAnimation:true});
    try{await decoder.tracks.ready;await decoder.completed;const count=decoder.tracks.selectedTrack.frameCount;preserve=!!timing&&timing.frames===count&&timing.frames<=fps*timing.duration+1e-6;
     for(let i=0;i<count;i++){const {image}=await decoder.decode({frameIndex:i});try{accept(image.timestamp/1e6,Math.max(.01,(image.duration||0)/1e6),image.displayWidth,image.displayHeight,(ctx,w,h)=>ctx.drawImage(image,0,0,w,h));}finally{image.close();}}
    }finally{decoder.close();}
@@ -47,7 +48,7 @@ const AnimationSequences=(()=>{
   const elapsed=()=>performance.now()-started;
   function metrics(){const out={frameWorkers:options.workers,threadsPerFrame:options.threads,prefixThreads:options.latencyThreads,sourceFrames:prepared.total,skippedFrames:prepared.total-prepared.rows.length,selectedFrames:prepared.rows.length,firstEightMs};for(const state of states)for(const [key,value] of Object.entries(state.metrics||{})){if(typeof value==='number'&&!['sourceFrames','skippedFrames','selectedFrames'].includes(key))out[key]=(out[key]||0)+value;}return out;}
   async function sequence(rows,threads,seed=null,requestSeed=false){
-   const state={progress:0,metrics:null,firstSource:rows[0].source,lastSource:rows.at(-1).source};states.push(state);const worker=new Worker('worker-animation.js?v=splat-b4dd204');handles.push(worker);
+   const state={progress:0,metrics:null,firstSource:rows[0].source,lastSource:rows.at(-1).source};states.push(state);const worker=new Worker('worker-animation.js?v=apng-1');handles.push(worker);
    const result=await new Promise((resolve,reject)=>{
     worker.onerror=event=>reject(Error(event.message||'Frame sequence failed'));
     worker.onmessage=({data})=>{

@@ -1,6 +1,6 @@
-# GIF/video animation (Splat and Primeval)
+# GIF/APNG/video animation (Splat and Primeval)
 
-GIF/video inputs offer two methods: Splat (default) and Primeval. The other
+GIF, animated PNG (APNG) and video inputs offer two methods: Splat (default) and Primeval. The other
 methods are disabled while an animation is queued; the still-image method is
 restored when it is removed.
 
@@ -66,13 +66,20 @@ Chrome to reject the module before fitting starts. Both video paths and deployed
 imports use the `.js` entry. Browser regressions emulate the incorrect `.mjs`
 MIME type; the bundle hash and MPL license remain unchanged.
 
-GIF decoding uses native ImageDecoder with composited disposal/transparency and
-original frame timing. Video uses bundled Mediabunny 1.65.2/WebCodecs, iterating
-every decoded sample in presentation order. Unsupported codecs fail explicitly.
+GIF and APNG decoding uses native ImageDecoder with composited
+disposal/transparency and original frame timing. PNG uploads are sniffed on
+intake (`AnimationMedia.sniff`): an `acTL` chunk before the first `IDAT`
+declaring more than one frame retypes the file as `image/apng`, whatever its
+extension; other PNGs stay still images. APNG decodes as `image/apng`, falling
+back to `image/png` (PNG decoders read APNG frames).
+
+Video uses bundled Mediabunny 1.65.2/WebCodecs, iterating every decoded sample
+in presentation order. Unsupported codecs fail explicitly.
 New animation inputs start at 1,000 primitives, 512 px detail and Focus enabled.
 The count stays editable; switching back to still images restores their count.
-FPS 0 preserves the source rate. GIF container timing is inspected first: when
-all source poses already fit the selected rate, native variable timing is kept.
+FPS 0 preserves the source rate. GIF/APNG container timing (`fcTL` delays for
+APNG) is inspected first: when all source poses already fit the selected rate,
+native variable timing is kept.
 This avoids aliasing a roughly 15 FPS GIF down to fewer poses at FPS 15. Preview,
 generation and Lua follow the same stored timeline, without applying a second
 FPS cap. For a lower target, positive FPS selects source images covering

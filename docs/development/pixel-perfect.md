@@ -18,12 +18,12 @@ qualifies (for example a flat background with small details).
   the same cover as the output, but it stops once the colour count or a cover
   reaches `limit`. Stills use `limit` = 1,000. A photo stops after its first
   1,000 colours, and 4K/1080p inputs finish in under 0.7 s.
-- GIFs are decoded in the worker with `ImageDecoder`, as composited frames.
+- GIFs and APNGs are decoded in the worker with `ImageDecoder`, as composited frames.
   The average per frame must stay under 1,000. Each frame's limit is the
   remaining budget, capped at 10,000. Counting stops as soon as the average
   can no longer stay under 1,000, or one frame alone needs 10,000. Frames up to
-  2K take under 1 s each at that cap. Without `ImageDecoder` a GIF is not
-  selected.
+  2K take under 1 s each at that cap. Without `ImageDecoder` a GIF/APNG is
+  not selected.
 - Videos have no alpha. Only a video under 1,000 pixels per frame is selected,
   because then it certainly needs fewer controls.
 
@@ -63,6 +63,14 @@ A 300×200 image where every pixel has its own colour takes about 0.3 s and need
 one rectangle per colour. A layered cover is dropped once its scanning exceeds
 64 visits per pixel, which can happen when one colour is scattered across a
 photo. The no-overlap cover is always kept.
+
+## Preview
+
+At zoom >= 1 device pixel per image pixel, the result preview and PNG export
+round rectangle edges to device pixels (`PrimevalResult.snapRect`). Separately
+anti-aliased rectangles that share an edge inside a device pixel would each
+cover it only partly and let the backdrop show through as thin dark seams.
+The JSON/GIA/Lua geometry is unchanged.
 
 ## Animation Lua
 

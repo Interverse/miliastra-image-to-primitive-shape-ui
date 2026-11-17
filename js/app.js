@@ -302,10 +302,11 @@
     const id=++countId;
     return new Promise(resolve=>{countReplies.set(id,resolve);countWorker.postMessage({cmd:"count",id,...message},transfer);});
   }
-  /* GIFs are decoded in the worker. Video frames have no alpha; only a video
+  /* GIF/APNG frames are decoded in the worker. Video frames have no alpha; only a video
    * under the threshold in pixels is certain to need fewer controls. */
   async function animationControls(file){
-    if(/\.gif$/i.test(file.name)||file.type==="image/gif"){const gif=await file.arrayBuffer();return countControls({gif,type:"image/gif"},[gif]);}
+    const imageType=AnimationMedia.imageType(file);
+    if(imageType){const type=await AnimationMedia.decoderType(imageType),gif=await file.arrayBuffer();return type?countControls({gif,type},[gif]):Infinity;}
     const video=document.createElement("video"),url=URL.createObjectURL(file);
     try{
       video.muted=true;video.preload="metadata";video.src=url;await new Promise((resolve,reject)=>{video.onloadedmetadata=resolve;video.onerror=reject;});
@@ -663,22 +664,35 @@
     if(!pendingFiles.length)methodChosen=false;
     for (const file of files) {
       if (!file || (!file.type.startsWith("image/")&&!AnimationUI.isFile(file))) continue;
-      const entry = { file, url: AnimationUI.isFile(file)&&!(/\.gif$/i.test(file.name)||file.type==='image/gif')?AnimationUI.poster:URL.createObjectURL(file), focus: { enabled: true, automatic: true, areas: [] } };
+      const entry = { file, url: AnimationUI.isFile(file)&&!AnimationMedia.imageType(file)?AnimationUI.poster:URL.createObjectURL(file), focus: { enabled: true, automatic: true, areas: [] } };
       pendingFiles.push(entry);
-      if(AnimationUI.isFile(file)){
-        animationControls(file).catch(()=>Infinity).then(count=>{entry.pixelControls=count;if(pendingFiles.includes(entry))autoPixelMethod();});
-        continue;
-      }
-      decodeToRGBA(file).then(decoded => {
-        entry.hasTransparency = hasTransparentPixels(decoded.data.data);
-        if (!pendingFiles.includes(entry)) return;
-        const { width, height, data } = decoded.data, rgba = data.slice().buffer;
-        countControls({ rgba, width, height }, [rgba]).then(count => { entry.pixelControls = count; if (pendingFiles.includes(entry)) autoPixelMethod(); });
-        $("enablePngMode").checked = pendingFiles.some(item => item.hasTransparency);
-        syncBackgroundColor();
-      }).catch(() => {}); // The queue reports decoding failures.
+      // PNGs join at once and are sniffed by content: an animated one (APNG)
+      // becomes an animation input. Start waits for pending sniffs.
+      if(AnimationMedia.maybePng(file))entry.sniffing=AnimationMedia.sniff(file).then(sniffed=>{
+        delete entry.sniffing;entry.file=sniffed;if(!pendingFiles.includes(entry))return;
+        if(AnimationUI.isFile(sniffed)!==AnimationUI.isFile(file))updateUploadReady();
+        analyzeEntry(entry);
+      });
+      else analyzeEntry(entry);
     }
     updateUploadReady();
+  }
+
+  /* Pixel-perfect control count (and transparency for stills) of an input. */
+  function analyzeEntry(entry) {
+    const file = entry.file;
+    if(AnimationUI.isFile(file)){
+      animationControls(file).catch(()=>Infinity).then(count=>{entry.pixelControls=count;if(pendingFiles.includes(entry))autoPixelMethod();});
+      return;
+    }
+    decodeToRGBA(file).then(decoded => {
+      entry.hasTransparency = hasTransparentPixels(decoded.data.data);
+      if (!pendingFiles.includes(entry)) return;
+      const { width, height, data } = decoded.data, rgba = data.slice().buffer;
+      countControls({ rgba, width, height }, [rgba]).then(count => { entry.pixelControls = count; if (pendingFiles.includes(entry)) autoPixelMethod(); });
+      $("enablePngMode").checked = pendingFiles.some(item => item.hasTransparency);
+      syncBackgroundColor();
+    }).catch(() => {}); // The queue reports decoding failures.
   }
 
   function hasTransparentPixels(rgba) {
@@ -738,8 +752,8 @@
       const extension=file.name.split('.').pop().toLowerCase();
       const format=['json','css','svg'].includes(extension)?extension:({'application/json':'json','text/css':'css','image/svg+xml':'svg'}[file.type]);
       if(format)structured.push({file,format});
-      else if(AnimationUI.isFile(file)||file.type.startsWith('image/')||/^(png|jpe?g|webp|gif|bmp|avif)$/.test(extension)){
-        const mime={png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp',gif:'image/gif',bmp:'image/bmp',avif:'image/avif',mp4:'video/mp4',m4v:'video/mp4',mov:'video/quicktime',webm:'video/webm',mkv:'video/x-matroska',ogv:'video/ogg',ts:'video/mp2t'}[extension];
+      else if(AnimationUI.isFile(file)||file.type.startsWith('image/')||/^(a?png|jpe?g|webp|gif|bmp|avif)$/.test(extension)){
+        const mime={png:'image/png',apng:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp',gif:'image/gif',bmp:'image/bmp',avif:'image/avif',mp4:'video/mp4',m4v:'video/mp4',mov:'video/quicktime',webm:'video/webm',mkv:'video/x-matroska',ogv:'video/ogg',ts:'video/mp2t'}[extension];
         images.push(file.type.startsWith('image/')||file.type.startsWith('video/')?file:new File([file],file.name,{type:mime}));
       }else errors.push(t('import.failed',{name:file.name,error:t('import.unsupported')}));
     }
@@ -1323,14 +1337,14 @@
 
   function startAnimationJob(job){
     if(!jobs.some(j=>j.id===selectedPreviewJobId&&j.status==='processing'))selectedPreviewJobId=job.id;
-    const worker=new Worker('js/worker-animation.js?v=splat-b4dd204');job.worker=worker;
+    const worker=new Worker('js/worker-animation.js?v=apng-1');job.worker=worker;
     worker.onmessage=({data})=>{
       if(job.status!=="processing")return;
       if(data.type.startsWith('animation-frame')){animationGeneration.handle(job,data);scheduleProgressFlush();}
       else if(data.type==='progress'){job.progress=data.step;job.progressTotal=data.total;scheduleProgressFlush();scheduleGenerationPreview();}
       else if(data.type==='done'){
         job.result=data.result;job.config={...job.config,...data.result.config};job.status='done';job.progress=job.progressTotal;
-        job.previewUrl=URL.createObjectURL(new Blob([data.poster],{type:'image/png'}));if(!(/\.gif$/i.test(job.file.name)||job.file.type==='image/gif'))job.thumbUrl=job.previewUrl;
+        job.previewUrl=URL.createObjectURL(new Blob([data.poster],{type:'image/png'}));if(!AnimationMedia.imageType(job.file))job.thumbUrl=job.previewUrl;
         worker.terminate();job.worker=null;animationGeneration.finish(job);updateGenerationPreview(job,{});pumpQueue();
       }else if(data.type==='error'){console.error('Animation fitting failed',data.detail);job.status='error';job.error=t(data.message);worker.terminate();job.worker=null;pumpQueue();}
     };
@@ -1385,6 +1399,9 @@
       alert(t("submit.noFiles"));
       return;
     }
+    // A PNG may still be resolving to an APNG; start once its type is known.
+    const sniffing=pendingFiles.filter(entry=>entry.sniffing);
+    if(sniffing.length){Promise.all(sniffing.map(entry=>entry.sniffing)).then(()=>$("btnSubmit").click());return;}
     if(pendingFiles.some(entry=>AnimationUI.isFile(entry.file)))updateUploadReady();
     if(pendingFiles.some(entry=>AnimationUI.isFile(entry.file))){const fps=Number($("animationFps").value);if(!Number.isSafeInteger(fps)||fps<0)$("animationFps").setCustomValidity(t('animation.fpsInvalid'));if(!$("animationFps").reportValidity())return;}
     if(currentMode==="fill"&&!validControlCount(numPrimsManual))return;
@@ -1912,10 +1929,16 @@
     const fillAlpha = Number.isFinite(rawAlpha) ? Math.max(0, rawAlpha) : 0.5;
 
     ctx.save();
-    ctx.translate(center.x, center.y);
-    ctx.rotate(elementRotationRad(element));
     ctx.beginPath();
-    drawElementPath(element);
+    // Exact pixel copies snap to device pixels so zooming shows no seams between rects.
+    if (isPixelConfig(R.data.config) && normalizeType(element.type) === "rectangle" && !elementRotationRad(element)) {
+      const width = (element.size.width || 0) * R.ppu, height = (element.size.height || 0) * R.ppu;
+      PrimevalResult.snapRect(ctx, center.x - width / 2, center.y - height / 2, width, height);
+    } else {
+      ctx.translate(center.x, center.y);
+      ctx.rotate(elementRotationRad(element));
+      drawElementPath(element);
+    }
 
     if (thumbRendering || $("showFill").checked) {
       if (selected) ctx.fillStyle = "rgba(37, 99, 235, 0.42)";
@@ -4099,7 +4122,7 @@
   classicDropZone.addEventListener("dragover", (event) => { event.preventDefault(); classicDropZone.classList.add("drag-over"); });
   classicDropZone.addEventListener("dragleave", (event) => { event.preventDefault(); classicDropZone.classList.remove("drag-over"); });
   classicDropZone.addEventListener("drop", (event) => {
-    if(Array.from(event.dataTransfer?.files||[]).some(file=>AnimationUI.isFile(file)||file.type.startsWith('image/')||/\.(json|css|svg|png|jpe?g|webp|gif|bmp|avif)$/i.test(file.name)))return;
+    if(Array.from(event.dataTransfer?.files||[]).some(file=>AnimationUI.isFile(file)||file.type.startsWith('image/')||/\.(json|css|svg|a?png|jpe?g|webp|gif|bmp|avif)$/i.test(file.name)))return;
     event.preventDefault();
     classicDropZone.classList.remove("drag-over");
     if (event.dataTransfer.files && event.dataTransfer.files[0]) attachClassicGia(event.dataTransfer.files[0]);

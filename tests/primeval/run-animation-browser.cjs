@@ -15,6 +15,13 @@ const report=await page.evaluate(async(single)=>{
  check(first.result.elements.filter(e=>e.type==='triangle').length===8,'Primeval triangle count per frame');check(first.result.animation.kind==='primeval','animation uses Primeval');
  check(AnimationCore.elements(first.result.animation,1).every(e=>parseInt(e.color.slice(1,3),16)<10),'GIF disposal does not retain previous red pixels');
  check(first.result.animation.frames[0].some((p,i)=>p!==first.result.animation.frames[1][i]),'GIF frame colours change');
+ console.log('animation browser: apng');
+ const apng=await AnimationMedia.sniff(new File([await(await fetch('/tests/primeval/fixtures/animation/moving.apng')).blob()],'moving.png',{type:'image/png'}));
+ check(apng.type==='image/apng'&&AnimationUI.isFile(apng),'animated PNG is an animation input');
+ const apngFit=await decode(apng);check(apngFit.result.animation.frames.length===3,'APNG preserves every frame');
+ check(apngFit.result.animation.durations.every((d,i)=>Math.abs(d-[.1,.2,.03][i])<.000001),'APNG source timing');
+ const apngColour=i=>AnimationCore.elements(apngFit.result.animation,i)[0].color.toLowerCase();
+ check(apngColour(0)==='#ff0000'&&apngColour(1)==='#00ff00'&&apngColour(2)==='#0000ff','APNG frames decode in order');
  console.log('animation browser: detail');
  const detail=new File([await(await fetch('/tests/primeval/fixtures/animation/detail.gif')).blob()],'detail.gif',{type:'image/gif'});
  const detailed=await decode(detail,{num_primitives:32,allowed_shapes:['circle'],primeval_speed:'fastest',primeval_resolution:64,primeval_threads:1,image_scale:2,output_alpha:.5});
@@ -86,7 +93,7 @@ const report=await page.evaluate(async(single)=>{
  if(longMP4){const upload=new DataTransfer();upload.items.add(longMP4);document.body.dispatchEvent(new DragEvent('drop',{dataTransfer:upload,bubbles:true,cancelable:true}));const end=performance.now()+10000;while($('animationSourcePlay').disabled){if(performance.now()>end)throw Error('long MP4 preview: '+$('animationSourceStatus').textContent);await new Promise(r=>setTimeout(r,20));}check($('uploadWarning').hidden,'MP4s do not get the still-image size warning');check($('animationSourceStatus').textContent.includes('300.00')&&$('animationSourceStatus').textContent.includes('streamed'),'long MP4 preview streams without buffering the whole clip');check($('animationSourceCanvas').width===320,'streamed MP4 backdrop renders');document.querySelector('.file-thumb-remove').click();}
  console.log('animation browser: GIF preview');
  const data=new DataTransfer();data.items.add(gif);document.body.dispatchEvent(new DragEvent('drop',{dataTransfer:data,bubbles:true,cancelable:true}));
- check(document.querySelector('[data-i18n=\"fitting.formats\"]').textContent==='PNG / JPG / WEBP / Short GIFs and Videos','concise media format wording');check(document.querySelector('[data-i18n=\"import.hint\"]').textContent==='Paste JSON/CSS/SVG to reopen'&&!document.querySelector('[data-i18n=\"upload.multiHint\"]'),'concise reopen wording without redundant batch hint');
+ check(document.querySelector('[data-i18n=\"fitting.formats\"]').textContent==='PNG / JPG / WEBP / Short GIFs, APNGs and Videos','concise media format wording');check(document.querySelector('[data-i18n=\"import.hint\"]').textContent==='Paste JSON/CSS/SVG to reopen'&&!document.querySelector('[data-i18n=\"upload.multiHint\"]'),'concise reopen wording without redundant batch hint');
  check($('animationFps').value==='15','default animation FPS');
  check(!$('animationSettings').hidden,'GIF exposes dedicated animation settings');
  const previewDeadline=performance.now()+10000;while($('animationSourcePlay').disabled){if(performance.now()>previewDeadline)throw Error('source preview timeout: '+$('animationSourceStatus').textContent);await new Promise(r=>setTimeout(r,20));}

@@ -1,9 +1,9 @@
 "use strict";
 const AnimationUI=(()=>{
- const isFile=file=>file?.type==='image/gif'||file?.type?.startsWith('video/')||/\.(gif|mp4|m4v|mov|webm|mkv|ogv|ts)$/i.test(file?.name||'');
+ const isFile=file=>!!AnimationMedia.imageType(file)||file?.type?.startsWith('video/')||/\.(gif|mp4|m4v|mov|webm|mkv|ogv|ts)$/i.test(file?.name||'');
  const poster='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="90"><rect width="160" height="90" fill="#303346"/><path d="M66 25L105 45L66 65Z" fill="#bbc4ff"/></svg>');
  function settings(){return {mode:'fill',animation_fps:Number(document.getElementById('animationFps').value),animation_loop:document.getElementById('animationLoop').checked,animation_temporal:document.getElementById('animationTemporal').checked};}
- function paint(state,ctx){PrimevalResult.drawElements(ctx,state.data.elements,Number(state.data.config.image_scale)||1,state.data.image_size);}
+ function paint(state,ctx){PrimevalResult.drawElements(ctx,state.data.elements,Number(state.data.config.image_scale)||1,state.data.image_size,state.data.config.fit_method==='pixel');}
  function createSource(){
   const $=id=>document.getElementById(id);let file=null,worker=null,frames=[],ends=[],timer=0,handle=0,playing=false,time=0,last=0,token=0,video=null,videoURL=null,videoHandle=0,lastVideoFrame=-1;
   const label=()=>{const key=playing?'animation.pause':'animation.play';$('animationSourcePlay').dataset.i18n=key;$('animationSourcePlay').textContent=I18N.t(key);};
@@ -30,8 +30,8 @@ const AnimationUI=(()=>{
    clear();const current=++token,fps=Number($('animationFps').value);$('animationSource').hidden=!file;if(!file)return;
    $('animationSourcePlay').disabled=true;$('animationSourceStatus').textContent=I18N.t('animation.previewLoading');
    if(!Number.isSafeInteger(fps)||fps<0){$('animationSourceStatus').textContent=I18N.t('animation.fpsInvalid');return;}
-   if(!(/\.gif$/i.test(file.name)||file.type==='image/gif')){streamVideo(current,fps);return;}
-   worker=new Worker('js/worker-animation.js?v=splat-b4dd204');
+   if(!AnimationMedia.imageType(file)){streamVideo(current,fps);return;}
+   worker=new Worker('js/worker-animation.js?v=apng-1');
    const fail=key=>{clear();$('animationSourcePlay').disabled=true;$('animationSourceStatus').textContent=I18N.t(key);};
    worker.onerror=()=>fail('animation.codec');worker.onmessage=({data})=>{
     if(current!==token){data.bitmap?.close();return;}

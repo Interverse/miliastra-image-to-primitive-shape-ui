@@ -93,13 +93,27 @@
     const surface=new OffscreenCanvas(w,h);surface.getContext("2d").putImageData(new ImageData(Core.toRGBA8(pixels,w,h),w,h),0,0);
     ctx.drawImage(surface,0,0,frame.width,frame.height);
   }
-  function drawElements(ctx,elements,unit=1,frame=null){
+  /* Adds an axis-aligned rect with its edges rounded to device pixels. Separately
+   * anti-aliased rects that share an edge inside a device pixel each cover it only
+   * partly, so the backdrop shows through as a thin seam when zoomed in. Pixel-perfect
+   * previews snap instead. Only at >= 1 device pixel per unit, so no rect vanishes. */
+  function snapRect(ctx,x,y,w,h){
+    const m=ctx.getTransform();
+    if(m.b||m.c||Math.abs(m.a)<1||Math.abs(m.d)<1){ctx.rect(x,y,w,h);return;}
+    const x0=Math.round(m.a*x+m.e),x1=Math.round(m.a*(x+w)+m.e),y0=Math.round(m.d*y+m.f),y1=Math.round(m.d*(y+h)+m.f);
+    ctx.rect((x0-m.e)/m.a,(y0-m.f)/m.d,(x1-x0)/m.a,(y1-y0)/m.d);
+  }
+  function drawElements(ctx,elements,unit=1,frame=null,snap=false){
     for(let i=0;i<elements.length;i++){
       if(elements[i].type==="splat"){
         let j=i;while(j<elements.length&&elements[j].type==="splat")j++;
         drawSplats(ctx,elements.slice(i,j),unit,frame);i=j-1;continue;
       }
       const e=elements[i];
+      if(snap&&e.type!=="ellipse"&&e.type!=="triangle"&&!e.rotation?.z){
+        const w=e.size.width/unit,h=e.size.height/unit;
+        ctx.save();ctx.globalAlpha=e.alpha;ctx.fillStyle=e.color;ctx.beginPath();snapRect(ctx,e.center.x/unit-w/2,-e.center.y/unit-h/2,w,h);ctx.fill();ctx.restore();continue;
+      }
       ctx.save();ctx.translate(e.center.x/unit,-e.center.y/unit);ctx.rotate(-(e.rotation?.z||0)*Math.PI/180);
       ctx.globalAlpha=e.alpha;ctx.fillStyle=e.color;ctx.beginPath();
       if(e.type==="ellipse")ctx.ellipse(0,0,e.size.rx/unit,e.size.ry/unit,0,0,Math.PI*2);
@@ -132,6 +146,6 @@
     }
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${parts.join('')}</svg>`;
   }
-  const api={triangle,drawingToElements,matteRGB,encodeRGB,encodeRGBA,drawElements,elementsToSvg};root.PrimevalResult=api;
+  const api={triangle,drawingToElements,matteRGB,encodeRGB,encodeRGBA,snapRect,drawElements,elementsToSvg};root.PrimevalResult=api;
   if(typeof module!=="undefined")module.exports=api;
 })(typeof self!=="undefined"?self:globalThis);
