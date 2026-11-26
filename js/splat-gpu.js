@@ -1,12 +1,11 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at https://mozilla.org/MPL/2.0/ (also LICENSES/mw_splat-MPL-2.0.txt).
- * Based on mw_splat by Golden_Water, commit b4dd204. */
+ * Based on mw_splat by Golden_Water, commit 0354838. */
 /* WebGPU Splat fitter: the upstream WGSL passes (bin_count/alloc/fill/sort,
  * splats_cache_fill, render, learn_backward, learn_adam,
- * redistribute_cells/select/move/sort) with four browser changes: immediates
- * are uniform buffers, f32 atomics are a workgroup reduction plus
- * compare-exchange, `info` is a flat uniform, and the redistribution sort runs
+ * redistribute_cells/select/move/sort) with browser adaptations: immediates
+ * are uniform buffers, `info` is a flat uniform, and the redistribution sort runs
  * in one workgroup. Bin overflow keeps the
  * upstream protocol: later passes are skipped, the bin buffer doubles and
  * the skipped iterations are replayed. Same parameters, loss, Adam and
@@ -33,7 +32,7 @@ struct Info {
 struct Splat { pos: vec2f, size: vec2f, color: vec4f, scale: vec2f, rot: f32, order: u32 }
 struct SplatCache { sin: f32, cos: f32, core: vec2f, ramp: vec2f }
 struct BinHeader { base: u32, len: u32 }
-struct SamplingCell { loss: f32, hot_px_idx: u32 }
+struct SamplingCell { peak: f32, hot_px_idx: u32 }
 struct RedistributeState { boundary_lo: f32, boundary_hi: f32, boundary_frac: f32 }
 fn splat_rot(cache: SplatCache) -> mat2x2f { return mat2x2f(cache.cos, cache.sin, -cache.sin, cache.cos); }
 fn profile(t: f32) -> f32 { let u = clamp(t, 0.0, 1.0); return u * (0.5 + u * (1.5 - u)); }
@@ -46,6 +45,32 @@ fn sample_kernel(splat: Splat, cache: SplatCache, px: vec2f) -> f32 {
   if !all(abs(uv) <= cache.core + cache.ramp) { return 0.0; }
   let excess = max(vec2f(0.0), abs(uv) - cache.core);
   return profile(1.0 - length(sign(uv) * excess / max(cache.ramp, vec2f(1e-6)) - TEXEL));
+}
+struct GradScales {
+    lin: vec2f,
+    quad: f32,
+    scale_norm: vec2f,
+}
+
+fn grad_scales(splat: Splat, canvas_dims: vec2u) -> GradScales {
+    let canvas_area = f32(canvas_dims.x * canvas_dims.y);
+    let extent = splat.size * splat.scale;
+    var s: GradScales;
+    s.lin = 268435456.0 * canvas_area / max(extent, vec2f(1e-6));
+    s.quad = 268435456.0 * canvas_area / max(extent.x * extent.y, 1e-6);
+    s.scale_norm = 268435456.0 * canvas_area / max(
+            vec2f(
+                splat.size.x * splat.size.y * splat.scale.y,
+                splat.size.x * splat.size.y * splat.scale.x,
+            ),
+            vec2f(1e-6),
+        );
+    return s;
+}
+
+fn gradient_factors(splat: Splat, dims: vec2u) -> array<f32, 11> {
+  let s = grad_scales(splat, dims);
+  return array<f32, 11>(s.lin.x, s.lin.y, s.lin.x, s.lin.y, s.quad, s.quad, s.quad, s.quad, s.quad, s.scale_norm.x, s.scale_norm.y);
 }
 struct Range { valid: bool, t_min: vec2u, t_max: vec2u }
 struct XRange { valid: bool, t_min: u32, t_max: u32 }
@@ -237,20 +262,20 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   let bin = bin_heads[id.x / TILE_SIZE + id.y / TILE_SIZE * info.tile_dims.x];
   let px = vec2f(id.xy) + 0.5;
   var composite = info.background;
-  var trans = 1.0;
+  var trans = 0.0;
   for (var i = bin.base; i < bin.base + bin.len; i++) {
     let splat_index = bin_data[i];
     let splat = splats[splat_index];
     let sample = sample_kernel(splat, splat_caches[splat_index], px);
     let inv = 1.0 - sample * splat.color.a;
     composite = composite * inv + splat.color * sample;
-    trans *= inv;
+    trans += log(max(inv, 1e-30));
   }
   pixels[idx] = composite;
   transmittance[idx] = trans;
 }`,
-    // Each 8x8 workgroup owns one tile. Per-splat gradients are reduced in
-    // workgroup memory, then 11 lanes add them to one of GRAD_COPIES copies.
+    // Each 8x8 workgroup owns one tile. Each lane accumulates a 2x2 block
+    // before adding its scaled integer gradients to one of GRAD_COPIES copies.
     // Gradient order matches SplatCore: x y w h rot r g b a sx sy.
     backward: `
 @group(0) @binding(0) var<uniform> info: Info;
@@ -261,22 +286,51 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
 @group(0) @binding(5) var<storage, read> bin_data: array<u32>;
 @group(0) @binding(6) var<storage, read> pixels: array<vec4f>;
 @group(0) @binding(7) var<storage, read> transmittance: array<f32>;
-@group(0) @binding(8) var<storage, read_write> grads: array<atomic<u32>>;
+@group(0) @binding(8) var<storage, read_write> grads: array<atomic<i32>>;
 const BWD_BLOCK_SIZE = 2u;
 const BWD_BLOCK_LEN = 4u;
 const BWD_WG_SIZE = 8u;
 const BWD_WG_LEN = 64u;
-struct Px { composite: vec4f, adjoint: vec4f, center: vec2f, t_before: f32, transmittance: f32, on: bool }
-var<workgroup> wg_loss: array<f32, BWD_WG_LEN>;
-var<workgroup> wg_grad: array<f32, 704>;
-fn atomic_add_f32(idx: u32, value: f32) {
-  var old = atomicLoad(&grads[idx]);
-  loop {
-    let r = atomicCompareExchangeWeak(&grads[idx], old, bitcast<u32>(bitcast<f32>(old) + value));
-    if r.exchanged { break; }
-    old = r.old_value;
-  }
+fn normal_pdf(x: f32) -> f32 {
+    return 0.3989422804 * exp(-0.5 * x * x);
 }
+
+fn normal_cdf(x: f32) -> f32 {
+    let z = abs(x) * 0.7071067812;
+    let t = 1.0 / (1.0 + 0.3275911 * z);
+    let poly = t
+        * (0.254829592
+            + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
+    let erf = 1.0 - poly * exp(-z * z);
+    return 0.5 * (1.0 + select(-erf, erf, x >= 0.0));
+}
+
+fn tail_slope(s: f32, sigma: f32) -> f32 {
+    if sigma <= 0.0 {
+        return 0.0;
+    }
+    if sigma > 6.0 {
+        return normal_pdf((s - 0.5) / sigma) / sigma;
+    }
+
+    let a = -s / sigma;
+    let b = (1.0 - s) / sigma;
+    let mass = normal_cdf(b) - normal_cdf(a);
+    let pdf_a = normal_pdf(a);
+    let pdf_b = normal_pdf(b);
+    let body = 0.5 + 3.0 * s * (1.0 - s);
+    let skew = 3.0 * (1.0 - 2.0 * s);
+
+    return body * mass + skew * sigma * (pdf_a - pdf_b)
+        - 3.0 * sigma * sigma * (mass - b * pdf_b + a * pdf_a);
+}
+
+fn extent_along(axis_weight: vec2f, half_extent: vec2f) -> f32 {
+    return 1.0 / max(dot(axis_weight, 1.0 / max(half_extent, vec2f(1e-6))), 1e-6);
+}
+
+struct Px { composite: vec4f, adjoint: vec4f, center: vec2f, log_below: f32, transmittance: f32, on: bool }
+var<workgroup> wg_loss: array<f32, BWD_WG_LEN>;
 @compute @workgroup_size(BWD_WG_SIZE, BWD_WG_SIZE)
 fn main(@builtin(workgroup_id) w_id: vec3u, @builtin(num_workgroups) w_num: vec3u,
     @builtin(local_invocation_id) l_id: vec3u, @builtin(local_invocation_index) l_ii: u32) {
@@ -294,7 +348,7 @@ fn main(@builtin(workgroup_id) w_id: vec3u, @builtin(num_workgroups) w_num: vec3
     if !in_canvas { continue; }
     block_pixels[b_i].center = vec2f(px_pos) + 0.5;
     block_pixels[b_i].composite = info.background;
-    block_pixels[b_i].t_before = 1.;
+    block_pixels[b_i].log_below = 0.;
     let px_idx = px_pos.x + px_pos.y * info.stride;
     let weight = reference[weight_base + px_idx].x;
     let px = pixels[px_idx];
@@ -311,11 +365,10 @@ fn main(@builtin(workgroup_id) w_id: vec3u, @builtin(num_workgroups) w_num: vec3
     if l_ii < step { wg_loss[l_ii] += wg_loss[l_ii + step]; }
     workgroupBarrier();
   }
-  if l_ii == 0u { atomic_add_f32(GRAD_COPIES * arrayLength(&splats) * GRAD_STRIDE, wg_loss[0]); }
+  if l_ii == 0u { atomicStore(&grads[GRAD_COPIES * arrayLength(&splats) * GRAD_STRIDE + tile_idx], bitcast<i32>(wg_loss[0])); }
   let head = bin_heads[tile_idx];
   if head.len == 0u { return; }
   let grad_base = arrayLength(&splats) * (tile_idx % GRAD_COPIES);
-  let bg_transparency = 1.0 - info.background.a;
   let cap = info.ramp_cap;
   for (var bin_idx = head.base; bin_idx < head.base + head.len; bin_idx++) {
     let splat_idx = bin_data[bin_idx];
@@ -338,17 +391,18 @@ fn main(@builtin(workgroup_id) w_id: vec3u, @builtin(num_workgroups) w_num: vec3
       let in_rect = all(abs(uv) <= cache.core + cache.ramp);
       let kernel = select(0.0, profile(1.0 - s), in_rect);
       let inv = 1. - kernel * splat.color.a;
-      let denom = (*b).t_before * inv;
-      if kernel > 0.0 {
-        var t_after = 0.0;
-        if denom > 1e-30 { t_after = (*b).transmittance / denom; }
-        let adjoint4 = (*b).adjoint * t_after;
-        let d_cov = adjoint4.a * bg_transparency * (*b).t_before - dot((*b).composite.rgb, adjoint4.rgb);
-        let dk = vec4f(adjoint4.rgb, d_cov);
+      let log_through = (*b).log_below + log(max(inv, 1e-30));
+      let weights = kernel_s * kernel_s / max(s * s, 1e-6);
+      let sigma = 0.125 * extent_along(weights, cache.core) / (3.0 * extent_along(weights, ramp_safe));
+      let band = any(in_ramp) && s > 1e-6 && s < 1.0 + 3.0 * sigma;
+      if in_rect || band {
+        let adjoint4 = (*b).adjoint * exp((*b).transmittance - log_through);
+        let dk = adjoint4 - vec4f(0., 0., 0., dot(adjoint4, (*b).composite));
         let d_kernel = dot(dk, splat.color);
         g[5] += dk.x * kernel; g[6] += dk.y * kernel; g[7] += dk.z * kernel; g[8] += dk.w * kernel;
-        if any(in_ramp) && s > 1e-6 && s < 1.0 {
-          let slope = d_profile(1.0 - s);
+        if band {
+          var slope = d_profile(1.0 - s);
+          if s >= 1.0 { slope = tail_slope(s, sigma); }
           let dk_duv = select(-slope * kernel_s / s / ramp_safe, vec2f(0.0), !in_ramp);
           let dk_dhalf = -sign(uv) * dk_duv;
           let dk_dramp = sign(uv) * dk_duv * (1.0 - excess / ramp_safe);
@@ -362,23 +416,20 @@ fn main(@builtin(workgroup_id) w_id: vec3u, @builtin(num_workgroups) w_num: vec3
         }
       }
       (*b).composite = (*b).composite * inv + splat.color * kernel;
-      (*b).t_before = denom;
+      (*b).log_below = log_through;
     }
-    for (var k = 0u; k < GRAD_STRIDE; k++) { wg_grad[l_ii * GRAD_STRIDE + k] = g[k]; }
-    workgroupBarrier();
-    if l_ii < GRAD_STRIDE {
-      var sum = 0.0;
-      for (var t = 0u; t < BWD_WG_LEN; t++) { sum += wg_grad[t * GRAD_STRIDE + l_ii]; }
-      if sum != 0.0 { atomic_add_f32((grad_base + splat_idx) * GRAD_STRIDE + l_ii, sum); }
+    let factors = gradient_factors(splat, info.dims);
+    for (var k = 0u; k < GRAD_STRIDE; k++) {
+      let value = i32(round(g[k] * factors[k]));
+      if value != 0 { atomicAdd(&grads[(grad_base + splat_idx) * GRAD_STRIDE + k], value); }
     }
-    workgroupBarrier();
   }
 }`,
     adam: `
 struct Imm { lr_scale: f32 }
 @group(0) @binding(0) var<uniform> info: Info;
 @group(0) @binding(1) var<storage, read_write> splats: array<Splat>;
-@group(0) @binding(2) var<storage, read> grads: array<f32>;
+@group(0) @binding(2) var<storage, read> grads: array<i32>;
 @group(0) @binding(3) var<storage, read_write> moment1: array<Splat>;
 @group(0) @binding(4) var<storage, read_write> moment2: array<Splat>;
 @group(0) @binding(5) var<uniform> imm: Imm;
@@ -394,9 +445,11 @@ fn main(@builtin(global_invocation_id) id: vec3u, @builtin(num_workgroups) wg_nu
   if idx >= n { return; }
   var g: array<f32, 11>;
   for (var c = 0u; c < GRAD_COPIES; c++) {
-    for (var k = 0u; k < GRAD_STRIDE; k++) { g[k] += grads[(n * c + idx) * GRAD_STRIDE + k]; }
+    for (var k = 0u; k < GRAD_STRIDE; k++) { g[k] += f32(grads[(n * c + idx) * GRAD_STRIDE + k]); }
   }
   let splat = splats[idx];
+  let factors = gradient_factors(splat, info.dims);
+  for (var k = 0u; k < GRAD_STRIDE; k++) { g[k] /= factors[k]; }
   let a = splat.color.a;
   var rgb = vec3f(0.5);
   if a > LOGIT_EPS { rgb = splat.color.rgb / a; }
@@ -421,11 +474,24 @@ fn main(@builtin(global_invocation_id) id: vec3u, @builtin(num_workgroups) wg_nu
   v.scale = v.scale * BETA2 + raw_grad.scale * raw_grad.scale * (1.0 - BETA2);
   let rate = imm.lr_scale;
   let lr_col = vec4f(vec3f(info.lr_color), info.lr_alpha);
-  let pos = splat.pos - rate * (info.lr_position * m.pos) / (sqrt(v.pos) + vec2f(ADAM_EPS));
-  let size = min(log(max(splat.size, vec2f(LOGIT_EPS))) - rate * (info.lr_size * m.size) / (sqrt(v.size) + vec2f(ADAM_EPS)), vec2f(LN_SIZE_MAX));
+  let next_pos = splat.pos - rate * (info.lr_position * m.pos) / (sqrt(v.pos) + vec2f(ADAM_EPS));
+  let next_size = log(max(splat.size, vec2f(LOGIT_EPS))) - rate * (info.lr_size * m.size) / (sqrt(v.size) + vec2f(ADAM_EPS));
   let rot = splat.rot - rate * info.lr_rotation * m.rot / (sqrt(v.rot) + ADAM_EPS);
-  let color_raw = clamp(logit4(vec4f(rgb, a)) - rate * (lr_col * m.color) / (sqrt(v.color) + vec4f(ADAM_EPS)), vec4f(-10.), vec4f(10.));
-  let scale_raw = clamp(log(max(splat.scale, vec2f(LOGIT_EPS))) - rate * (info.lr_scale * m.scale) / (sqrt(v.scale) + vec2f(ADAM_EPS)), vec2f(-10.), vec2f(10.));
+  let next_color = logit4(vec4f(rgb, a)) - rate * (lr_col * m.color) / (sqrt(v.color) + vec4f(ADAM_EPS));
+  let next_scale = log(max(splat.scale, vec2f(LOGIT_EPS))) - rate * (info.lr_scale * m.scale) / (sqrt(v.scale) + vec2f(ADAM_EPS));
+  let pos = clamp(next_pos, vec2f(0.5), info.dimsf - 0.5);
+  let size_floor = select(2.0 * info.ramp_cap, LOGIT_EPS, info.lr_scale == 0.0);
+  let size = clamp(next_size, vec2f(log(size_floor)), vec2f(LN_SIZE_MAX));
+  let color_raw = clamp(next_color, vec4f(-10.), vec4f(10.));
+  let scale_raw = clamp(next_scale, vec2f(-10.), vec2f(10.));
+  m.pos = select(m.pos, vec2f(0.), pos != next_pos);
+  v.pos = select(v.pos, vec2f(0.), pos != next_pos);
+  m.size = select(m.size, vec2f(0.), size != next_size);
+  v.size = select(v.size, vec2f(0.), size != next_size);
+  m.color = select(m.color, vec4f(0.), color_raw != next_color);
+  v.color = select(v.color, vec4f(0.), color_raw != next_color);
+  m.scale = select(m.scale, vec2f(0.), scale_raw != next_scale);
+  v.scale = select(v.scale, vec2f(0.), scale_raw != next_scale);
   let color = 1.0 / (1.0 + exp(-color_raw));
   splats[idx] = Splat(pos, exp(size), vec4f(color.rgb * color.a, color.a), exp(scale_raw), rot, splat.order);
   moment1[idx] = m;
@@ -444,7 +510,6 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   let px_base = id.xy * imm.cell_size;
   let px_max = min(px_base + vec2u(imm.cell_size), info.dims);
   let weight_base = info.dims.x * info.dims.y;
-  var loss_sum = 0.0;
   var hot_px_idx = 0u;
   var peak = -1.0;
   for (var y = px_base.y; y < px_max.y; y++) {
@@ -455,11 +520,10 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
       let black = px.rgb - tgt.rgb;
       let white = black + vec3f(tgt.a - px.a);
       let loss = (dot(black, black) + dot(white, white)) / 6.0 * reference[weight_base + px_idx].x;
-      loss_sum += loss;
       if loss > peak { peak = loss; hot_px_idx = px_idx; }
     }
   }
-  sampling_cells[id.x + id.y * imm.grid_dims.x] = SamplingCell(loss_sum, hot_px_idx);
+  sampling_cells[id.x + id.y * imm.grid_dims.x] = SamplingCell(peak, hot_px_idx);
 }`,
     select: `
 struct Imm { grid_dims: vec2u, move_count: u32 }
@@ -475,12 +539,12 @@ fn main() {
   var total_loss = 0.0;
   var peak_loss = 0.0;
   for (var cell = 0u; cell < cell_count; cell++) {
-    total_loss += sampling_cells[cell].loss;
-    peak_loss = max(peak_loss, sampling_cells[cell].loss);
+    total_loss += sampling_cells[cell].peak;
+    peak_loss = max(peak_loss, sampling_cells[cell].peak);
   }
   let bin_scale = select(0.0, f32(BINS - 1u) / peak_loss, peak_loss > 0.0);
   for (var cell = 0u; cell < cell_count; cell++) {
-    hist[min(u32(sampling_cells[cell].loss * bin_scale), BINS - 1u)] += 1u;
+    hist[min(u32(sampling_cells[cell].peak * bin_scale), BINS - 1u)] += 1u;
   }
   var cells_below = 0u;
   var bin = 0u;
@@ -497,7 +561,7 @@ fn main() {
   for (var slot = 0u; slot < INVERSE_CDF_SIZE; slot++) {
     let target_loss = total_loss * f32(slot) / f32(INVERSE_CDF_SIZE - 1u);
     while cell_idx + 1u < cell_count {
-      let cell_loss = sampling_cells[cell_idx].loss;
+      let cell_loss = sampling_cells[cell_idx].peak;
       if cum_loss + cell_loss >= target_loss { break; }
       cum_loss += cell_loss;
       cell_idx += 1u;
@@ -538,16 +602,18 @@ fn main(@builtin(global_invocation_id) id: vec3u, @builtin(num_workgroups) wg_nu
   var should_move = off_grid || redistribute_hash(splat_idx, 7u) < 1.0 - coverage(splat);
   if !should_move {
     let cell_coord = vec2u(splat.pos / f32(imm.cell_size));
-    let cell_loss = sampling_cells[cell_coord.x + cell_coord.y * imm.grid_dims.x].loss;
+    let cell_loss = sampling_cells[cell_coord.x + cell_coord.y * imm.grid_dims.x].peak;
     should_move = cell_loss < state.boundary_lo
       || (cell_loss < state.boundary_hi && redistribute_hash(splat_idx, imm.seed) < state.boundary_frac);
   }
   if !should_move { splats[splat_idx].order = splat_idx; return; }
   let slot = min(u32(redistribute_hash(splat_idx, 101u) * f32(INVERSE_CDF_SIZE - 1u)), INVERSE_CDF_SIZE - 1u);
   let hot = sampling_cells[inverse_cdf[slot]].hot_px_idx;
-  let destination = clamp(vec2f(vec2u(hot % info.stride, hot / info.stride)) + 0.5, vec2f(0.5), vec2f(info.dims) - 0.5);
+  let jitter = vec2f(redistribute_hash(splat_idx, 131u) - 0.5, 0.5 - redistribute_hash(splat_idx, 137u));
+  let destination = clamp(vec2f(vec2u(hot % info.stride, hot / info.stride)) + 0.5 + jitter * f32(imm.cell_size), vec2f(0.5), vec2f(info.dims) - 0.5);
   let color = reference[u32(destination.y) * info.stride + u32(destination.x)];
-  splats[splat_idx] = Splat(destination, vec2f(imm.splat_size), color, vec2f(1.0), 0.0, MOVED_ORDER_BASE + splat_idx);
+  let size = select(max(imm.splat_size, 2.0 * info.ramp_cap), imm.splat_size, info.lr_scale == 0.0);
+  splats[splat_idx] = Splat(destination, vec2f(size), color, vec2f(imm.splat_size / size), 0.0, MOVED_ORDER_BASE + splat_idx);
   moment1[splat_idx] = Splat();
   moment2[splat_idx] = Splat();
 }`,
@@ -602,7 +668,8 @@ fn main(@builtin(local_invocation_index) lii: u32) {
       this.tiles = [Math.ceil(width / TILE), Math.ceil(height / TILE)];
       const bins = this.tiles[0] * this.tiles[1], N = width * height;
       const limit = dev.limits.maxStorageBufferBindingSize;
-      if (Math.max(N * 32, GRAD_COPIES * n * STRIDE * 4 + 4) > limit) throw new Error("SPLAT_GPU_LIMIT");
+      const gradientBytes = (GRAD_COPIES * n * STRIDE + bins) * 4;
+      if (Math.max(N * 32, gradientBytes) > limit) throw new Error("SPLAT_GPU_LIMIT");
       const S = GPUBufferUsage.STORAGE, D = GPUBufferUsage.COPY_DST, C = GPUBufferUsage.COPY_SRC;
       // Exact sizes: shaders use arrayLength() as the element count.
       const buffer = (size, usage = S | D | C) => dev.createBuffer({ size: Math.max(4, Math.ceil(size / 4) * 4), usage });
@@ -610,7 +677,7 @@ fn main(@builtin(local_invocation_index) lii: u32) {
       this.b = {
         info: buffer(80, U), reference: buffer(N * 32), splats: buffer(n * SPLAT_BYTES),
         caches: buffer(n * CACHE_BYTES), m1: buffer(n * SPLAT_BYTES), m2: buffer(n * SPLAT_BYTES),
-        grads: buffer(GRAD_COPIES * n * STRIDE * 4 + 4), pixels: buffer(N * 16), trans: buffer(N * 4),
+        grads: buffer(gradientBytes), pixels: buffer(N * 16), trans: buffer(N * 4),
         counts: buffer(bins * 4), heads: buffer(bins * 8), bump: buffer(4), cursor: buffer(bins * 4),
         overflow: buffer(16 + INDIRECT.length * 16, S | D | C | GPUBufferUsage.INDIRECT), data: buffer(4 << 18),
         cells: buffer(8), state: buffer(16), cdf: buffer(CDF * 4),
@@ -815,7 +882,9 @@ fn main(@builtin(local_invocation_index) lii: u32) {
       return out;
     }
     async lastLoss() {
-      return new Float32Array(await this.read(this.b.grads, 4, GRAD_COPIES * this.count * STRIDE * 4))[0];
+      const bytes = this.tiles[0] * this.tiles[1] * 4;
+      const losses = new Float32Array(await this.read(this.b.grads, bytes, GRAD_COPIES * this.count * STRIDE * 4));
+      return losses.reduce((sum, loss) => sum + loss, 0);
     }
     destroy() { this.dev.destroy(); }
   }
@@ -827,33 +896,24 @@ fn main(@builtin(local_invocation_index) lii: u32) {
     const Core = options.core;
     const dev = await device();
     if (!dev) return null;
-    const cap = Core.rampCap(height), n = params.length / STRIDE, N = width * height;
+    const cap = Core.rampCap(height), n = params.length / STRIDE;
     const learner = new Learner(dev, target, width, height, params, background, { cap, weights: options.weights || null, lr: { ...Core.LR, ...(options.lr || {}) } });
     try { await learner.ready(); } catch (error) { learner.destroy(); throw error; }
     const host = Float64Array.from(params);
     let lastLoss = NaN;
 
-    /* SplatCore.createFitter's schedule. */
-    function redistributeArgs(iter, iters) {
-      const spacing = Math.sqrt(N / Math.max(1, n)), progress = iter / iters;
-      const cellSize = Math.max(1, Math.floor(Math.max(1, spacing * 2 ** (1 - 3 * progress))));
-      const cells = Math.ceil(width / cellSize) * Math.ceil(height / cellSize);
-      return [cellSize, Math.max(1, Math.floor(0.5 * 2 ** (-3 * progress) * cells)), spacing * 0.9];
-    }
-
     /* Learner::run, replaying iterations skipped by a bin overflow. As in the
      * CPU fitter, nothing moves after the final step. */
     async function run(iters, lrScale, every, seed, hooks = {}) {
-      const random = Core.rng(seed);
       let iter = 0;
       while (iter < iters) {
         await learner.step(iter, Core.annealed(lrScale, hooks.annealTo, iter, iters));
-        const due = every > 0 && iter % every === 0 && iter + 1 < iters;
+        const due = every > 0 && iter > 0 && iter % every === 0 && iter + 1 < iters;
         if (due || iter + 1 === iters || learner.overflowState.iteration >= 0) {
           const replay = await learner.settle();
           if (replay >= 0) { iter = replay; continue; }
         }
-        if (due) await learner.redistribute(...redistributeArgs(iter, iters), Math.floor(random() * 4294967296));
+        if (due) await learner.redistribute(...Core.redistribution(width, height, n, iter, iters, seed));
         iter++;
         if (hooks.each) {
           let keep = hooks.each(iter);

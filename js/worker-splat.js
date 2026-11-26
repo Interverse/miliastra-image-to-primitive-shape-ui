@@ -1,14 +1,14 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at https://mozilla.org/MPL/2.0/ (also LICENSES/mw_splat-MPL-2.0.txt).
- * Based on mw_splat by Golden_Water, commit b4dd204. */
+ * Based on mw_splat by Golden_Water, commit 0354838. */
 /* Splat fitting worker. Port of mw_splat (MPL-2.0); see splat-core.js.
  * WebGPU runs upstream's tiled GPU passes (splat-gpu.js) when available.
  * Otherwise each fitting step is split into horizontal bands handled by
  * helper workers; with cross-origin isolation they share memory, otherwise
  * the parameters and gradients are copied. One thread runs everything inline. */
 "use strict";
-if (typeof importScripts === "function") importScripts("splat-core.js?v=5", "splat-gpu.js?v=2");
+if (typeof importScripts === "function") importScripts("splat-core.js?v=6", "splat-gpu.js?v=3");
 const Core = typeof SplatCore !== "undefined" ? SplatCore : require("./splat-core.js");
 const Gpu = typeof SplatGpu !== "undefined" ? SplatGpu : null;
 
@@ -50,7 +50,7 @@ function buildResult(params, count, background, fw, fh, width, height, config, t
 let bandSource = null;
 async function bandUrl() {
   if (!bandSource) {
-    const [core, band] = await Promise.all(["splat-core.js?v=5", "worker-splat-band.js?v=5"].map(async (path) => {
+    const [core, band] = await Promise.all(["splat-core.js?v=6", "worker-splat-band.js?v=6"].map(async (path) => {
       const response = await fetch(path);
       if (!response.ok) throw new Error("Could not load " + path);
       return response.text();

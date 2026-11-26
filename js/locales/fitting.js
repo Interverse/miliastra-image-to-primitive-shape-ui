@@ -4,6 +4,13 @@
   for(const [lang,text] of Object.entries(contours))window.LOCALES[lang]['fitting.contourHint']=text;
   const legacy={en:"Legacy","zh-CN":"旧版","zh-TW":"舊版",ja:"従来方式",ko:"기존 방식",fr:"Anciennes méthodes",de:"Bisherige Methoden",es:"Métodos anteriores",pt:"Métodos antigos",ru:"Прежние методы",th:"วิธีเดิม",vi:"Phương pháp cũ",id:"Metode lama",tr:"Eski yöntemler",it:"Metodi precedenti"};
   for(const [lang,text] of Object.entries(legacy))window.LOCALES[lang]["fitting.legacy"]=text;
+  const legacyGroup = {
+    en: "Legacy methods", "zh-CN": "旧版方法", "zh-TW": "舊版方法", ja: "従来の方式",
+    ko: "이전 방식", fr: "Méthodes héritées", de: "Ältere Verfahren", es: "Métodos heredados",
+    pt: "Métodos legados", ru: "Устаревшие методы", th: "วิธีการรุ่นเก่า", vi: "Các phương pháp cũ",
+    id: "Metode terdahulu", tr: "Önceki yöntemler", it: "Metodi tradizionali"
+  };
+  for (const [lang, label] of Object.entries(legacyGroup)) window.LOCALES[lang]["fitting.legacyGroup"] = label;
   const mixed={en:["Mixed","Chooses among all three shapes. Takes longer."],"zh-CN":["混合","自动选择三种图形，耗时更长。"],"zh-TW":["混合","自動選擇三種圖形，耗時較長。"],ja:["混合","3種類の図形を自動選択。処理時間は長くなります。"],ko:["혼합","세 도형 중 자동 선택합니다. 시간이 더 걸립니다."],fr:["Mixte","Choisit parmi les trois formes. Plus lent."],de:["Gemischt","Wählt aus allen drei Formen. Dauert länger."],es:["Mixto","Elige entre las tres formas. Tarda más."],pt:["Misto","Escolhe entre as três formas. Demora mais."],ru:["Смешанный","Выбирает из трёх фигур. Требует больше времени."],th:["ผสม","เลือกจากทั้งสามรูปทรง ใช้เวลานานขึ้น"],vi:["Hỗn hợp","Chọn từ cả ba hình. Mất nhiều thời gian hơn."],id:["Campuran","Memilih dari ketiga bentuk. Lebih lama."],tr:["Karma","Üç şekil arasından seçer. Daha uzun sürer."],it:["Misto","Sceglie fra le tre forme. Richiede più tempo."]};
   for(const [lang,[label,hint]]of Object.entries(mixed)){window.LOCALES[lang]["shapes.mixed"]=label;window.LOCALES[lang]["fitting.mixedHint"]=hint;}
   const hint={en:"Choose one shape.","zh-CN":"请选择一种图形。","zh-TW":"請選擇一種圖形。",ja:"図形を1種類選択。",ko:"도형 하나를 선택하세요.",fr:"Choisissez une forme.",de:"Eine Form auswählen.",es:"Elige una forma.",pt:"Escolha uma forma.",ru:"Выберите одну фигуру.",th:"เลือกรูปทรงหนึ่งชนิด",vi:"Chọn một hình.",id:"Pilih satu bentuk.",tr:"Bir şekil seçin.",it:"Scegli una forma."};

@@ -13,7 +13,7 @@
   </script>
   <title data-i18n="app.pageTitle">Miliastra Wonderland Image Fitter</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='38' cy='42' r='26' fill='%234355B9'/%3E%3Crect x='48' y='44' width='36' height='36' rx='6' fill='%23E8A317' transform='rotate(12 66 62)'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="css/style.css?v=load-speed-1">
+  <link rel="stylesheet" href="css/style.css?v=method-groups-1">
 </head>
 <body>
   <header class="topbar">
@@ -65,12 +65,15 @@
         <div id="fillShapeSection">
           <div class="form-field">
             <label for="fitMethod" data-i18n="compression.method">Method</label>
-            <select id="fitMethod" class="num-input">
+            <select id="fitMethod" class="num-input method-select">
               <option value="primeval">Primeval</option>
               <option value="splat">Splat</option>
               <option value="pixel" data-i18n="pixel.method">Pixel-perfect</option>
-              <option value="gaussian">Gaussian</option>
-              <option value="legacy" data-i18n="fitting.legacy">Legacy</option>
+              <hr>
+              <optgroup label="Legacy methods" data-i18n-label="fitting.legacyGroup">
+                <option value="gaussian">Gaussian</option>
+                <option value="legacy" data-i18n="fitting.legacy">Legacy</option>
+              </optgroup>
             </select>
           </div>
           <div id="primevalSettings" class="form-stack">
@@ -576,8 +579,15 @@
         <h3 data-i18n="result.retry.sectionTitle">Re-process</h3>
         <div class="form-field">
           <label for="retryFitMethod" data-i18n="compression.method">Method</label>
-          <select id="retryFitMethod" class="num-input">
-            <option value="primeval">Primeval</option><option value="splat">Splat</option><option value="pixel" data-i18n="pixel.method">Pixel-perfect</option><option value="gaussian">Gaussian</option><option value="legacy" data-i18n="fitting.legacy">Legacy</option>
+          <select id="retryFitMethod" class="num-input method-select">
+            <option value="primeval">Primeval</option>
+            <option value="splat">Splat</option>
+            <option value="pixel" data-i18n="pixel.method">Pixel-perfect</option>
+            <hr>
+            <optgroup label="Legacy methods" data-i18n-label="fitting.legacyGroup">
+              <option value="gaussian">Gaussian</option>
+              <option value="legacy" data-i18n="fitting.legacy">Legacy</option>
+            </optgroup>
           </select>
         </div>
         <div class="shape-checks" id="retryShapeChecks">
@@ -816,7 +826,7 @@
   <script src="js/locales/it.js?v=33"></script>
 
   <script src="js/locales/compression.js?v=3"></script>
-  <script src="js/locales/fitting.js?v=apng-1"></script>
+  <script src="js/locales/fitting.js?v=method-groups-1"></script>
   <script src="js/locales/focus.js?v=6"></script>
   <script src="js/locales/experimental.js?v=retired-groups-1"></script>
   <script src="js/locales/pause.js?v=1"></script>
@@ -831,7 +841,7 @@
   <script src="js/gia.js?v=26"></script>
   <script src="js/gia-export.js?v=26"></script>
   <script src="js/lua-export.js?v=pixel-1"></script>
-  <script src="js/splat-core.js?v=5"></script>
+  <script src="js/splat-core.js?v=6"></script>
   <script src="js/pixel-perfect.js?v=3"></script>
   <script src="js/splat-export.js?v=1"></script>
   <script src="js/splat-preview.js?v=3"></script>
@@ -854,7 +864,7 @@
   <script src="js/animation-lua.js?v=17"></script>
   <script src="js/animation-generation-ui.js?v=3"></script>
   <script src="js/animation-media.js?v=3"></script>
-  <script src="js/animation-ui.js?v=13"></script>
-  <script src="js/app.js?v=apng-3"></script>
+  <script src="js/animation-ui.js?v=14"></script>
+  <script src="js/app.js?v=apng-4"></script>
 </body>
 </html>

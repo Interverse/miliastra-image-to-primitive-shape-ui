@@ -1057,6 +1057,15 @@ input[type="range"]::-webkit-slider-thumb {
   min-width: 0;
   min-height: 36px;
 }
+.method-select optgroup {
+  color: var(--md-on-surface-variant);
+  font-style: normal;
+  font-weight: 600;
+}
+.method-select option:enabled {
+  color: var(--md-on-surface);
+  font-weight: normal;
+}
 .num-input:focus, .form-input:focus, .form-select:focus {
   outline: 2px solid var(--md-primary);
   outline-offset: -1px;

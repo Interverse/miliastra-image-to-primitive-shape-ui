@@ -1,7 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at https://mozilla.org/MPL/2.0/ (also LICENSES/mw_splat-MPL-2.0.txt).
- * Based on mw_splat by Golden_Water, commit b4dd204. */
+ * Based on mw_splat by Golden_Water, commit 0354838. */
 /*
  * splat-core.js — Splat fitting and rendering.
  *
@@ -29,7 +29,7 @@ const SplatCore = (() => {
   const LOGIT_EPS = 1e-4, LN_SIZE_MAX = Math.log(20000);
   const BETA1 = 0.5, BETA2 = 0.95, ADAM_EPS = 1e-8;
   // Upstream defaults, tuned for 2,000 steps redistributing every 50.
-  const LR = { position: 0.31874454, size: 0.033444524, rotation: 0.011405053, color: 0.62412935, alpha: 0.0011357757, scale: 0.044140805 };
+  const LR = { position: 0.15, size: 0.005, rotation: 0.01, color: 0.24, alpha: 0.24, scale: 0.03 };
   // Fitting: a main phase with redistribution, then a refine phase of the
   // same length whose learning rate is cosine-annealed down to 0.1.
   const REDISTRIBUTE_EVERY = 50, REFINE_LR = 0.1;
@@ -104,11 +104,11 @@ const SplatCore = (() => {
   }
 
   /* Composites splats in order over the background for rows [y0, y1).
-   * Writes premultiplied RGBA and transmittance into band-local arrays. */
+   * Writes premultiplied RGBA and log transmittance into band-local arrays. */
   function forwardRows(p, n, cache, width, y0, y1, background, pixels, trans) {
     const M = (y1 - y0) * width;
     const br = background[0], bg = background[1], bb = background[2], ba = background[3];
-    for (let q = 0; q < M; q++) { const o = q * 4; pixels[o] = br; pixels[o + 1] = bg; pixels[o + 2] = bb; pixels[o + 3] = ba; trans[q] = 1; }
+    for (let q = 0; q < M; q++) { const o = q * 4; pixels[o] = br; pixels[o + 1] = bg; pixels[o + 2] = bb; pixels[o + 3] = ba; trans[q] = 0; }
     for (let i = 0; i < n; i++) {
       const o = i * CACHE, x0 = cache[o + 8], x1 = cache[o + 9];
       const ya = Math.max(cache[o + 10], y0), yb = Math.min(cache[o + 11], y1);
@@ -123,6 +123,7 @@ const SplatCore = (() => {
         const xa = SPAN[0], xb = SPAN[1], row = (y - y0) * width;
         for (let x = xa; x < xb; x++) {
           const dx = x + 0.5 - cx, u = c * dx + s * dy, v = c * dy - s * dx;
+          if (Math.abs(u) > hx || Math.abs(v) > hy) continue;
           const ex = Math.abs(u) - coreX, ey = Math.abs(v) - coreY;
           const qx = (ex > 0 ? (u < 0 ? -ex : ex) * irx : 0) - TEXEL, qy = (ey > 0 ? (v < 0 ? -ey : ey) * iry : 0) - TEXEL;
           const d2 = qx * qx + qy * qy;
@@ -133,7 +134,7 @@ const SplatCore = (() => {
           pixels[at + 1] = pixels[at + 1] * inv + cg * kern;
           pixels[at + 2] = pixels[at + 2] * inv + cb * kern;
           pixels[at + 3] = pixels[at + 3] * inv + ca * kern;
-          trans[q] *= inv;
+          trans[q] += Math.log(Math.max(inv, 1e-30));
         }
       }
     }
@@ -148,6 +149,7 @@ const SplatCore = (() => {
     const cache = out && out.cache && out.cache.length >= n * CACHE ? out.cache : new Float64Array(Math.max(1, n) * CACHE);
     fillCache(p, n, width, height, cap, cache);
     forwardRows(p, n, cache, width, 0, height, background, pixels, trans);
+    for (let q = 0; q < N; q++) trans[q] = Math.exp(trans[q]);
     return { pixels, trans, cache };
   }
 
@@ -311,20 +313,65 @@ const SplatCore = (() => {
     return wsum <= 1e-12 ? [0, 0, 0, 0] : acc.map((v) => v / wsum);
   }
 
-  function initialize(img, width, height, n, seed) {
+  function initialize(img, width, height, n, seed, fixedScale = false) {
     const size = Math.max(1, Math.sqrt(width * height / Math.max(1, n)));
+    const rawSize = fixedScale ? size : Math.max(size, 2 * rampCap(height));
     const background = backgroundColor(img, width, height);
     const points = blueNoise(img, width, height, n, rng(seed));
     const p = new Float64Array(n * STRIDE);
     for (let i = 0; i < n; i++) {
       const x = points[i * 2], y = points[i * 2 + 1], c = featherMean(img, width, height, x, y, size * 0.5), k = i * STRIDE;
-      p[k] = x; p[k + 1] = y; p[k + 2] = size; p[k + 3] = size; p[k + 4] = 0;
-      p[k + 5] = c[0]; p[k + 6] = c[1]; p[k + 7] = c[2]; p[k + 8] = c[3]; p[k + 9] = 1; p[k + 10] = 1;
+      p[k] = x; p[k + 1] = y; p[k + 2] = rawSize; p[k + 3] = rawSize; p[k + 4] = 0;
+      p[k + 5] = c[0]; p[k + 6] = c[1]; p[k + 7] = c[2]; p[k + 8] = c[3]; p[k + 9] = size / rawSize; p[k + 10] = size / rawSize;
     }
     return { params: p, background };
   }
 
   /* ── training (upstream learn.rs and shaders) ── */
+
+  function redistribution(width, height, count, iter, iters, seed) {
+    const spacing = Math.sqrt(width * height / Math.max(1, count)), progress = iter / iters;
+    const cellSize = Math.max(1, Math.floor(spacing * 2 ** (1 - 3 * progress)));
+    const cells = Math.ceil(width / cellSize) * Math.ceil(height / cellSize);
+    const moveCount = Math.max(1, Math.floor(0.25 * 2 ** (-3 * progress) * cells));
+    const u64 = x => BigInt.asUintN(64, x);
+    let x = u64(BigInt(Math.trunc(seed || 0))) ^ u64(BigInt(iter) * 0x9e3779b97f4a7c15n);
+    x = u64((x ^ (x >> 30n)) * 0xbf58476d1ce4e5b9n);
+    x = u64((x ^ (x >> 27n)) * 0x94d049bb133111ebn);
+    return [cellSize, moveCount, spacing * 0.9, Number(BigInt.asUintN(32, x ^ (x >> 31n)))];
+  }
+
+  function normalCdf(x) {
+    const z = Math.abs(x) * Math.SQRT1_2, t = 1 / (1 + 0.3275911 * z);
+    const poly = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
+    return 0.5 * (1 + Math.sign(x) * (1 - poly * Math.exp(-z * z)));
+  }
+  const normalPdf = x => 0.3989422804 * Math.exp(-0.5 * x * x);
+  function tailSlope(s, sigma) {
+    if (sigma > 6) return normalPdf((s - 0.5) / sigma) / sigma;
+    const a = -s / sigma, b = (1 - s) / sigma;
+    const mass = normalCdf(b) - normalCdf(a), pa = normalPdf(a), pb = normalPdf(b);
+    return (0.5 + 3 * s * (1 - s)) * mass + 3 * (1 - 2 * s) * sigma * (pa - pb)
+      - 3 * sigma * sigma * (mass - b * pb + a * pa);
+  }
+
+  // Match the GPU binning pass: intersect the rectangle with a tile row.
+  function tileColumns(xs, ys, y, width) {
+    const top = Math.floor(y / 16) * 16, bottom = top + 16;
+    let left = Infinity, right = -Infinity;
+    for (let i = 0; i < 4; i++) {
+      const j = (i + 1) % 4;
+      if (ys[i] >= top && ys[i] <= bottom) {
+        left = Math.min(left, xs[i]); right = Math.max(right, xs[i]);
+      }
+      for (let edge = top; edge <= bottom; edge += 16) {
+        if (edge <= Math.min(ys[i], ys[j]) || edge >= Math.max(ys[i], ys[j])) continue;
+        const x = xs[i] + (xs[j] - xs[i]) * (edge - ys[i]) / (ys[j] - ys[i]);
+        left = Math.min(left, x); right = Math.max(right, x);
+      }
+    }
+    return [Math.max(0, Math.floor(left / 16) * 16), Math.min(width, Math.ceil(right / 16) * 16)];
+  }
 
   /* One horizontal band of rows. pass() renders the band, measures its loss
    * and returns gradients for every splat from the pixels in the band. Bands
@@ -333,7 +380,7 @@ const SplatCore = (() => {
   function createBand(target, width, height, weights, background) {
     let pixels = new Float64Array(0), trans = pixels, adjoint = pixels, comp = pixels, before = pixels;
     let cache = new Float64Array(0), grad = new Float64Array(0);
-    const norm = 1 / (width * height * 6), bgT = 1 - background[3];
+    const norm = 1 / (width * height * 6);
 
     function ensure(rows, n) {
       const M = rows * width;
@@ -362,13 +409,14 @@ const SplatCore = (() => {
         adjoint[o] = (br + wr) * f; adjoint[o + 1] = (bgg + wg) * f; adjoint[o + 2] = (bb + wb) * f;
         adjoint[o + 3] = -f * (wr + wg + wb);
         comp[o] = background[0]; comp[o + 1] = background[1]; comp[o + 2] = background[2]; comp[o + 3] = background[3];
-        before[q] = 1;
+        before[q] = 0;
       }
       // Replay the composite in order and collect each splat's gradient.
       const g = out || grad;
       for (let i = 0; i < n; i++) {
         const o = i * CACHE, x0 = cache[o + 8], x1 = cache[o + 9];
-        const ya = Math.max(cache[o + 10], y0), yb = Math.min(cache[o + 11], y1);
+        const ya = Math.max(Math.floor(cache[o + 10] / 16) * 16, y0);
+        const yb = Math.min(Math.ceil(cache[o + 11] / 16) * 16, y1);
         if (x0 >= x1 || ya >= yb) continue;
         const k = i * STRIDE, cx = p[k], cy = p[k + 1], s = cache[o], c = cache[o + 1];
         const coreX = cache[o + 2], coreY = cache[o + 3], irx = cache[o + 4], iry = cache[o + 5];
@@ -378,31 +426,48 @@ const SplatCore = (() => {
         const limX = halfX < cap ? 1 : 0, limY = halfY < cap ? 1 : 0;
         const cr = p[k + 5], cg = p[k + 6], cb = p[k + 7], ca = p[k + 8];
         let gx = 0, gy = 0, gw = 0, gh = 0, grot = 0, gr = 0, gg = 0, gb = 0, ga = 0, gsx = 0, gsy = 0;
+        const ux = c * hx, uy = s * hx, vx = -s * hy, vy = c * hy;
+        const xs = [cx - ux - vx, cx + ux - vx, cx + ux + vx, cx - ux + vx];
+        const ys = [cy - uy - vy, cy + uy - vy, cy + uy + vy, cy - uy + vy];
+        // Bound the training band along any local direction before scanning.
+        const reach = TEXEL + 0.125 * Math.max(coreX * irx, coreY * iry, 1e-6 * irx, 1e-6 * iry);
+        const reachX = hx + reach / irx, reachY = hy + reach / iry;
+        let xa, xb;
         for (let y = ya; y < yb; y++) {
-          const dy = y + 0.5 - cy;
-          rowSpan(cx, dy, c, s, hx, hy, x0, x1);
-          const xa = SPAN[0], xb = SPAN[1], row = (y - y0) * width;
-          for (let x = xa; x < xb; x++) {
+          const dy = y + 0.5 - cy, row = (y - y0) * width;
+          if (y === ya || y % 16 === 0) [xa, xb] = tileColumns(xs, ys, y, width);
+          rowSpan(cx, dy, c, s, reachX, reachY, xa, xb);
+          for (let x = SPAN[0]; x < SPAN[1]; x++) {
             const dx = x + 0.5 - cx;
             const u = c * dx + s * dy, v = c * dy - s * dx;
             const ex0 = Math.abs(u) - coreX, ey0 = Math.abs(v) - coreY;
             const ex = ex0 > 0 ? ex0 : 0, ey = ey0 > 0 ? ey0 : 0;
             const su = u > 0 ? 1 : u < 0 ? -1 : 0, sv = v > 0 ? 1 : v < 0 ? -1 : 0;
             const qx = su * ex * irx - TEXEL, qy = sv * ey * iry - TEXEL, d2 = qx * qx + qy * qy;
-            if (d2 >= 1) continue;
-            const dist = Math.sqrt(d2), t = 1 - dist;
-            const kern = t * (0.5 + t * (1.5 - t));
-            if (kern <= 0) continue;
-            const q = row + x, at = q * 4;
-            const tb = before[q], inv = 1 - kern * ca, denom = tb * inv;
-            const after = denom > 1e-30 ? trans[q] / denom : 0;
+            const dist = Math.sqrt(d2), t = Math.max(0, 1 - dist);
+            const inside = Math.abs(u) <= hx && Math.abs(v) <= hy;
+            const kern = inside ? t * (0.5 + t * (1.5 - t)) : 0;
+            let slope = 0;
+            if ((ex > 0 || ey > 0) && dist > 1e-6) {
+              if (dist < 1) slope = 0.5 + 3 * t * (1 - t);
+              else {
+                const wx = qx * qx / d2, wy = qy * qy / d2;
+                const sigma = (0.125 / 3) * Math.max(wx * irx + wy * iry, 1e-6)
+                  / Math.max(wx / Math.max(coreX, 1e-6) + wy / Math.max(coreY, 1e-6), 1e-6);
+                if (dist < 1 + 3 * sigma) slope = tailSlope(dist, sigma);
+              }
+            }
+            if (!kern && !slope) continue;
+            const q = row + x, at = q * 4, inv = 1 - kern * ca;
+            const logThrough = before[q] + Math.log(Math.max(inv, 1e-30));
+            const after = Math.exp(trans[q] - logThrough);
             const a0 = adjoint[at] * after, a1 = adjoint[at + 1] * after, a2 = adjoint[at + 2] * after, a3 = adjoint[at + 3] * after;
-            const dCov = a3 * bgT * tb - (comp[at] * a0 + comp[at + 1] * a1 + comp[at + 2] * a2);
+            const dCov = a3 * (1 - comp[at + 3]) - (comp[at] * a0 + comp[at + 1] * a1 + comp[at + 2] * a2);
             const dKernel = a0 * cr + a1 * cg + a2 * cb + dCov * ca;
             gr += a0 * kern; gg += a1 * kern; gb += a2 * kern; ga += dCov * kern;
-            if ((ex > 0 || ey > 0) && dist > 1e-6) {
+            if (slope) {
               // Kernel derivative per local axis; zero on an axis inside its core.
-              const sd = (0.5 + 3 * t * (1 - t)) / dist;
+              const sd = slope / dist;
               const dux = ex > 0 ? -sd * qx * irx : 0, duy = ey > 0 ? -sd * qy * iry : 0;
               const dHalfX = -su * dux, dHalfY = -sv * duy;
               const dRampX = su * dux * (1 - ex * irx), dRampY = sv * duy * (1 - ey * iry);
@@ -418,7 +483,7 @@ const SplatCore = (() => {
             comp[at + 1] = comp[at + 1] * inv + cg * kern;
             comp[at + 2] = comp[at + 2] * inv + cb * kern;
             comp[at + 3] = comp[at + 3] * inv + ca * kern;
-            before[q] = denom;
+            before[q] = logThrough;
           }
         }
         g[k] += gx; g[k + 1] += gy; g[k + 2] += gw; g[k + 3] += gh; g[k + 4] += grot;
@@ -475,6 +540,9 @@ const SplatCore = (() => {
     const logit = (x) => { const v = clamp(x, LOGIT_EPS, 1 - LOGIT_EPS); return Math.log(v / (1 - v)); };
     const sigmoid = (x) => 1 / (1 + Math.exp(-x));
     const rates = [lr.position, lr.position, lr.size, lr.size, lr.rotation, lr.color, lr.color, lr.color, lr.alpha, lr.scale, lr.scale];
+    const sizeFloor = lr.scale === 0 ? LOGIT_EPS : 2 * cap;
+    const minRaw = [0.5, 0.5, Math.log(sizeFloor), Math.log(sizeFloor), -Infinity, -10, -10, -10, -10, -10, -10];
+    const maxRaw = [width - 0.5, height - 0.5, LN_SIZE_MAX, LN_SIZE_MAX, Infinity, 10, 10, 10, 10, 10, 10];
     function adam(grad, lrScale) {
       for (let i = 0; i < n; i++) {
         const k = i * STRIDE, a = p[k + 8];
@@ -495,10 +563,12 @@ const SplatCore = (() => {
           m1[at] = m1[at] * BETA1 + gj * (1 - BETA1);
           m2[at] = m2[at] * BETA2 + gj * gj * (1 - BETA2);
           raw[j] -= lrScale * rates[j] * m1[at] / (Math.sqrt(m2[at]) + ADAM_EPS);
+          const bounded = clamp(raw[j], minRaw[j], maxRaw[j]);
+          if (bounded !== raw[j]) {
+            raw[j] = bounded;
+            m1[at] = m2[at] = 0;
+          }
         }
-        raw[2] = Math.min(raw[2], LN_SIZE_MAX); raw[3] = Math.min(raw[3], LN_SIZE_MAX);
-        for (let j = 5; j <= 8; j++) raw[j] = clamp(raw[j], -10, 10);
-        raw[9] = clamp(raw[9], -10, 10); raw[10] = clamp(raw[10], -10, 10);
         const na = sigmoid(raw[8]);
         p[k] = raw[0]; p[k + 1] = raw[1]; p[k + 2] = Math.exp(raw[2]); p[k + 3] = Math.exp(raw[3]); p[k + 4] = raw[4];
         p[k + 5] = sigmoid(raw[5]) * na; p[k + 6] = sigmoid(raw[6]) * na; p[k + 7] = sigmoid(raw[7]) * na; p[k + 8] = na;
@@ -521,25 +591,24 @@ const SplatCore = (() => {
     function redistribute(cellSize, moveCount, splatSize, seed) {
       const pixels = forward();
       const gw = Math.ceil(width / cellSize), gh = Math.ceil(height / cellSize), cells = gw * gh;
-      const cellLoss = new Float64Array(cells), hot = new Int32Array(cells);
+      const cellPeak = new Float64Array(cells), hot = new Int32Array(cells);
       for (let cy = 0; cy < gh; cy++) for (let cx = 0; cx < gw; cx++) {
-        let sum = 0, peak = -1, hotIdx = 0;
+        let peak = -1, hotIdx = 0;
         for (let y = cy * cellSize; y < Math.min(height, (cy + 1) * cellSize); y++)
           for (let x = cx * cellSize; x < Math.min(width, (cx + 1) * cellSize); x++) {
             const q = y * width + x, o = q * 4, w = weights ? weights[q] : 1;
             const br = pixels[o] - target[o], bgg = pixels[o + 1] - target[o + 1], bb = pixels[o + 2] - target[o + 2];
             const da = target[o + 3] - pixels[o + 3], wr = br + da, wg = bgg + da, wb = bb + da;
             const l = (br * br + bgg * bgg + bb * bb + wr * wr + wg * wg + wb * wb) / 6 * w;
-            sum += l;
             if (l > peak) { peak = l; hotIdx = q; }
           }
-        cellLoss[cx + cy * gw] = sum; hot[cx + cy * gw] = hotIdx;
+        cellPeak[cx + cy * gw] = peak; hot[cx + cy * gw] = hotIdx;
       }
       // Donor threshold from a loss histogram, then an inverse CDF for destinations.
       let total = 0, peak = 0;
-      for (let i = 0; i < cells; i++) { total += cellLoss[i]; peak = Math.max(peak, cellLoss[i]); }
+      for (let i = 0; i < cells; i++) { total += cellPeak[i]; peak = Math.max(peak, cellPeak[i]); }
       const binScale = peak > 0 ? (BINS - 1) / peak : 0, hist = new Uint32Array(BINS);
-      for (let i = 0; i < cells; i++) hist[Math.min(Math.floor(cellLoss[i] * binScale), BINS - 1)]++;
+      for (let i = 0; i < cells; i++) hist[Math.min(Math.floor(cellPeak[i] * binScale), BINS - 1)]++;
       let below = 0, bin = 0;
       while (bin + 1 < BINS) { if (below + hist[bin] > moveCount) break; below += hist[bin]; bin++; }
       const frac = clamp((moveCount - below) / Math.max(hist[bin], 1), 0, 1);
@@ -548,7 +617,7 @@ const SplatCore = (() => {
       let cum = 0, ci = 0;
       for (let slot = 0; slot < INVERSE_CDF_SIZE; slot++) {
         const goal = total * slot / (INVERSE_CDF_SIZE - 1);
-        while (ci + 1 < cells) { if (cum + cellLoss[ci] >= goal) break; cum += cellLoss[ci]; ci++; }
+        while (ci + 1 < cells) { if (cum + cellPeak[ci] >= goal) break; cum += cellPeak[ci]; ci++; }
         cdf[slot] = ci;
       }
       let moved = 0;
@@ -563,16 +632,19 @@ const SplatCore = (() => {
           move = hash(i, 7) < 1 - cover;
         }
         if (!move) {
-          const l = cellLoss[Math.floor(x / cellSize) + Math.floor(y / cellSize) * gw];
+          const l = cellPeak[Math.floor(x / cellSize) + Math.floor(y / cellSize) * gw];
           move = l < lo || (l < hi && hash(i, seed) < frac);
         }
         if (!move) continue;
         const slot = Math.min(Math.floor(hash(i, 101) * (INVERSE_CDF_SIZE - 1)), INVERSE_CDF_SIZE - 1);
-        const q = hot[cdf[slot]], dx = clamp(q % width + 0.5, 0.5, width - 0.5), dy = clamp(Math.floor(q / width) + 0.5, 0.5, height - 0.5);
+        const q = hot[cdf[slot]];
+        const dx = clamp(q % width + 0.5 + (hash(i, 131) - 0.5) * cellSize, 0.5, width - 0.5);
+        const dy = clamp(Math.floor(q / width) + 0.5 - (hash(i, 137) - 0.5) * cellSize, 0.5, height - 0.5);
+        const size = Math.max(splatSize, sizeFloor);
         const d = (Math.floor(dy) * width + Math.floor(dx)) * 4;
-        p[k] = dx; p[k + 1] = dy; p[k + 2] = splatSize; p[k + 3] = splatSize; p[k + 4] = 0;
+        p[k] = dx; p[k + 1] = dy; p[k + 2] = size; p[k + 3] = size; p[k + 4] = 0;
         p[k + 5] = target[d]; p[k + 6] = target[d + 1]; p[k + 7] = target[d + 2]; p[k + 8] = target[d + 3];
-        p[k + 9] = 1; p[k + 10] = 1;
+        p[k + 9] = splatSize / size; p[k + 10] = splatSize / size;
         m1.fill(0, k, k + STRIDE); m2.fill(0, k, k + STRIDE);
         isMoved[i] = 1; moved++;
       }
@@ -590,28 +662,20 @@ const SplatCore = (() => {
       return moved;
     }
 
-    function redistributeArgs(iter, iters) {
-      const spacing = Math.sqrt(N / Math.max(1, n)), progress = iter / iters;
-      const cellSize = Math.max(1, Math.floor(Math.max(1, spacing * 2 ** (1 - 3 * progress))));
-      const cells = Math.ceil(width / cellSize) * Math.ceil(height / cellSize);
-      return [cellSize, Math.max(1, Math.floor(0.5 * 2 ** (-3 * progress) * cells)), spacing * 0.9];
-    }
-
     /* Runs `iters` steps like upstream Learner::run. `gradient(p)` may return
      * a promise (threaded bands); `hooks.each(iter)` returning false stops;
      * `hooks.annealTo` cosine-anneals the learning rate down to that factor.
      * Unlike upstream, no redistribution happens after the final step, so
      * every moved splat still gets fitted. */
     async function run(iters, lrScale, every, seed, hooks = {}) {
-      const random = rng(seed), gradient = hooks.gradient || localGradient;
+      const gradient = hooks.gradient || localGradient;
       for (let iter = 0; iter < iters; iter++) {
         let out = gradient(p);
         if (out && typeof out.then === "function") out = await out;
         lastLoss = out.loss;
         adam(out.grad, annealed(lrScale, hooks.annealTo, iter, iters));
-        if (every > 0 && iter % every === 0 && iter + 1 < iters) {
-          const [cellSize, moveCount, splatSize] = redistributeArgs(iter, iters);
-          redistribute(cellSize, moveCount, splatSize, Math.floor(random() * 4294967296));
+        if (every > 0 && iter > 0 && iter % every === 0 && iter + 1 < iters) {
+          redistribute(...redistribution(width, height, n, iter, iters, seed));
         }
         if (hooks.each) {
           let keep = hooks.each(iter + 1);
@@ -754,7 +818,7 @@ const SplatCore = (() => {
 
   return {
     REF_HEIGHT, RAMP_CAP, ASSET, BACKGROUND_ASSET, STRIDE, LR, REDISTRIBUTE_EVERY, REFINE_LR, TEXEL,
-    rng, rampCap, annealed, fit, render, toRGBA8, premultiply, downsample, initialize, createFitter, createBand, balanceRows, shapeWeights,
+    rng, redistribution, rampCap, annealed, fit, render, toRGBA8, premultiply, downsample, initialize, createFitter, createBand, balanceRows, shapeWeights,
     toElements, backgroundElement, fromElements, renderElements, toIr, isSplat, colorOf, hash, profile: (t) => { const u = clamp(t, 0, 1); return u * (0.5 + u * (1.5 - u)); },
   };
 })();

@@ -23,7 +23,7 @@
       const render = diff(pa, pb);
       gpu.destroy();
       [cpu, gpu] = await pair();
-      await cpu.run(2, 1, 1, 9); await gpu.run(2, 1, 1, 9); await gpu.sync();
+      await cpu.run(3, 1, 1, 9); await gpu.run(3, 1, 1, 9); await gpu.sync();
       let moved = 0;
       for (let i = 0; i < cpu.count; i++) {
         const k = i * SplatCore.STRIDE;

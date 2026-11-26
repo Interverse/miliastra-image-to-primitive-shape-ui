@@ -1,5 +1,5 @@
 "use strict";
-importScripts('animation-sequences.js?v=8','animation-motion.js?v=5','animation-fit-pool.js?v=3','animation-media.js?v=3','animation-progress.js?v=1','animation-core.js?v=7','worker-primeval.js?v=animation-detail-3','focus.js?v=2','splat-core.js?v=5','splat-gpu.js?v=2','pixel-perfect.js?v=3');
+importScripts('animation-sequences.js?v=9','animation-motion.js?v=5','animation-fit-pool.js?v=3','animation-media.js?v=3','animation-progress.js?v=1','animation-core.js?v=7','worker-primeval.js?v=animation-detail-3','focus.js?v=2','splat-core.js?v=6','splat-gpu.js?v=3','pixel-perfect.js?v=3');
 self.onmessage=async({data:msg})=>{
  if(!['process','preview'].includes(msg.cmd))return;
  const started=performance.now();let fitPool=null;
@@ -83,7 +83,7 @@ self.onmessage=async({data:msg})=>{
     const fw=Math.max(1,Math.round(width*ratio)),fh=Math.max(1,Math.round(height*ratio));
     const target=SplatCore.downsample(SplatCore.premultiply(rgba),width,height,fw,fh);
     const warm=temporal&&splatState&&splatState.fw===fw&&splatState.fh===fh;
-    const start=warm?{params:splatState.params.slice(),background:splatState.background}:SplatCore.initialize(target,fw,fh,splatCount,splatSeed);
+    const start=warm?{params:splatState.params.slice(),background:splatState.background}:SplatCore.initialize(target,fw,fh,splatCount,splatSeed,true);
     const lr={scale:0};let fitter=null;
     if(config.splat_backend!=='cpu'){try{fitter=await SplatGpu.createFitter(target,fw,fh,start.params,start.background,{core:SplatCore,lr});}catch(error){if(/SPLAT_GPU_LIMIT/.test(error.message))throw error;}}
     if(!fitter)fitter=SplatCore.createFitter(target,fw,fh,start.params,start.background,{lr});

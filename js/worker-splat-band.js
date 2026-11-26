@@ -1,12 +1,12 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at https://mozilla.org/MPL/2.0/ (also LICENSES/mw_splat-MPL-2.0.txt).
- * Based on mw_splat by Golden_Water, commit b4dd204. */
+ * Based on mw_splat by Golden_Water, commit 0354838. */
 /* Splat band helper: computes loss and gradients for a range of image rows.
  * Started by worker-splat.js; one per thread. */
 "use strict";
 // The job worker usually starts this from a blob with splat-core.js inlined.
-if (typeof SplatCore === "undefined") importScripts("splat-core.js?v=5");
+if (typeof SplatCore === "undefined") importScripts("splat-core.js?v=6");
 
 let band = null, cap = 0, shared = null;
 

@@ -55,6 +55,35 @@ test("redistribution puts moved splats on top in order", () => {
   assert.deepStrictEqual(xs.slice(0, kept.length), kept, "unmoved splats keep their order at the bottom");
 });
 
+test("small splats preserve their extent at initialization and redistribution", () => {
+  const W = 8, H = 32, count = 64, extent = Math.sqrt(W * H / count);
+  const target = Core.premultiply(image(W, H, () => [100, 80, 60, 255]));
+  for (const fixedScale of [false, true]) {
+    const init = Core.initialize(target, W, H, count, 1, fixedScale);
+    const p = init.params, size = fixedScale ? extent : 2 * Core.rampCap(H);
+    assert.strictEqual(p[2], size);
+    assert.strictEqual(p[2] * p[9], extent);
+    const f = Core.createFitter(target, W, H, p, init.background, fixedScale ? { lr: { scale: 0 } } : {});
+    p[8] = 0; // force a low-coverage donor
+    assert.ok(f.redistribute(2, 1, extent, 1) > 0);
+    const last = (count - 1) * Core.STRIDE;
+    assert.strictEqual(p[last + 2], size);
+    assert.strictEqual(p[last + 2] * p[last + 9], extent);
+  }
+});
+
+test("a clamped Adam parameter responds immediately to an inward gradient", () => {
+  const W = 16, H = 16, p = new Float64Array([0.5, 8, 4, 4, 0, .3, .3, .3, .6, 1, 1]);
+  const f = Core.createFitter(new Float64Array(W * H * 4), W, H, p, [0, 0, 0, 0]);
+  const g = new Float64Array(Core.STRIDE);
+  g[0] = 100;
+  f.adam(g, 1);
+  assert.strictEqual(p[0], 0.5);
+  g[0] = -1;
+  f.adam(g, 1);
+  assert.ok(p[0] > 0.8);
+});
+
 test("refine phase anneals the learning rate to 0.1", async () => {
   assert.strictEqual(Core.annealed(1, null, 5, 10), 1);
   assert.strictEqual(Core.annealed(2, 0.1, 0, 100), 2);
@@ -70,9 +99,11 @@ test("refine phase anneals the learning rate to 0.1", async () => {
 test("analytic gradients match finite differences", () => {
   const W = 24, H = 20;
   const target = Core.premultiply(image(W, H, (x, y) => [x * 10, y * 12, 128, 255]));
+  // With zero core extent the surrogate tail vanishes, so geometry also
+  // follows the finite difference of the rendered loss.
   const base = new Float64Array([
-    11.3, 9.7, 9, 7, 0.4, 0.5 * 0.7, 0.2 * 0.7, 0.6 * 0.7, 0.7, 1.1, 0.9,
-    13.1, 10.2, 6, 11, -0.3, 0.1 * 0.5, 0.8 * 0.5, 0.3 * 0.5, 0.5, 0.8, 1.2,
+    11.3, 9.7, 2, 1.8, 0.4, 0.5 * 0.7, 0.2 * 0.7, 0.6 * 0.7, 0.7, 4.95, 3.5,
+    13.1, 10.2, 1.5, 2.5, -0.3, 0.1 * 0.5, 0.8 * 0.5, 0.3 * 0.5, 0.5, 3.2, 5.28,
   ]);
   const bg = [0.2, 0.3, 0.4, 1];
   // Loss as a function of the params, via a fresh fitter each time.
@@ -99,6 +130,26 @@ test("analytic gradients match finite differences", () => {
     const scale = Math.max(1e-9, Math.abs(numeric), Math.abs(g));
     assert.ok(Math.abs(numeric - g) / scale < 2e-3, `param ${index}: numeric ${numeric} analytic ${g}`);
   }
+});
+
+test("training can move a splat toward error just beyond its visible edge", () => {
+  const W = 32, H = 32, bg = [0, 0, 0, 0];
+  const params = new Float64Array([15.4, 15.5, 20, 20, 0, 1, 0, 0, 1, 1, 1]);
+  const q = 15 * W + 25;
+  const target = Core.render(params, 1, W, H, bg, 2).pixels;
+  assert.strictEqual(target[q * 4], 0);
+  target[q * 4] = target[q * 4 + 3] = 1;
+  const { grad } = Core.createBand(target, W, H, null, bg).pass(params, 1, 2, 0, H);
+  assert.ok(grad[0] < 0, "descent moves the rectangle right");
+  assert.strictEqual(grad[5], 0, "an invisible sample contributes no colour gradient");
+});
+
+test("opaque stacks retain the top layer gradient", () => {
+  const n = 220, p = new Float64Array(n * Core.STRIDE);
+  for (let i = 0; i < n; i++) p.set([0.5, 0.5, 6, 6, 0, 1, 0, 0, 1, 1, 1], i * Core.STRIDE);
+  const { grad } = Core.createBand(new Float64Array(4), 1, 1, null, [0,0,0,0]).pass(p, n, 1, 0, 1);
+  assert.ok(grad.every(Number.isFinite));
+  assert.ok(grad[(n - 1) * Core.STRIDE + 5] > 0.1);
 });
 
 test("fitting a small image lowers the loss and keeps the splat count", async () => {
