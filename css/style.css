@@ -270,6 +270,8 @@ body {
   margin-bottom: 12px;
 }
 .panel-section:last-child { margin-bottom: 0; }
+/* Parameter cards sit alone in a wrapper, so :last-child does not mean last in the panel. */
+:is(#fillParams, #outlineParams) > .panel-section { margin-bottom: 12px; }
 .panel-section > :is(.hint, .field-label, .config-row, .param-item,
   .export-name-field, .export-action, .btn-sm, .gia-export-group,
   .outline-intro, .primitive-toolbar) { margin: 0; }
@@ -1603,7 +1605,7 @@ input[type="range"]::-webkit-slider-thumb {
     scrollbar-gutter: auto;
   }
   .panel-split > .panel-submit {
-    margin: 0;
+    margin: 12px 0 0;
     padding: 16px;
     border: 1px solid var(--md-outline-variant);
     border-radius: var(--md-shape-lg);
