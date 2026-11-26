@@ -40,7 +40,7 @@ async function processPrimeval(msg,emit=(...args)=>postMessage(...args)){
     if(!Number.isSafeInteger(count)||count<1)throw Error("Invalid shape count");
     if(allowed.length!==1||!["circle","rect","triangle","mixed"].includes(allowed[0]))throw Error("Choose one Primeval shape mode");
     self.PRIMEVAL_THREADS=Number.isInteger(config.primeval_threads)&&config.primeval_threads>0?config.primeval_threads:Math.min(16,navigator.hardwareConcurrency||1);
-    runtime ??= await import("./vendor/primeval/dist/browser-runtime.js?v=animation-default-1");
+    runtime ??= await import("./vendor/primeval/dist/browser-runtime.js?v=memory-4g-1");
     const rgba=new Uint8ClampedArray(msg.rgba);
     const transparent=!!config.enable_png_mode&&rgba.some((a,i)=>i%4===3&&a<255);
     const background=!config.enable_png_mode&&config.background_color!=null?String(config.background_color):null;
@@ -100,6 +100,11 @@ async function processPrimeval(msg,emit=(...args)=>postMessage(...args)){
     if(config.primeval_turbo===true&&config.primeval_experiments?.length)result.config.primeval_experiments=config.primeval_experiments.filter(key=>key!=='groups');
     emit({type:"done",jobId:msg.jobId,result},[result.image_rgba,result.preview_rgba,result.primeval_png]);
     return result;
-  }catch(error){emit({type:"error",jobId:msg.jobId,message:error?.message || String(error)});}
+  }catch(error){
+    // A bare WebAssembly trap is an abort without a panic message: in this
+    // engine an allocation failure once memory cannot grow further.
+    const message=error?.message || String(error);
+    emit({type:"error",jobId:msg.jobId,message:message==="unreachable"?"PRIMEVAL_MEMORY_LIMIT":message});
+  }
 }
 self.onmessage=({data})=>processPrimeval(data);

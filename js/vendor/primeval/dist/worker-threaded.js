@@ -2,9 +2,9 @@
 // workers: the calling worker starts its pool workers from this same file,
 // and the first message tells the two roles apart. The glue import is static
 // so that bundlers bundle it with its snippets and `.wasm` asset.
-import * as glueModule from "../wasm/threaded/primeval.js?v=animation-default-1";
+import * as glueModule from "../wasm/threaded/primeval.js?v=memory-4g-1";
 import { messageOf } from "./errors.js";
-import { requestRunner, scope } from "./worker-common.js?v=animation-default-1";
+import { requestRunner, scope } from "./worker-common.js?v=memory-4g-1";
 const glue = glueModule;
 // Kept for the life of this worker. The builder owns the channel whose
 // receiver the pool workers block on, so it must outlive them. The `Worker`
@@ -14,7 +14,7 @@ let builder;
 const poolWorkers = [];
 /** Starts one pool worker; both of its promises reject if it fails. */
 function spawnPoolWorker(init) {
-    const worker = new Worker(new URL("./worker-threaded.js?v=animation-default-1", import.meta.url), {
+    const worker = new Worker(new URL("./worker-threaded.js?v=memory-4g-1", import.meta.url), {
         type: "module",
     });
     poolWorkers.push(worker);
@@ -47,7 +47,7 @@ function spawnPoolWorker(init) {
  * their instantiation still overlaps. Once the last one has loaded, the page
  * is told that this call's workers have started.
  */
-async function startPool(module) {
+async function startPool(module, channel) {
     const requested=Number(new URL(import.meta.url).searchParams.get("threads"));
     builder = new glue.PoolBuilder(requested>0?Math.min(navigator.hardwareConcurrency,Math.floor(requested)):navigator.hardwareConcurrency);
     const init = {
@@ -55,6 +55,7 @@ async function startPool(module) {
         module,
         memory: glue.wasmMemory(),
         receiver: builder.receiver(),
+        channel,
     };
     const ready = [];
     for (let k = 0; k < builder.numThreads; k += 1) {
@@ -67,7 +68,7 @@ async function startPool(module) {
     builder.build();
 }
 /** A pool worker: joins the calling worker's instance and runs one rayon thread. */
-async function runPoolWorker({ module, memory, receiver }) {
+async function runPoolWorker({ module, memory, receiver, channel }) {
     try {
         await glue.default({ module_or_path: module, memory });
     }
@@ -78,7 +79,17 @@ async function runPoolWorker({ module, memory, receiver }) {
     scope.postMessage({ type: "ready" });
     // Blocks for the life of the pool. A panic here reaches the page on the
     // worker's BroadcastChannel: this thread has no reporter of its own.
-    glue.startPoolWorker(receiver);
+    // A trap without a panic (an allocation failure aborts) would otherwise
+    // only reach the blocked calling worker, so it is sent on the same channel.
+    try {
+        glue.startPoolWorker(receiver);
+    }
+    catch (error) {
+        const port = new BroadcastChannel(channel);
+        port.postMessage(messageOf(error));
+        port.close();
+        throw error;
+    }
 }
 const run = requestRunner(glue, startPool);
 scope.onmessage = ({ data }) => {

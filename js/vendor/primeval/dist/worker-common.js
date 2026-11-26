@@ -20,7 +20,7 @@ export function requestRunner(glue, startPool) {
         await glue.default({ module_or_path: module });
         // Before the pool starts, so the hook covers every thread.
         glue.setPanicReporter(channel, (message) => post({ type: "error", error: { code: "INTERNAL", message } }));
-        await startPool?.(module);
+        await startPool?.(module, channel);
     };
     return async (request) => {
         if (request.type === "init") {

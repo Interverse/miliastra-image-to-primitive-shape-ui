@@ -1,5 +1,5 @@
 "use strict";
-importScripts('animation-sequences.js?v=9','animation-motion.js?v=5','animation-fit-pool.js?v=3','animation-media.js?v=3','animation-progress.js?v=1','animation-core.js?v=7','worker-primeval.js?v=animation-detail-3','focus.js?v=2','splat-core.js?v=6','splat-gpu.js?v=3','pixel-perfect.js?v=3');
+importScripts('animation-sequences.js?v=10','animation-motion.js?v=5','animation-fit-pool.js?v=4','animation-media.js?v=3','animation-progress.js?v=1','animation-core.js?v=7','worker-primeval.js?v=memory-4g-1','focus.js?v=2','splat-core.js?v=6','splat-gpu.js?v=3','pixel-perfect.js?v=3');
 self.onmessage=async({data:msg})=>{
  if(!['process','preview'].includes(msg.cmd))return;
  const started=performance.now();let fitPool=null;
@@ -276,5 +276,5 @@ self.onmessage=async({data:msg})=>{
    config:{...config,...frameConfig,primeval_threads:msg.config.primeval_threads,engine:'animation-browser',fit_method:['splat','pixel'].includes(config.fit_method)?config.fit_method:'primeval',output_has_transparency:!!animation.hasTransparency},mask:null,image_rgba:null,animation};
   const seed=msg.requestSeed?{previousDrawing,previousPixels:previousPixels.buffer,automaticMap,referenceError,referenceFocusError,referenceComplexity,referenceFocusComplexity,referenceDetail,frame:animation.frames.at(-1),width:animation.width,height:animation.height,poster,image_center:first.image_center,config:frameConfig}:undefined;
   self.postMessage({type:'done',result,poster,...(seed?{seed}:{})},[...new Set([poster,...animation.frames.map(frame=>frame.buffer),...(seed?[seed.previousPixels]:[])])]);
- }catch(error){fitPool?.close(error);self.postMessage({type:'error',message:error.message?.startsWith('animation.')?error.message:'animation.fitError',detail:error.stack||String(error)});}
+ }catch(error){fitPool?.close(error);self.postMessage({type:'error',message:error.message==='PRIMEVAL_MEMORY_LIMIT'?'animation.limit':error.message?.startsWith('animation.')?error.message:'animation.fitError',detail:error.stack||String(error)});}
 };

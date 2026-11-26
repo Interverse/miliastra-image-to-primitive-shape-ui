@@ -9,7 +9,7 @@ bindgen=next((work/'wasm-bindgen').rglob('wasm-bindgen.exe'))
 variant=sys.argv[1] if len(sys.argv)>1 else 'single'
 flags='-C target-feature=+simd128';args=[]
 if variant=='threaded':
- flags+=' -C target-feature=+atomics,+bulk-memory -C link-arg=--shared-memory -C link-arg=--max-memory=1073741824 -C link-arg=--import-memory -C link-arg=--export=__wasm_init_tls -C link-arg=--export=__tls_size -C link-arg=--export=__tls_align -C link-arg=--export=__tls_base'
+ flags+=' -C target-feature=+atomics,+bulk-memory -C link-arg=--shared-memory -C link-arg=--max-memory=4294967296 -C link-arg=--import-memory -C link-arg=--export=__wasm_init_tls -C link-arg=--export=__tls_size -C link-arg=--export=__tls_align -C link-arg=--export=__tls_base'
  args=['-Z','build-std=panic_abort,std'];toolchain='+nightly-2026-10-12';features='asset-triangle,threads'
 else:toolchain='+'+os.environ.get('PRIMEVAL_STABLE_TOOLCHAIN','stable');features='asset-triangle'
 if variant=='single':

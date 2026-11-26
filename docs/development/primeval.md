@@ -146,6 +146,18 @@ Fast and Maximum detail keep identical search effort, placements and refinement
 schedules; Fast changes only equivalent implementation details. `coi-sw.js` enables isolation on static hosts;
 an output-equivalent single-thread fallback works without it, but is slower.
 
+The threaded build's shared memory may grow to 4 GiB, the wasm32 maximum
+(`--max-memory=4294967296`; the committed binary's memory import and the glue's
+`maximum` say 65536 pages). The old 1 GiB cap made large transparent Turbo fits
+abort: varka (2560×1534) at Detail 2048 and 2,000 shapes peaks at about 1.33 GB
+and took 24 minutes (512: 70 s; 1024: 184 s). Refine dominates there because a
+40 MB RGBA canvas leaves the 64 MB replay budget room for one checkpoint, so each
+layer replays every layer below it. An allocation failure aborts with a bare
+`unreachable` trap and no panic message, on the calling or a pool thread. Pool
+workers forward the trap on the panic channel; `worker-primeval.js` reports it
+as `PRIMEVAL_MEMORY_LIMIT`, shown as `fitting.memoryLimit` (animation:
+`animation.limit`).
+
 ## Rebuild (Windows)
 
 The committed WASM files need no deployment build. To rebuild, use

@@ -31,7 +31,7 @@ const AnimationUI=(()=>{
    $('animationSourcePlay').disabled=true;$('animationSourceStatus').textContent=I18N.t('animation.previewLoading');
    if(!Number.isSafeInteger(fps)||fps<0){$('animationSourceStatus').textContent=I18N.t('animation.fpsInvalid');return;}
    if(!AnimationMedia.imageType(file)){streamVideo(current,fps);return;}
-   worker=new Worker('js/worker-animation.js?v=apng-2');
+   worker=new Worker('js/worker-animation.js?v=memory-4g-1');
    const fail=key=>{clear();$('animationSourcePlay').disabled=true;$('animationSourceStatus').textContent=I18N.t(key);};
    worker.onerror=()=>fail('animation.codec');worker.onmessage=({data})=>{
     if(current!==token){data.bitmap?.close();return;}

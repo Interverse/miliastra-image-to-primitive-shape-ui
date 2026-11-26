@@ -48,7 +48,7 @@ const AnimationSequences=(()=>{
   const elapsed=()=>performance.now()-started;
   function metrics(){const out={frameWorkers:options.workers,threadsPerFrame:options.threads,prefixThreads:options.latencyThreads,sourceFrames:prepared.total,skippedFrames:prepared.total-prepared.rows.length,selectedFrames:prepared.rows.length,firstEightMs};for(const state of states)for(const [key,value] of Object.entries(state.metrics||{})){if(typeof value==='number'&&!['sourceFrames','skippedFrames','selectedFrames'].includes(key))out[key]=(out[key]||0)+value;}return out;}
   async function sequence(rows,threads,seed=null,requestSeed=false){
-   const state={progress:0,metrics:null,firstSource:rows[0].source,lastSource:rows.at(-1).source};states.push(state);const worker=new Worker('worker-animation.js?v=apng-2');handles.push(worker);
+   const state={progress:0,metrics:null,firstSource:rows[0].source,lastSource:rows.at(-1).source};states.push(state);const worker=new Worker('worker-animation.js?v=memory-4g-1');handles.push(worker);
    const result=await new Promise((resolve,reject)=>{
     worker.onerror=event=>reject(Error(event.message||'Frame sequence failed'));
     worker.onmessage=({data})=>{
